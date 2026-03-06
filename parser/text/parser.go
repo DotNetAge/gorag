@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/DotNetAge/gorag/parser"
 	"github.com/google/uuid"
-	"github.com/raya-dev/gorag/parser"
 )
 
 // Parser implements a simple text parser

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raya-dev/gorag/parser"
-	"github.com/raya-dev/gorag/vectorstore"
+	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

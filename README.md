@@ -1,6 +1,6 @@
 # GoRAG
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/raya-dev/gorag)](https://goreportcard.com/report/github.com/raya-dev/gorag)
+[![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **GoRAG** - Production-ready RAG (Retrieval-Augmented Generation) framework for Go
@@ -22,11 +22,11 @@ import (
     "context"
     "log"
     
-    "github.com/raya-dev/gorag/rag"
-    "github.com/raya-dev/gorag/parser/text"
-    "github.com/raya-dev/gorag/vectorstore/memory"
-    "github.com/raya-dev/gorag/embedding/openai"
-    "github.com/raya-dev/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/parser/text"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+    "github.com/DotNetAge/gorag/embedding/openai"
+    "github.com/DotNetAge/gorag/llm/openai"
 )
 
 func main() {
@@ -61,7 +61,7 @@ func main() {
 ## Installation
 
 ```bash
-go get github.com/raya-dev/gorag
+go get github.com/DotNetAge/gorag
 ```
 
 ## Architecture
@@ -85,7 +85,7 @@ go get github.com/raya-dev/gorag
 ## Modules
 
 - **parser** - Document parsers (Text, PDF, DOCX, HTML, etc.)
-- **vectorstore** - Vector storage backends (Memory, Pinecone, Weaviate, etc.)
+- **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate, etc.)
 - **embedding** - Embedding providers (OpenAI, Ollama, etc.)
 - **llm** - LLM clients (OpenAI, Anthropic, etc.)
 - **rag** - RAG engine and orchestration

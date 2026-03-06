@@ -6,9 +6,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/raya-dev/gorag/parser/text"
-	"github.com/raya-dev/gorag/rag"
-	"github.com/raya-dev/gorag/vectorstore/memory"
+	"github.com/DotNetAge/gorag/parser/text"
+	"github.com/DotNetAge/gorag/rag"
+	"github.com/DotNetAge/gorag/vectorstore/memory"
 )
 
 type mockEmbedder struct{}
