@@ -40,7 +40,7 @@
 - [x] Anthropic client
 - [x] Azure OpenAI client
 - [x] Ollama client
-- [x] Compatible API client (supports domestic LLMs: qwen, seed2, minmax, kimi, glm5, deepseek, etc.)
+- [x] Compatible API client (supports domestic LLMs)
 
 ### Features
 - [x] Streaming responses
@@ -90,116 +90,110 @@
 - [x] Getting started guide
 - [x] Plugin development guide
 
-## Version 0.6.0 (Next Release)
+## Version 0.6.0 (Next Release - Quality Improvement)
 
-### More Parsers
-- [ ] Markdown parser (with frontmatter support)
-- [ ] CSV parser
-- [ ] RTF parser
-- [ ] EPUB parser
+### Test Coverage Improvement
+- [ ] Add tests for config package (current: 0%)
+- [ ] Add tests for Azure OpenAI client (current: 0%)
+- [ ] Improve test coverage for Excel parser (current: 13.5%)
+- [ ] Improve test coverage for Milvus store (current: 18.8%)
+- [ ] Improve test coverage for Qdrant store (current: 13.0%)
+- [ ] Improve test coverage for Weaviate store (current: 14.1%)
+- [ ] Improve test coverage for RAG engine (current: 40.6%)
 
-### More Vector Stores
-- [ ] Chroma integration
-- [ ] Elasticsearch integration
-- [ ] PostgreSQL pgvector integration
-- [ ] Redis Vector integration
+### Code Quality
+- [ ] Implement proper LLM response parsing for reranker scores (TODO in reranker.go:104)
+- [ ] Add error handling for edge cases
+- [ ] Improve code documentation
 
-### More Embedding Providers
-- [ ] Cohere embeddings
-- [ ] HuggingFace embeddings
-- [ ] Jina AI embeddings
-- [ ] Voyage AI embeddings
+### Bug Fixes
+- [ ] Fix any issues found during testing
+- [ ] Handle concurrent access safely
+- [ ] Improve error messages
 
-### More LLM Clients
-- [ ] Google Gemini client
-- [ ] AWS Bedrock client
-- [ ] Cohere client
-- [ ] Mistral AI client
-
-## Version 0.7.0
-
-### Advanced Chunking
-- [ ] Semantic chunking
-- [ ] Recursive character text splitter
-- [ ] Code-aware chunking
-- [ ] Markdown-aware chunking
-
-### Query Enhancement
-- [ ] Query rewriting
-- [ ] Query expansion
-- [ ] Multi-query retrieval
-- [ ] HyDE (Hypothetical Document Embeddings)
-
-### Retrieval Optimization
-- [ ] Maximal marginal relevance (MMR)
-- [ ] Similarity score threshold filtering
-- [ ] Metadata filtering
-- [ ] Time-weighted retrieval
-
-## Version 0.8.0
+## Version 0.7.0 (Performance & Reliability)
 
 ### Performance Optimization
-- [ ] Parallel document processing
-- [ ] Embedding caching
-- [ ] Query result caching
-- [ ] Lazy loading for large documents
+- [ ] Optimize embedding batch processing
+- [ ] Add connection pooling for vector stores
+- [ ] Implement query result caching
+- [ ] Add lazy loading for large documents
 
-### Developer Tools
-- [ ] RAG pipeline visualization
-- [ ] Performance profiling tools
-- [ ] Debug mode with detailed logging
-- [ ] Query analysis dashboard
+### Reliability
+- [ ] Add retry logic for API calls
+- [ ] Implement graceful degradation
+- [ ] Add circuit breaker pattern
+- [ ] Improve timeout handling
 
-### Testing Tools
-- [ ] RAG evaluation metrics
-- [ ] Retrieval quality benchmarks
-- [ ] Answer relevance scoring
-- [ ] Ground truth comparison tools
+### Developer Experience
+- [ ] Add more code examples
+- [ ] Improve error messages
+- [ ] Add debugging utilities
+- [ ] Create troubleshooting guide
 
-## Version 0.9.0
+## Version 0.8.0 (Documentation & Examples)
 
-### Advanced Features
-- [ ] Document versioning
-- [ ] Incremental indexing
-- [ ] Document deletion and updates
-- [ ] Collection management
+### Documentation
+- [ ] Add architecture decision records (ADRs)
+- [ ] Create contribution guidelines
+- [ ] Add performance tuning guide
+- [ ] Create FAQ section
 
-### Multi-modal Enhancement
-- [ ] Audio transcription support
-- [ ] Video frame extraction
-- [ ] Table extraction from images
-- [ ] Chart recognition
+### Examples
+- [ ] Add real-world use case examples
+- [ ] Create step-by-step tutorials
+- [ ] Add integration examples
+- [ ] Create best practices guide
 
-### Integration
-- [ ] LangChain compatibility layer
-- [ ] LlamaIndex compatibility layer
-- [ ] OpenAI Assistants API integration
-- [ ] Custom callback system
+### Community
+- [ ] Set up issue templates
+- [ ] Create pull request template
+- [ ] Add code of conduct
+- [ ] Set up GitHub Actions for CI/CD
 
-## Version 1.0.0
+## Version 0.9.0 (Stability)
 
-### Stability & Production Ready
+### API Stability
+- [ ] Review and finalize public APIs
+- [ ] Add deprecation warnings
+- [ ] Ensure backward compatibility
+- [ ] Document API changes
+
+### Production Readiness
+- [ ] Add health check endpoints
+- [ ] Implement graceful shutdown
+- [ ] Add startup/shutdown hooks
+- [ ] Improve resource cleanup
+
+### Monitoring
+- [ ] Add comprehensive metrics
+- [ ] Create monitoring dashboards
+- [ ] Add alerting rules
+- [ ] Document monitoring setup
+
+## Version 1.0.0 (Stable Release)
+
+### Stability
 - [ ] API stability guarantee
-- [ ] Comprehensive error handling
-- [ ] Graceful degradation
+- [ ] No breaking changes
 - [ ] Production-ready documentation
+- [ ] Comprehensive test suite
 
-### Ecosystem
-- [ ] Example applications gallery
-- [ ] Community plugin repository
-- [ ] Integration templates
-- [ ] Best practices guide
+### Support
+- [ ] Long-term support commitment
+- [ ] Regular security updates
+- [ ] Community support channels
+- [ ] Enterprise support options
 
 ## Future Considerations
 
-### Research & Innovation
-- [ ] Graph RAG support
-- [ ] Adaptive retrieval strategies
-- [ ] Self-querying retrieval
-- [ ] Contextual compression
+### Research
+- [ ] Evaluate Graph RAG feasibility
+- [ ] Research adaptive retrieval
+- [ ] Explore multi-modal enhancements
 
 ### Community
 - [ ] Plugin marketplace
-- [ ] Community contributions guide
-- [ ] Regular release schedule
-- [ ] Semantic versioning commitment
+- [ ] Community contributions
+- [ ] Regular releases
+- [ ] Semantic versioning

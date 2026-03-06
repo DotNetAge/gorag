@@ -293,30 +293,32 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [x] Production deployment guides
 - [x] Plugin development guide
 
-### Planned (v0.6.0)
-- [ ] More parsers (Markdown, CSV, RTF, EPUB)
-- [ ] More vector stores (Chroma, Elasticsearch, pgvector, Redis)
-- [ ] More embedding providers (Cohere, HuggingFace, Jina, Voyage)
-- [ ] More LLM clients (Gemini, Bedrock, Cohere, Mistral)
+### Planned (v0.6.0 - Quality Improvement)
+- [ ] Improve test coverage (config: 0%, Azure OpenAI: 0%, Excel: 13.5%, Milvus: 18.8%, Qdrant: 13.0%, Weaviate: 14.1%, RAG engine: 40.6%)
+- [ ] Implement proper LLM response parsing for reranker scores
+- [ ] Add error handling for edge cases
+- [ ] Improve code documentation
 
-### Planned (v0.7.0)
-- [ ] Advanced chunking strategies
-- [ ] Query enhancement (rewriting, expansion, multi-query, HyDE)
-- [ ] Retrieval optimization (MMR, filtering, time-weighted)
+### Planned (v0.7.0 - Performance & Reliability)
+- [ ] Optimize embedding batch processing
+- [ ] Add connection pooling for vector stores
+- [ ] Implement query result caching
+- [ ] Add retry logic and circuit breaker pattern
 
-### Planned (v0.8.0)
-- [ ] Performance optimization
-- [ ] Developer tools
-- [ ] RAG evaluation metrics
+### Planned (v0.8.0 - Documentation & Examples)
+- [ ] Add architecture decision records (ADRs)
+- [ ] Create real-world use case examples
+- [ ] Set up GitHub Actions for CI/CD
+- [ ] Create troubleshooting guide
 
-### Planned (v0.9.0)
-- [ ] Document versioning and incremental indexing
-- [ ] Multi-modal enhancement (audio, video)
-- [ ] Framework integrations (LangChain, LlamaIndex)
+### Planned (v0.9.0 - Stability)
+- [ ] Review and finalize public APIs
+- [ ] Add health check endpoints
+- [ ] Implement graceful shutdown
+- [ ] Create monitoring dashboards
 
 ### Future
-- [ ] Graph RAG support
-- [ ] Adaptive retrieval strategies
+- [ ] Evaluate Graph RAG feasibility
 - [ ] Plugin marketplace
 
 ## Contributing
