@@ -311,12 +311,6 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [ ] Set up GitHub Actions for CI/CD
 - [ ] Create troubleshooting guide
 
-### Planned (v0.9.0 - Stability)
-- [ ] Review and finalize public APIs
-- [ ] Add health check endpoints
-- [ ] Implement graceful shutdown
-- [ ] Create monitoring dashboards
-
 ### Future
 - [ ] Evaluate Graph RAG feasibility
 - [ ] Plugin marketplace
