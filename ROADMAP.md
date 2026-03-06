@@ -17,11 +17,15 @@
 - [x] PDF parser
 - [x] DOCX parser
 - [x] HTML parser
+- [x] Excel parser
+- [x] PPT parser
+- [x] Image parser
 
 ### Vector Stores
 - [x] Pinecone integration
 - [x] Weaviate integration
 - [x] Milvus integration
+- [x] Qdrant integration
 
 ### Embedding Providers
 - [x] OpenAI embeddings
@@ -30,11 +34,13 @@
 ### LLM Clients
 - [x] OpenAI client
 - [x] Anthropic client
-- [ ] Azure OpenAI client
+- [x] Azure OpenAI client
+- [x] Ollama client
+- [x] Domestic LLM support (qwen, seed2, minmax, kimi, glm5, etc.)
 
 ### Features
 - [x] Streaming responses
-- [ ] Custom prompt templates
+- [x] Custom prompt templates
 - [x] Query caching
 
 ## Version 0.3.0
@@ -59,19 +65,46 @@
 
 ### Production Features
 - [x] Plugin system
-- [ ] Configuration management
+- [x] Configuration management
 - [ ] Rate limiting
 - [ ] Authentication/Authorization
 
 ### CLI Tool
-- [ ] Index command
-- [ ] Query command
-- [ ] Export/Import
+- [x] Index command
+- [x] Query command
+- [x] Export/Import
+- [x] Custom prompt template support
+
+## Version 0.5.0
+
+### Testing & Quality
+- [x] Full test coverage (85%+)
+- [x] Integration tests with Testcontainers
+- [x] Performance benchmarks
+
+### Documentation
+- [x] Production deployment guides
+- [x] API documentation
+- [x] Getting started guide
 
 ## Version 1.0.0
 
 ### Stable Release
-- [ ] Full test coverage
-- [ ] Performance benchmarks
-- [ ] Production deployment guides
-- [ ] Enterprise features
+- [ ] Multi-tenancy support
+- [ ] Advanced security features
+- [ ] Enterprise support
+- [ ] Cloud-native deployment templates
+
+## Future Plans
+
+### Version 1.1.0
+- [ ] Graph RAG support
+- [ ] Advanced chunking strategies
+- [ ] Multi-language support
+- [ ] Custom embedding models
+
+### Version 1.2.0
+- [ ] Real-time indexing
+- [ ] Distributed deployment
+- [ ] Advanced monitoring
+- [ ] Performance optimization

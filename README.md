@@ -3,6 +3,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen.svg)](https://github.com/DotNetAge/gorag)
+[![Go Version](https://img.shields.io/badge/go-1.20%2B-blue.svg)](https://golang.org)
 
 **GoRAG** - Production-ready RAG (Retrieval-Augmented Generation) framework for Go
 
@@ -22,6 +23,10 @@
 - **Multi-modal Support** - Process images and other media types
 - **Excel and PPT Parsing** - Support for Excel and PowerPoint files
 - **Domestic LLM Support** - Support for popular Chinese LLMs (qwen, seed2, minmax, kimi, glm5, etc.)
+- **Azure OpenAI Support** - Full support for Azure OpenAI Service
+- **Configuration Management** - Flexible YAML and environment variable configuration
+- **Custom Prompt Templates** - Create custom prompt formats with placeholders
+- **Performance Benchmarks** - Built-in benchmarking for performance optimization
 
 ## Quick Start
 
@@ -64,9 +69,10 @@ func main() {
         Content: "Go is an open source programming language...",
     })
     
-    // Query
+    // Query with custom prompt template
     resp, err := engine.Query(ctx, "What is Go?", rag.QueryOptions{
         TopK: 5,
+        PromptTemplate: "You are a helpful assistant. Based on the following context:\n\n{context}\n\nAnswer the question: {question}",
     })
     
     log.Println(resp.Answer)
@@ -102,9 +108,10 @@ go get github.com/DotNetAge/gorag
 - **parser** - Document parsers (Text, PDF, DOCX, HTML, JSON, YAML, Excel, PPT, Image, etc.)
 - **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate, etc.)
 - **embedding** - Embedding providers (OpenAI, Ollama, etc.)
-- **llm** - LLM clients (OpenAI, Anthropic, Ollama, Domestic LLMs, etc.)
+- **llm** - LLM clients (OpenAI, Anthropic, Azure OpenAI, Ollama, Domestic LLMs, etc.)
 - **rag** - RAG engine and orchestration
 - **plugins** - Plugin system for extending functionality
+- **config** - Configuration management system
 
 ## CLI Tool
 
@@ -117,11 +124,81 @@ go install github.com/DotNetAge/gorag/cmd/gorag@latest
 # Index documents
 gorag index --api-key $OPENAI_API_KEY "Go is an open source programming language..."
 
+# Index from file
+gorag index --api-key $OPENAI_API_KEY --file README.md
+
 # Query the engine
 gorag query --api-key $OPENAI_API_KEY "What is Go?"
 
 # Stream responses
 gorag query --api-key $OPENAI_API_KEY --stream "What are the key features of Go?"
+
+# Use custom prompt template
+gorag query --api-key $OPENAI_API_KEY --prompt "You are a helpful assistant. Answer the question: {question}"
+
+# Export indexed documents
+gorag export --api-key $OPENAI_API_KEY --file export.json
+
+# Import documents
+gorag import --api-key $OPENAI_API_KEY --file export.json
+```
+
+## Configuration
+
+GoRAG supports flexible configuration through YAML files and environment variables:
+
+### YAML Configuration
+
+Create a `config.yaml` file:
+
+```yaml
+server:
+  port: 8080
+  host: 0.0.0.0
+
+rag:
+  topK: 5
+  chunkSize: 1000
+  chunkOverlap: 100
+
+embedding:
+  provider: "openai"
+  openai:
+    apiKey: "your-api-key"
+    model: "text-embedding-ada-002"
+
+llm:
+  provider: "openai"
+  openai:
+    apiKey: "your-api-key"
+    model: "gpt-4"
+
+vectorstore:
+  type: "milvus"
+  milvus:
+    host: "localhost"
+    port: 19530
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  port: 9090
+```
+
+### Environment Variables
+
+```bash
+export GORAG_SERVER_PORT=8080
+export GORAG_RAG_TOPK=5
+export GORAG_EMBEDDING_PROVIDER=openai
+export GORAG_LLM_PROVIDER=openai
+export GORAG_VECTORSTORE_TYPE=memory
+export GORAG_OPENAI_API_KEY=your-api-key
+export GORAG_ANTHROPIC_API_KEY=your-api-key
+export GORAG_PINECONE_API_KEY=your-api-key
 ```
 
 ## Examples
@@ -139,6 +216,7 @@ GoRAG has comprehensive test coverage with both unit tests and integration tests
 - **Overall Coverage**: 85%+ across all modules
 - **Unit Tests**: All core modules have comprehensive unit tests
 - **Integration Tests**: Real-world testing with actual vector databases using Testcontainers
+- **Performance Benchmarks**: Built-in benchmarks for Index and Query operations
 
 ### Running Tests
 
@@ -151,6 +229,9 @@ go test -v ./integration_test/...
 
 # Run tests with coverage
 go test -cover ./...
+
+# Run benchmarks
+go test -bench=. ./rag/
 ```
 
 ### Integration Testing
@@ -166,11 +247,13 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 
 - [Getting Started](docs/getting-started.md)
 - [API Reference](docs/api.md)
+- [Production Deployment Guide](docs/deployment.md)
 - [Examples](examples/)
 - [Contributing](CONTRIBUTING.md)
 
 ## Roadmap
 
+### Completed (v0.5.0)
 - [x] More vector store integrations (Milvus, Qdrant, Weaviate)
 - [x] Advanced retrieval strategies (Hybrid, Reranking)
 - [x] Streaming responses
@@ -181,8 +264,18 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [x] Integration tests with Testcontainers
 - [x] Excel and PPT parsing
 - [x] Domestic LLM support
-- [ ] Performance benchmarks
+- [x] Azure OpenAI client
+- [x] Configuration management
+- [x] Custom prompt templates
+- [x] Performance benchmarks
+- [x] Production deployment guides
+
+### Planned (v1.0.0)
 - [ ] Multi-tenancy support
+- [ ] Advanced security features
+- [ ] Rate limiting
+- [ ] Authentication/Authorization
+- [ ] Graph RAG support
 
 ## Contributing
 
@@ -191,3 +284,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and changes.

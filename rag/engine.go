@@ -991,7 +991,16 @@ func (e *Engine) QueryStream(ctx context.Context, question string, opts QueryOpt
 // buildPrompt builds the prompt for LLM
 func buildPrompt(question string, contexts []string, template string) string {
 	if template != "" {
-		return strings.ReplaceAll(template, "{question}", question)
+		// Build context string
+		var contextStr strings.Builder
+		for i, ctx := range contexts {
+			contextStr.WriteString(fmt.Sprintf("%d. %s\n", i+1, ctx))
+		}
+		
+		// Replace placeholders
+		result := strings.ReplaceAll(template, "{question}", question)
+		result = strings.ReplaceAll(result, "{context}", contextStr.String())
+		return result
 	}
 
 	var buf bytes.Buffer

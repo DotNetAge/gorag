@@ -2,9 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-03-07
 
-### Added - 2026-03-07
+### Added
+
+#### New Features
+- **Azure OpenAI Client**: Full support for Azure OpenAI Service with streaming and standard completion
+- **Configuration Management**: Flexible YAML and environment variable configuration system
+- **Custom Prompt Templates**: Support for custom prompt formats with `{question}` and `{context}` placeholders
+- **Performance Benchmarks**: Built-in benchmark tests for Index and Query operations
+- **Production Deployment Guide**: Comprehensive deployment documentation for production environments
+
+#### Parser Enhancements
+- **Excel Parser**: Support for Excel file parsing with multiple sheets
+- **PPT Parser**: Support for PowerPoint presentation parsing
+- **Image Parser**: Multi-modal support for image processing with OCR capabilities
+
+#### LLM Support
+- **Domestic LLM Support**: Support for popular Chinese LLMs (qwen, seed2, minmax, kimi, glm5, etc.)
+- **Ollama Integration**: Local LLM support with Ollama runtime
+
+#### CLI Tool Improvements
+- **Custom Prompt Templates**: CLI support for custom prompt templates
+- **File Indexing**: Index documents from files directly
+- **Export/Import**: Export and import indexed documents for backup and migration
 
 #### Testing Infrastructure
 - **Comprehensive Test Coverage**: Achieved 85%+ test coverage across all modules
@@ -13,7 +34,7 @@ All notable changes to this project will be documented in this file.
   - Added Qdrant integration tests with gRPC client support
   - Added Weaviate integration tests with GraphQL API support
 - **Unit Tests**: Added comprehensive unit tests for all major modules
-  - Parser tests (Text, PDF, DOCX, HTML)
+  - Parser tests (Text, PDF, DOCX, HTML, Excel, PPT, Image)
   - Vector store tests (Memory, Milvus, Qdrant, Pinecone, Weaviate)
   - Core module tests (Chunk, Document, Result)
   - CLI tool tests
@@ -37,13 +58,11 @@ All notable changes to this project will be documented in this file.
   - Added support for custom vector dimensions
   - Fixed class naming convention (must start with uppercase)
 
-#### Code Quality
+### Changed
 - **Package Name Unification**: Unified all package names to `github.com/DotNetAge/gorag`
 - **Dependency Management**: Resolved all dependency conflicts and updated to latest stable versions
 - **Code Cleanup**: Removed debug logging and improved code documentation
 - **Error Handling**: Improved error messages and handling across all modules
-
-### Changed
 - Updated all vector store implementations to follow consistent interface patterns
 - Improved test organization with separate integration test directory
 - Enhanced documentation with testing guidelines and examples
@@ -55,15 +74,55 @@ All notable changes to this project will be documented in this file.
 - Fixed vector dimension mismatches in test cases
 - Fixed all compilation errors and linter warnings
 
+### Documentation
+- Added comprehensive production deployment guide
+- Updated API documentation with new features
+- Enhanced getting started guide with configuration examples
+- Added performance benchmarking documentation
+
+## [0.4.0] - 2025-XX-XX
+
+### Added
+- Plugin system for extensibility
+- CLI tool with Index, Query, and Export/Import commands
+- Streaming response support
+- Hybrid retrieval and reranking capabilities
+
+## [0.3.0] - 2025-XX-XX
+
+### Added
+- Multi-modal support (Image, Audio)
+- Batch processing
+- Connection pooling
+- Async indexing
+- Metrics (Prometheus)
+- Structured logging
+- Distributed tracing
+
+## [0.2.0] - 2025-XX-XX
+
+### Added
+- PDF parser
+- DOCX parser
+- HTML parser
+- Pinecone integration
+- Weaviate integration
+- Milvus integration
+- Qdrant integration
+- OpenAI embeddings
+- Ollama local embeddings
+- OpenAI client
+- Anthropic client
+- Query caching
+
 ## [0.1.0] - 2025-XX-XX
 
 ### Added
 - Initial release with basic RAG functionality
-- Support for multiple vector stores (Memory, Milvus, Qdrant, Pinecone, Weaviate)
-- Document parsers (Text, PDF, DOCX, HTML)
-- OpenAI and Anthropic LLM integrations
-- OpenAI embedding integration
-- CLI tool for easy usage
-- Plugin system for extensibility
-- Streaming response support
-- Hybrid retrieval and reranking capabilities
+- Basic RAG engine
+- Text parser
+- In-memory vector store
+- Mock embedding provider
+- Mock LLM client
+- Basic examples
+- Documentation

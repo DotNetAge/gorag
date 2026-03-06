@@ -10,6 +10,8 @@ import (
 
 func TestParser_Parse(t *testing.T) {
 	// Create a simple Excel file content
+	// Note: This is a simplified XML structure and won't actually work with excelize
+	// For a real test, we would need to create a proper Excel file
 	excelContent := `<?xml version="1.0" encoding="UTF-8"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheets>
@@ -19,9 +21,6 @@ func TestParser_Parse(t *testing.T) {
     <relationship id="rId1" type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" target="worksheets/sheet1.xml"/>
   </relationships>
 </workbook>`
-
-	// Note: This is a simplified XML structure and won't actually work with excelize
-	// For a real test, we would need to create a proper Excel file
 
 	parser := NewParser()
 	ctx := context.Background()
@@ -38,3 +37,5 @@ func TestParser_SupportedFormats(t *testing.T) {
 	assert.Contains(t, formats, ".xlsx")
 	assert.Contains(t, formats, ".xls")
 }
+
+

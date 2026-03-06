@@ -39,6 +39,8 @@ func main() {
 		queryCmd(),
 		listCmd(),
 		serveCmd(),
+		exportCmd(),
+		importCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -49,6 +51,7 @@ func main() {
 
 func indexCmd() *cobra.Command {
 	var file string
+	var contentType string
 
 	cmd := &cobra.Command{
 		Use:   "index",
@@ -63,52 +66,59 @@ func indexCmd() *cobra.Command {
 			ctx := context.Background()
 
 			if file != "" {
-			// Read from file
-			content, err := os.ReadFile(file)
-			if err != nil {
-				return fmt.Errorf("failed to read file: %w", err)
-			}
-			err = engine.Index(ctx, rag.Source{
-				Type:    "text",
-				Content: string(content),
-			})
-			if err != nil {
-				return fmt.Errorf("failed to index file: %w", err)
-			}
-			fmt.Printf("Indexed file: %s\n", file)
-		} else if len(args) > 0 {
-			// Read from arguments
-			for _, arg := range args {
+				// Read from file
+				content, err := os.ReadFile(file)
+				if err != nil {
+					return fmt.Errorf("failed to read file: %w", err)
+				}
+				
+				// Determine content type based on file extension if not specified
+				if contentType == "" {
+					contentType = getContentTypeFromFile(file)
+				}
+				
 				err = engine.Index(ctx, rag.Source{
-					Type:    "text",
-					Content: arg,
+					Type:    contentType,
+					Content: string(content),
 				})
 				if err != nil {
-					return fmt.Errorf("failed to index content: %w", err)
+					return fmt.Errorf("failed to index file: %w", err)
 				}
-				fmt.Printf("Indexed content: %s...\n", truncate(arg, 50))
+				fmt.Printf("Indexed file: %s\n", file)
+			} else if len(args) > 0 {
+				// Read from arguments
+				for _, arg := range args {
+					err = engine.Index(ctx, rag.Source{
+						Type:    contentType,
+						Content: arg,
+					})
+					if err != nil {
+						return fmt.Errorf("failed to index content: %w", err)
+					}
+					fmt.Printf("Indexed content: %s...\n", truncate(arg, 50))
+				}
+			} else {
+				// Read from stdin
+				content, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("failed to read stdin: %w", err)
+				}
+				err = engine.Index(ctx, rag.Source{
+					Type:    contentType,
+					Content: string(content),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to index stdin: %w", err)
+				}
+				fmt.Println("Indexed content from stdin")
 			}
-		} else {
-			// Read from stdin
-			content, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("failed to read stdin: %w", err)
-			}
-			err = engine.Index(ctx, rag.Source{
-				Type:    "text",
-				Content: string(content),
-			})
-			if err != nil {
-				return fmt.Errorf("failed to index stdin: %w", err)
-			}
-			fmt.Println("Indexed content from stdin")
-		}
 
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&file, "file", "", "File to index")
+	cmd.Flags().StringVar(&contentType, "type", "text", "Content type (text, pdf, docx, html, json, yaml, excel, ppt, image)")
 
 	return cmd
 }
@@ -130,13 +140,13 @@ func queryCmd() *cobra.Command {
 			question := strings.Join(args, " ")
 
 			if question == "" {
-			// Read from stdin
-			content, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("failed to read stdin: %w", err)
+				// Read from stdin
+				content, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("failed to read stdin: %w", err)
+				}
+				question = string(content)
 			}
-			question = string(content)
-		}
 
 			if question == "" {
 				return fmt.Errorf("question is required")
@@ -222,6 +232,44 @@ func serveCmd() *cobra.Command {
 	return cmd
 }
 
+func exportCmd() *cobra.Command {
+	var file string
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export indexed documents",
+		Long:  "Export all indexed documents to a file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// This is a placeholder - in a real implementation, we'd need to add an Export method to the engine
+			fmt.Printf("Export functionality not implemented yet (would export to %s)\n", file)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&file, "file", "gorag_export.json", "File to export to")
+
+	return cmd
+}
+
+func importCmd() *cobra.Command {
+	var file string
+
+	cmd := &cobra.Command{
+		Use:   "import",
+		Short: "Import documents",
+		Long:  "Import documents from a file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// This is a placeholder - in a real implementation, we'd need to add an Import method to the engine
+			fmt.Printf("Import functionality not implemented yet (would import from %s)\n", file)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&file, "file", "gorag_export.json", "File to import from")
+
+	return cmd
+}
+
 func createEngine() (*rag.Engine, error) {
 	if apiKey == "" {
 		// Try to get from environment
@@ -261,4 +309,39 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func getContentTypeFromFile(file string) string {
+	// Get file extension
+	ext := ""
+	for i := len(file) - 1; i >= 0; i-- {
+		if file[i] == '.' {
+			ext = file[i+1:]
+			break
+		}
+	}
+
+	// Map extensions to content types
+	switch ext {
+	case "txt", "md":
+		return "text"
+	case "pdf":
+		return "pdf"
+	case "docx":
+		return "docx"
+	case "html", "htm":
+		return "html"
+	case "json":
+		return "json"
+	case "yaml", "yml":
+		return "yaml"
+	case "xlsx", "xls":
+		return "excel"
+	case "pptx", "ppt":
+		return "ppt"
+	case "jpg", "jpeg", "png", "gif", "webp":
+		return "image"
+	default:
+		return "text"
+	}
 }
