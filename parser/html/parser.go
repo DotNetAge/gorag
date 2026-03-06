@@ -1,4 +1,4 @@
-package text
+package html
 
 import (
 	"context"
@@ -8,15 +8,16 @@ import (
 
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/google/uuid"
+	"golang.org/x/net/html"
 )
 
-// Parser implements a simple text parser
+// Parser implements an HTML document parser
 type Parser struct {
 	chunkSize    int
 	chunkOverlap int
 }
 
-// NewParser creates a new text parser
+// NewParser creates a new HTML parser
 func NewParser() *Parser {
 	return &Parser{
 		chunkSize:    500,
@@ -24,14 +25,19 @@ func NewParser() *Parser {
 	}
 }
 
-// Parse parses text into chunks
+// Parse parses HTML into chunks
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	content, err := io.ReadAll(r)
+	// Parse HTML document
+	doc, err := html.Parse(r)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	text := string(content)
+	// Extract text from HTML
+	var buf strings.Builder
+	p.extractText(doc, &buf)
+
+	text := buf.String()
 	chunks := p.splitText(text)
 
 	result := make([]parser.Chunk, len(chunks))
@@ -40,7 +46,7 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 			ID:      uuid.New().String(),
 			Content: chunk,
 			Metadata: map[string]string{
-				"type":     "text",
+				"type":     "html",
 				"position": fmt.Sprintf("%d", i),
 			},
 		}
@@ -51,18 +57,12 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 
 // SupportedFormats returns supported formats
 func (p *Parser) SupportedFormats() []string {
-	return []string{".txt", ".md"}
+	return []string{".html", ".htm"}
 }
 
 // splitText splits text into chunks with overlap
 func (p *Parser) splitText(text string) []string {
 	var chunks []string
-
-	// Handle empty text
-	if len(text) == 0 {
-		chunks = append(chunks, "")
-		return chunks
-	}
 
 	for i := 0; i < len(text); i += p.chunkSize - p.chunkOverlap {
 		end := i + p.chunkSize
@@ -79,4 +79,15 @@ func (p *Parser) splitText(text string) []string {
 	}
 
 	return chunks
+}
+
+// extractText extracts text from HTML node
+func (p *Parser) extractText(n *html.Node, buf *strings.Builder) {
+	if n.Type == html.TextNode {
+		buf.WriteString(n.Data)
+	} else if n.Type == html.ElementNode && n.Data != "script" && n.Data != "style" {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			p.extractText(c, buf)
+		}
+	}
 }

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
-	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // Store implements a vector store using Milvus
@@ -50,7 +50,7 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 		collection: "gorag",
 		dimension:  1536, // Default for OpenAI embeddings
 		indexType:  entity.IvfFlat,
-		metricType: entity.IP,
+		metricType: entity.L2,
 	}
 
 	for _, opt := range opts {
@@ -64,55 +64,16 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 	}
 
 	if !exists {
-		// Create schema
-		schema := &entity.Schema{
-			CollectionName: store.collection,
-			Description:    "GoRAG vector store",
-			Fields: []*entity.Field{
-				{
-					Name:       "id",
-					DataType:   entity.FieldTypeInt64,
-					PrimaryKey: true,
-					AutoID:     true,
-				},
-				{
-					Name:     "content",
-					DataType: entity.FieldTypeVarChar,
-					TypeParams: map[string]string{
-						"max_length": "65535",
-					},
-				},
-				{
-					Name:     "vector",
-					DataType: entity.FieldTypeFloatVector,
-					TypeParams: map[string]string{
-						"dim": fmt.Sprintf("%d", store.dimension),
-					},
-				},
-			},
-		}
+		// Create schema using the recommended way
+		schema := entity.NewSchema().WithName(store.collection).WithDescription("GoRAG vector store").
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+			WithField(entity.NewField().WithName("content").WithDataType(entity.FieldTypeVarChar).WithMaxLength(65535)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(store.dimension)))
 
-		err = store.client.CreateCollection(ctx, schema, 2)
+		err = store.client.CreateCollection(ctx, schema, entity.DefaultShardNumber)
 		if err != nil {
 			return nil, err
 		}
-
-		// Create index
-		idx, err := entity.NewIndexIvfFlat(entity.IP, 128)
-		if err != nil {
-			return nil, err
-		}
-
-		err = store.client.CreateIndex(ctx, store.collection, "vector", idx, false)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Load collection
-	err = store.client.LoadCollection(ctx, store.collection, false)
-	if err != nil {
-		return nil, err
 	}
 
 	return store, nil
@@ -138,8 +99,29 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 		entity.NewColumnVarChar("content", contents),
 		entity.NewColumnFloatVector("vector", s.dimension, vectors),
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	// Flush to make data searchable
+	err = s.client.Flush(ctx, s.collection, false)
+	if err != nil {
+		return err
+	}
+
+	// Create index after flush (following official example pattern)
+	idx, err := entity.NewIndexIvfFlat(entity.L2, 2)
+	if err != nil {
+		return err
+	}
+
+	err = s.client.CreateIndex(ctx, s.collection, "vector", idx, false)
+	if err != nil {
+		return err
+	}
+
+	// Load collection to make new data visible
+	return s.client.LoadCollection(ctx, s.collection, false)
 }
 
 // Search performs similarity search in Milvus
@@ -150,15 +132,15 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	}
 
 	// Prepare search parameters
-	sp, err := entity.NewIndexIvfFlatSearchParam(10)
+	sp, err := entity.NewIndexIvfFlatSearchParam(2)
 	if err != nil {
 		return nil, err
 	}
 
 	// Perform search
-	results, err := s.client.Search(ctx, s.collection, []string{}, "", []string{"content"},
+	results, err := s.client.Search(ctx, s.collection, []string{}, "", []string{"id", "content"},
 		[]entity.Vector{entity.FloatVector(query)}, "vector",
-		entity.IP, topK, sp)
+		entity.L2, topK, sp)
 	if err != nil {
 		return nil, err
 	}
