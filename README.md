@@ -12,6 +12,11 @@
 - **Cloud Native** - Kubernetes friendly, single binary deployment
 - **Type Safe** - Full type safety with Go's strong typing
 - **Production Ready** - Observability, metrics, and error handling built-in
+- **Hybrid Retrieval** - Combine vector and keyword search for better results
+- **Reranking** - LLM-based result reranking for improved relevance
+- **Streaming Responses** - Real-time streaming for better user experience
+- **Plugin System** - Extensible architecture for custom functionality
+- **CLI Tool** - Command-line interface for easy usage
 
 ## Quick Start
 
@@ -21,23 +26,28 @@ package main
 import (
     "context"
     "log"
+    "os"
     
-    "github.com/DotNetAge/gorag/rag"
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
     "github.com/DotNetAge/gorag/parser/text"
+    "github.com/DotNetAge/gorag/rag"
     "github.com/DotNetAge/gorag/vectorstore/memory"
-    "github.com/DotNetAge/gorag/embedding/openai"
-    "github.com/DotNetAge/gorag/llm/openai"
 )
 
 func main() {
     ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
     
     // Create RAG engine
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
     engine, err := rag.New(
         rag.WithParser(text.NewParser()),
         rag.WithVectorStore(memory.NewStore()),
-        rag.WithEmbedder(openai.NewEmbedder(apiKey)),
-        rag.WithLLM(openai.NewClient(apiKey)),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
     )
     if err != nil {
         log.Fatal(err)
@@ -89,6 +99,31 @@ go get github.com/DotNetAge/gorag
 - **embedding** - Embedding providers (OpenAI, Ollama, etc.)
 - **llm** - LLM clients (OpenAI, Anthropic, etc.)
 - **rag** - RAG engine and orchestration
+- **plugins** - Plugin system for extending functionality
+
+## CLI Tool
+
+GoRAG includes a command-line interface for easy usage:
+
+```bash
+# Install
+go install github.com/DotNetAge/gorag/cmd/gorag@latest
+
+# Index documents
+gorag index --api-key $OPENAI_API_KEY "Go is an open source programming language..."
+
+# Query the engine
+gorag query --api-key $OPENAI_API_KEY "What is Go?"
+
+# Stream responses
+gorag query --api-key $OPENAI_API_KEY --stream "What are the key features of Go?"
+```
+
+## Examples
+
+- **Basic** - Simple RAG usage example
+- **Advanced** - Advanced features including streaming and hybrid retrieval
+- **Web** - HTTP API server example
 
 ## Documentation
 
@@ -99,12 +134,12 @@ go get github.com/DotNetAge/gorag
 
 ## Roadmap
 
-- [ ] More vector store integrations (Milvus, Qdrant)
-- [ ] Advanced retrieval strategies (Hybrid, Reranking)
-- [ ] Streaming responses
+- [x] More vector store integrations (Milvus, Qdrant)
+- [x] Advanced retrieval strategies (Hybrid, Reranking)
+- [x] Streaming responses
 - [ ] Multi-modal support (Image, Audio)
-- [ ] Plugin system
-- [ ] CLI tool
+- [x] Plugin system
+- [x] CLI tool
 
 ## Contributing
 
