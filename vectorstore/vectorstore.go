@@ -16,6 +16,8 @@ type Chunk struct {
 	ID       string
 	Content  string
 	Metadata map[string]string
+	MediaType string // e.g., "text/plain", "image/jpeg", "image/png"
+	MediaData []byte // Binary data for non-text content
 }
 
 // Result represents a search result

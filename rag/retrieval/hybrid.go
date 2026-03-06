@@ -54,6 +54,12 @@ func (r *HybridRetriever) Search(ctx context.Context, query string, embedding []
 	return r.combineResults(vectorResults, keywordResults, topK), nil
 }
 
+// KeywordSearch performs keyword-only search
+func (r *HybridRetriever) KeywordSearch(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
+	// Perform keyword search only
+	return r.keywordStore.Search(ctx, query, topK)
+}
+
 // combineResults combines vector and keyword search results
 func (r *HybridRetriever) combineResults(vectorResults, keywordResults []vectorstore.Result, topK int) []vectorstore.Result {
 	// Create a map to store combined results

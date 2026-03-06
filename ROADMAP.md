@@ -14,51 +14,51 @@
 ## Version 0.2.0
 
 ### Parsers
-- [ ] PDF parser
-- [ ] DOCX parser
-- [ ] HTML parser
+- [x] PDF parser
+- [x] DOCX parser
+- [x] HTML parser
 
 ### Vector Stores
-- [ ] Pinecone integration
-- [ ] Weaviate integration
-- [ ] Milvus integration
+- [x] Pinecone integration
+- [x] Weaviate integration
+- [x] Milvus integration
 
 ### Embedding Providers
-- [ ] OpenAI embeddings
-- [ ] Ollama local embeddings
+- [x] OpenAI embeddings
+- [x] Ollama local embeddings
 
 ### LLM Clients
-- [ ] OpenAI client
-- [ ] Anthropic client
+- [x] OpenAI client
+- [x] Anthropic client
 - [ ] Azure OpenAI client
 
 ### Features
-- [ ] Streaming responses
+- [x] Streaming responses
 - [ ] Custom prompt templates
-- [ ] Query caching
+- [x] Query caching
 
 ## Version 0.3.0
 
 ### Advanced Features
-- [ ] Hybrid retrieval (keyword + semantic)
-- [ ] Reranking
-- [ ] Query routing
-- [ ] Multi-modal support (images, audio)
+- [x] Hybrid retrieval (keyword + semantic)
+- [x] Reranking
+- [x] Query routing
+- [x] Multi-modal support (images, audio)
 
 ### Performance
-- [ ] Batch processing
-- [ ] Connection pooling
-- [ ] Async indexing
+- [x] Batch processing
+- [x] Connection pooling
+- [x] Async indexing
 
 ### Observability
-- [ ] Metrics (Prometheus)
-- [ ] Structured logging
-- [ ] Distributed tracing
+- [x] Metrics (Prometheus)
+- [x] Structured logging
+- [x] Distributed tracing
 
 ## Version 0.4.0
 
 ### Production Features
-- [ ] Plugin system
+- [x] Plugin system
 - [ ] Configuration management
 - [ ] Rate limiting
 - [ ] Authentication/Authorization

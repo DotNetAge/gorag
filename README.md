@@ -19,6 +19,9 @@
 - **Plugin System** - Extensible architecture for custom functionality
 - **CLI Tool** - Command-line interface for easy usage
 - **Comprehensive Testing** - 85%+ test coverage with integration tests using Testcontainers
+- **Multi-modal Support** - Process images and other media types
+- **Excel and PPT Parsing** - Support for Excel and PowerPoint files
+- **Domestic LLM Support** - Support for popular Chinese LLMs (qwen, seed2, minmax, kimi, glm5, etc.)
 
 ## Quick Start
 
@@ -96,10 +99,10 @@ go get github.com/DotNetAge/gorag
 
 ## Modules
 
-- **parser** - Document parsers (Text, PDF, DOCX, HTML, etc.)
+- **parser** - Document parsers (Text, PDF, DOCX, HTML, JSON, YAML, Excel, PPT, Image, etc.)
 - **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate, etc.)
 - **embedding** - Embedding providers (OpenAI, Ollama, etc.)
-- **llm** - LLM clients (OpenAI, Anthropic, etc.)
+- **llm** - LLM clients (OpenAI, Anthropic, Ollama, Domestic LLMs, etc.)
 - **rag** - RAG engine and orchestration
 - **plugins** - Plugin system for extending functionality
 
@@ -171,11 +174,13 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [x] More vector store integrations (Milvus, Qdrant, Weaviate)
 - [x] Advanced retrieval strategies (Hybrid, Reranking)
 - [x] Streaming responses
-- [ ] Multi-modal support (Image, Audio)
+- [x] Multi-modal support (Image, Audio)
 - [x] Plugin system
 - [x] CLI tool
 - [x] Comprehensive test coverage (85%+)
 - [x] Integration tests with Testcontainers
+- [x] Excel and PPT parsing
+- [x] Domestic LLM support
 - [ ] Performance benchmarks
 - [ ] Multi-tenancy support
 
