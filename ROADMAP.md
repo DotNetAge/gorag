@@ -13,30 +13,34 @@
 
 ## Version 0.2.0
 
-### Parsers
+### Parsers (9 types)
+- [x] Text parser
 - [x] PDF parser
 - [x] DOCX parser
 - [x] HTML parser
+- [x] JSON parser
+- [x] YAML parser
 - [x] Excel parser
 - [x] PPT parser
 - [x] Image parser
 
-### Vector Stores
+### Vector Stores (5 backends)
+- [x] Memory store
 - [x] Pinecone integration
 - [x] Weaviate integration
 - [x] Milvus integration
 - [x] Qdrant integration
 
-### Embedding Providers
+### Embedding Providers (2 providers)
 - [x] OpenAI embeddings
 - [x] Ollama local embeddings
 
-### LLM Clients
+### LLM Clients (5 clients)
 - [x] OpenAI client
 - [x] Anthropic client
 - [x] Azure OpenAI client
 - [x] Ollama client
-- [x] Domestic LLM support (qwen, seed2, minmax, kimi, glm5, etc.)
+- [x] Compatible API client (supports domestic LLMs: qwen, seed2, minmax, kimi, glm5, deepseek, etc.)
 
 ### Features
 - [x] Streaming responses

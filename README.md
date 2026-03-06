@@ -21,12 +21,40 @@
 - **CLI Tool** - Command-line interface for easy usage
 - **Comprehensive Testing** - 85%+ test coverage with integration tests using Testcontainers
 - **Multi-modal Support** - Process images and other media types
-- **Excel and PPT Parsing** - Support for Excel and PowerPoint files
-- **Domestic LLM Support** - Support for popular Chinese LLMs (qwen, seed2, minmax, kimi, glm5, etc.)
-- **Azure OpenAI Support** - Full support for Azure OpenAI Service
 - **Configuration Management** - Flexible YAML and environment variable configuration
 - **Custom Prompt Templates** - Create custom prompt formats with placeholders
 - **Performance Benchmarks** - Built-in benchmarking for performance optimization
+
+### 🎯 Out-of-the-Box Support
+
+#### Document Parsers (9 types)
+- **Text** - Plain text and markdown files
+- **PDF** - PDF documents
+- **DOCX** - Microsoft Word documents
+- **HTML** - HTML web pages
+- **JSON** - JSON data files
+- **YAML** - YAML configuration files
+- **Excel** - Microsoft Excel spreadsheets (.xlsx)
+- **PPT** - Microsoft PowerPoint presentations (.pptx)
+- **Image** - Images with OCR support
+
+#### Embedding Providers (2 providers)
+- **OpenAI** - OpenAI embeddings (text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large)
+- **Ollama** - Local embedding models (bge-small-zh-v1.5, nomic-embed-text, etc.)
+
+#### LLM Clients (5 clients)
+- **OpenAI** - GPT-3.5, GPT-4, GPT-4 Turbo, GPT-4o
+- **Anthropic** - Claude 3 (Opus, Sonnet, Haiku)
+- **Azure OpenAI** - Azure OpenAI Service
+- **Ollama** - Local LLMs (Llama 3, Qwen, Mistral, etc.)
+- **Compatible** - OpenAI API compatible services (supports domestic LLMs: qwen, seed2, minmax, kimi, glm5, deepseek, etc.)
+
+#### Vector Stores (5 backends)
+- **Memory** - In-memory store for development and testing
+- **Milvus** - Production-grade vector database
+- **Qdrant** - High-performance vector search engine
+- **Pinecone** - Fully managed vector database
+- **Weaviate** - Semantic search engine with GraphQL API
 
 ## Quick Start
 
@@ -105,10 +133,10 @@ go get github.com/DotNetAge/gorag
 
 ## Modules
 
-- **parser** - Document parsers (Text, PDF, DOCX, HTML, JSON, YAML, Excel, PPT, Image, etc.)
-- **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate, etc.)
-- **embedding** - Embedding providers (OpenAI, Ollama, etc.)
-- **llm** - LLM clients (OpenAI, Anthropic, Azure OpenAI, Ollama, Domestic LLMs, etc.)
+- **parser** - Document parsers (9 types: Text, PDF, DOCX, HTML, JSON, YAML, Excel, PPT, Image)
+- **embedding** - Embedding providers (OpenAI, Ollama)
+- **llm** - LLM clients (OpenAI, Anthropic, Azure OpenAI, Ollama, Compatible API)
+- **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate)
 - **rag** - RAG engine and orchestration
 - **plugins** - Plugin system for extending functionality
 - **config** - Configuration management system
@@ -178,10 +206,6 @@ vectorstore:
 logging:
   level: "info"
   format: "json"
-
-metrics:
-  enabled: true
-  port: 9090
 ```
 
 ### Environment Variables
