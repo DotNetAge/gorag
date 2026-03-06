@@ -7,6 +7,8 @@
 
 **GoRAG** - Production-ready RAG (Retrieval-Augmented Generation) framework for Go
 
+**[English](README.md)** | [中文文档](README-zh.md)
+
 ## Features
 
 - **High Performance** - Built for production with low latency and high throughput
