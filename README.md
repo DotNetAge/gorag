@@ -152,10 +152,6 @@ GoRAG supports flexible configuration through YAML files and environment variabl
 Create a `config.yaml` file:
 
 ```yaml
-server:
-  port: 8080
-  host: 0.0.0.0
-
 rag:
   topK: 5
   chunkSize: 1000
@@ -191,7 +187,6 @@ metrics:
 ### Environment Variables
 
 ```bash
-export GORAG_SERVER_PORT=8080
 export GORAG_RAG_TOPK=5
 export GORAG_EMBEDDING_PROVIDER=openai
 export GORAG_LLM_PROVIDER=openai

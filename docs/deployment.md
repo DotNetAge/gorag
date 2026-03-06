@@ -1,5 +1,7 @@
 # GoRAG 生产部署指南
 
+> **注意**：GoRAG 是一个 RAG 框架库，而不是独立的服务器应用。本部署指南主要针对使用 GoRAG 构建的应用程序（如 [examples/web](../examples/web/) 中的示例 HTTP 服务）。如果您只是将 GoRAG 作为库使用，可以跳过容器化和服务器部署相关章节。
+
 ## 1. 部署准备
 
 ### 1.1 系统要求
@@ -23,11 +25,6 @@
 创建 `config.yaml` 文件：
 
 ```yaml
-# 基本配置
-server:
-  port: 8080
-  host: 0.0.0.0
-
 # RAG 引擎配置
 rag:
   topK: 5
@@ -82,22 +79,23 @@ metrics:
 
 ### 2.2 环境变量
 
-| 环境变量 | 描述 | 默认值 |
-|---------|------|--------|
-| `GORAG_SERVER_PORT` | 服务器端口 | 8080 |
-| `GORAG_RAG_TOPK` | 检索文档数量 | 5 |
-| `GORAG_EMBEDDING_PROVIDER` | 嵌入模型提供商 | openai |
-| `GORAG_LLM_PROVIDER` | LLM 提供商 | openai |
-| `GORAG_VECTORSTORE_TYPE` | 向量存储类型 | memory |
-| `GORAG_OPENAI_API_KEY` | OpenAI API 密钥 | - |
-| `GORAG_ANTHROPIC_API_KEY` | Anthropic API 密钥 | - |
-| `GORAG_PINECONE_API_KEY` | Pinecone API 密钥 | - |
+| 环境变量                   | 描述               | 默认值 |
+| -------------------------- | ------------------ | ------ |
+| `GORAG_RAG_TOPK`           | 检索文档数量       | 5      |
+| `GORAG_EMBEDDING_PROVIDER` | 嵌入模型提供商     | openai |
+| `GORAG_LLM_PROVIDER`       | LLM 提供商         | openai |
+| `GORAG_VECTORSTORE_TYPE`   | 向量存储类型       | memory |
+| `GORAG_OPENAI_API_KEY`     | OpenAI API 密钥    | -      |
+| `GORAG_ANTHROPIC_API_KEY`  | Anthropic API 密钥 | -      |
+| `GORAG_PINECONE_API_KEY`   | Pinecone API 密钥  | -      |
 
 ## 3. 容器化部署
 
+> 以下示例假设您正在部署基于 GoRAG 构建的应用程序（如 `examples/web` 中的示例服务）。
+
 ### 3.1 Docker 构建
 
-创建 `Dockerfile`：
+创建 `Dockerfile`（以 examples/web 为例）：
 
 ```dockerfile
 FROM golang:1.20-alpine AS builder
@@ -164,9 +162,11 @@ docker-compose up -d
 
 ## 4. 云服务部署
 
+> 以下示例假设您正在部署基于 GoRAG 构建的应用程序。
+
 ### 4.1 Kubernetes 部署
 
-创建 `k8s/deployment.yaml`：
+创建 `k8s/deployment.yaml`（以部署 HTTP 服务为例）：
 
 ```yaml
 apiVersion: apps/v1
@@ -352,12 +352,12 @@ http.HandleFunc("/health", healthCheck)
 
 ### 8.1 常见问题
 
-| 问题 | 可能原因 | 解决方案 |
-|------|---------|----------|
-| 索引失败 | 嵌入模型错误 | 检查 API 密钥和网络连接 |
-| 查询超时 | LLM 响应慢 | 增加超时设置，使用流式响应 |
-| 内存不足 | 文档过大 | 调整 chunk 大小，增加内存 |
-| 向量存储连接失败 | 网络问题或配置错误 | 检查连接字符串和网络设置 |
+| 问题             | 可能原因           | 解决方案                   |
+| ---------------- | ------------------ | -------------------------- |
+| 索引失败         | 嵌入模型错误       | 检查 API 密钥和网络连接    |
+| 查询超时         | LLM 响应慢         | 增加超时设置，使用流式响应 |
+| 内存不足         | 文档过大           | 调整 chunk 大小，增加内存  |
+| 向量存储连接失败 | 网络问题或配置错误 | 检查连接字符串和网络设置   |
 
 ### 8.2 日志分析
 
