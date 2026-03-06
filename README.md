@@ -276,28 +276,48 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 ## Roadmap
 
 ### Completed (v0.5.0)
-- [x] More vector store integrations (Milvus, Qdrant, Weaviate)
-- [x] Advanced retrieval strategies (Hybrid, Reranking)
+- [x] Document parsers (9 types)
+- [x] Vector stores (5 backends)
+- [x] Embedding providers (2 providers)
+- [x] LLM clients (5 clients)
+- [x] Hybrid retrieval and reranking
 - [x] Streaming responses
-- [x] Multi-modal support (Image, Audio)
+- [x] Multi-modal support
 - [x] Plugin system
 - [x] CLI tool
 - [x] Comprehensive test coverage (85%+)
 - [x] Integration tests with Testcontainers
-- [x] Excel and PPT parsing
-- [x] Domestic LLM support
-- [x] Azure OpenAI client
 - [x] Configuration management
 - [x] Custom prompt templates
 - [x] Performance benchmarks
 - [x] Production deployment guides
+- [x] Plugin development guide
 
-### Planned (v1.0.0)
-- [ ] Multi-tenancy support
-- [ ] Advanced security features
-- [ ] Rate limiting
-- [ ] Authentication/Authorization
+### Planned (v0.6.0)
+- [ ] More parsers (Markdown, CSV, RTF, EPUB)
+- [ ] More vector stores (Chroma, Elasticsearch, pgvector, Redis)
+- [ ] More embedding providers (Cohere, HuggingFace, Jina, Voyage)
+- [ ] More LLM clients (Gemini, Bedrock, Cohere, Mistral)
+
+### Planned (v0.7.0)
+- [ ] Advanced chunking strategies
+- [ ] Query enhancement (rewriting, expansion, multi-query, HyDE)
+- [ ] Retrieval optimization (MMR, filtering, time-weighted)
+
+### Planned (v0.8.0)
+- [ ] Performance optimization
+- [ ] Developer tools
+- [ ] RAG evaluation metrics
+
+### Planned (v0.9.0)
+- [ ] Document versioning and incremental indexing
+- [ ] Multi-modal enhancement (audio, video)
+- [ ] Framework integrations (LangChain, LlamaIndex)
+
+### Future
 - [ ] Graph RAG support
+- [ ] Adaptive retrieval strategies
+- [ ] Plugin marketplace
 
 ## Contributing
 

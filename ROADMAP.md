@@ -49,11 +49,11 @@
 
 ## Version 0.3.0
 
-### Advanced Features
+### Advanced Retrieval
 - [x] Hybrid retrieval (keyword + semantic)
 - [x] Reranking
 - [x] Query routing
-- [x] Multi-modal support (images, audio)
+- [x] Multi-modal support (images)
 
 ### Performance
 - [x] Batch processing
@@ -67,11 +67,9 @@
 
 ## Version 0.4.0
 
-### Production Features
+### Extensibility
 - [x] Plugin system
 - [x] Configuration management
-- [ ] Rate limiting
-- [ ] Authentication/Authorization
 
 ### CLI Tool
 - [x] Index command
@@ -90,25 +88,118 @@
 - [x] Production deployment guides
 - [x] API documentation
 - [x] Getting started guide
+- [x] Plugin development guide
+
+## Version 0.6.0 (Next Release)
+
+### More Parsers
+- [ ] Markdown parser (with frontmatter support)
+- [ ] CSV parser
+- [ ] RTF parser
+- [ ] EPUB parser
+
+### More Vector Stores
+- [ ] Chroma integration
+- [ ] Elasticsearch integration
+- [ ] PostgreSQL pgvector integration
+- [ ] Redis Vector integration
+
+### More Embedding Providers
+- [ ] Cohere embeddings
+- [ ] HuggingFace embeddings
+- [ ] Jina AI embeddings
+- [ ] Voyage AI embeddings
+
+### More LLM Clients
+- [ ] Google Gemini client
+- [ ] AWS Bedrock client
+- [ ] Cohere client
+- [ ] Mistral AI client
+
+## Version 0.7.0
+
+### Advanced Chunking
+- [ ] Semantic chunking
+- [ ] Recursive character text splitter
+- [ ] Code-aware chunking
+- [ ] Markdown-aware chunking
+
+### Query Enhancement
+- [ ] Query rewriting
+- [ ] Query expansion
+- [ ] Multi-query retrieval
+- [ ] HyDE (Hypothetical Document Embeddings)
+
+### Retrieval Optimization
+- [ ] Maximal marginal relevance (MMR)
+- [ ] Similarity score threshold filtering
+- [ ] Metadata filtering
+- [ ] Time-weighted retrieval
+
+## Version 0.8.0
+
+### Performance Optimization
+- [ ] Parallel document processing
+- [ ] Embedding caching
+- [ ] Query result caching
+- [ ] Lazy loading for large documents
+
+### Developer Tools
+- [ ] RAG pipeline visualization
+- [ ] Performance profiling tools
+- [ ] Debug mode with detailed logging
+- [ ] Query analysis dashboard
+
+### Testing Tools
+- [ ] RAG evaluation metrics
+- [ ] Retrieval quality benchmarks
+- [ ] Answer relevance scoring
+- [ ] Ground truth comparison tools
+
+## Version 0.9.0
+
+### Advanced Features
+- [ ] Document versioning
+- [ ] Incremental indexing
+- [ ] Document deletion and updates
+- [ ] Collection management
+
+### Multi-modal Enhancement
+- [ ] Audio transcription support
+- [ ] Video frame extraction
+- [ ] Table extraction from images
+- [ ] Chart recognition
+
+### Integration
+- [ ] LangChain compatibility layer
+- [ ] LlamaIndex compatibility layer
+- [ ] OpenAI Assistants API integration
+- [ ] Custom callback system
 
 ## Version 1.0.0
 
-### Stable Release
-- [ ] Multi-tenancy support
-- [ ] Advanced security features
-- [ ] Enterprise support
-- [ ] Cloud-native deployment templates
+### Stability & Production Ready
+- [ ] API stability guarantee
+- [ ] Comprehensive error handling
+- [ ] Graceful degradation
+- [ ] Production-ready documentation
 
-## Future Plans
+### Ecosystem
+- [ ] Example applications gallery
+- [ ] Community plugin repository
+- [ ] Integration templates
+- [ ] Best practices guide
 
-### Version 1.1.0
+## Future Considerations
+
+### Research & Innovation
 - [ ] Graph RAG support
-- [ ] Advanced chunking strategies
-- [ ] Multi-language support
-- [ ] Custom embedding models
+- [ ] Adaptive retrieval strategies
+- [ ] Self-querying retrieval
+- [ ] Contextual compression
 
-### Version 1.2.0
-- [ ] Real-time indexing
-- [ ] Distributed deployment
-- [ ] Advanced monitoring
-- [ ] Performance optimization
+### Community
+- [ ] Plugin marketplace
+- [ ] Community contributions guide
+- [ ] Regular release schedule
+- [ ] Semantic versioning commitment
