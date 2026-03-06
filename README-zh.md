@@ -136,7 +136,7 @@ go get github.com/DotNetAge/gorag
 ## 模块
 
 - **parser** - 文档解析器（9 种类型：Text、PDF、DOCX、HTML、JSON、YAML、Excel、PPT、Image）
-- **embedding** - 嵌入模型提供商（OpenAI、Ollama）
+- **embedding** - 嵌入模型提供器（OpenAI、Ollama）
 - **llm** - LLM 客户端（OpenAI、Anthropic、Azure OpenAI、Ollama、Compatible API）
 - **vectorstore** - 向量存储后端（Memory、Milvus、Qdrant、Pinecone、Weaviate）
 - **rag** - RAG 引擎和编排
@@ -269,6 +269,7 @@ go test -bench=. ./rag/
 - [入门指南](docs/getting-started.md)
 - [API 参考](docs/api.md)
 - [生产部署指南](docs/deployment.md)
+- [插件开发指南](docs/plugin-development.md)
 - [示例代码](examples/)
 - [贡献指南](CONTRIBUTING.md)
 

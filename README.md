@@ -269,6 +269,7 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [Getting Started](docs/getting-started.md)
 - [API Reference](docs/api.md)
 - [Production Deployment Guide](docs/deployment.md)
+- [Plugin Development Guide](docs/plugin-development.md)
 - [Examples](examples/)
 - [Contributing](CONTRIBUTING.md)
 
