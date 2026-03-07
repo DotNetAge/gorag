@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/errors"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/rag/retrieval"
@@ -23,6 +24,15 @@ type QueryOptions struct {
 	UseAgenticRAG     bool   // Use agentic RAG with autonomous retrieval
 	MaxHops           int    // Maximum number of hops for multi-hop RAG
 	AgentInstructions string // Instructions for agentic RAG
+	RerankMultiplier  int    // Multiplier for topK when fetching candidates for reranking (default: 2)
+}
+
+// rerankMultiplier returns the effective rerank multiplier, defaulting to 2
+func (o QueryOptions) rerankMultiplier() int {
+	if o.RerankMultiplier > 0 {
+		return o.RerankMultiplier
+	}
+	return 2
 }
 
 // StreamResponse represents a streaming RAG query response
@@ -246,7 +256,7 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 
 	// Non-streaming path
 	if question == "" {
-		err := fmt.Errorf("question is required")
+		err := errors.ErrInvalidInput("question is required")
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "invalid_input")
 		}
@@ -301,16 +311,19 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 			if q.metrics != nil {
 				q.metrics.RecordErrorCount(ctx, "multi_hop_rag")
 			}
+			ragErr := errors.ErrRetrieval(err).
+				WithContext("question", question).
+				WithContext("max_hops", fmt.Sprintf("%d", maxHops))
 			if q.logger != nil {
-				q.logger.Error(ctx, "Failed to perform multi-hop RAG", err, map[string]interface{}{"question": question})
+				q.logger.Error(ctx, "Failed to perform multi-hop RAG", ragErr, map[string]interface{}{"question": question})
 			}
 			if q.tracer != nil {
 				if span, ok := q.tracer.Extract(ctx); ok {
-					span.SetError(err)
+					span.SetError(ragErr)
 				}
 			}
 			status = "error"
-			return nil, fmt.Errorf("failed to perform multi-hop RAG: %w", err)
+			return nil, ragErr
 		}
 
 		// Convert to QueryHandler Response
@@ -359,16 +372,19 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 			if q.metrics != nil {
 				q.metrics.RecordErrorCount(ctx, "agentic_rag")
 			}
+			ragErr := errors.ErrRetrieval(err).
+				WithContext("question", question).
+				WithContext("agent_instructions", opts.AgentInstructions)
 			if q.logger != nil {
-				q.logger.Error(ctx, "Failed to perform agentic RAG", err, map[string]interface{}{"question": question})
+				q.logger.Error(ctx, "Failed to perform agentic RAG", ragErr, map[string]interface{}{"question": question})
 			}
 			if q.tracer != nil {
 				if span, ok := q.tracer.Extract(ctx); ok {
-					span.SetError(err)
+					span.SetError(ragErr)
 				}
 			}
 			status = "error"
-			return nil, fmt.Errorf("failed to perform agentic RAG: %w", err)
+			return nil, ragErr
 		}
 
 		// Convert to QueryHandler Response
@@ -467,20 +483,23 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "embedding")
 		}
+		embErr := errors.ErrEmbedding("embedder", err).
+			WithContext("question", question)
 		if q.logger != nil {
-			q.logger.Error(ctx, "Failed to embed query", err, map[string]interface{}{"question": question})
+			q.logger.Error(ctx, "Failed to embed query", embErr, map[string]interface{}{"question": question})
 		}
 		if q.tracer != nil {
 			if span, ok := q.tracer.Extract(ctx); ok {
-				span.SetError(err)
+				span.SetError(embErr)
 			}
 		}
 		status = "error"
-		return nil, fmt.Errorf("failed to embed query: %w", err)
+		return nil, embErr
 	}
 
 	if len(queryEmbeddings) == 0 {
-		err := fmt.Errorf("failed to generate query embedding")
+		err := errors.ErrEmbedding("embedder", fmt.Errorf("no embeddings generated")).
+			WithContext("question", question)
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "embedding")
 		}
@@ -507,14 +526,14 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		} else {
 			// Fall back to vector search
 			searchOpts := vectorstore.SearchOptions{
-				TopK: topK * 2, // Get more results for reranking
+				TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 			}
 			results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 		}
 	case "vector":
 		// Use vector search
 		searchOpts := vectorstore.SearchOptions{
-			TopK: topK * 2, // Get more results for reranking
+			TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 		}
 		results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 	case "hybrid":
@@ -526,7 +545,7 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		} else {
 			// Use default vector search
 			searchOpts := vectorstore.SearchOptions{
-				TopK: topK * 2, // Get more results for reranking
+				TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 			}
 			results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 		}
@@ -536,16 +555,19 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "search")
 		}
+		searchErr := errors.ErrRetrieval(err).
+			WithContext("question", question).
+			WithContext("route_type", routeResult.Type)
 		if q.logger != nil {
-			q.logger.Error(ctx, "Failed to search", err, map[string]interface{}{"question": question, "route_type": routeResult.Type})
+			q.logger.Error(ctx, "Failed to search", searchErr, map[string]interface{}{"question": question, "route_type": routeResult.Type})
 		}
 		if q.tracer != nil {
 			if span, ok := q.tracer.Extract(ctx); ok {
-				span.SetError(err)
+				span.SetError(searchErr)
 			}
 		}
 		status = "error"
-		return nil, fmt.Errorf("failed to search: %w", err)
+		return nil, searchErr
 	}
 
 	// Use reranker if available
@@ -556,16 +578,19 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 			if q.metrics != nil {
 				q.metrics.RecordErrorCount(ctx, "reranking")
 			}
+			rerankErr := errors.ErrRetrieval(err).
+				WithContext("question", question).
+				WithContext("results_count", fmt.Sprintf("%d", len(results)))
 			if q.logger != nil {
-				q.logger.Error(ctx, "Failed to rerank", err, map[string]interface{}{"question": question})
+				q.logger.Error(ctx, "Failed to rerank", rerankErr, map[string]interface{}{"question": question})
 			}
 			if q.tracer != nil {
 				if span, ok := q.tracer.Extract(ctx); ok {
-					span.SetError(err)
+					span.SetError(rerankErr)
 				}
 			}
 			status = "error"
-			return nil, fmt.Errorf("failed to rerank: %w", err)
+			return nil, rerankErr
 		}
 		if q.logger != nil {
 			q.logger.Debug(ctx, "Reranking completed", map[string]interface{}{
@@ -639,16 +664,19 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "llm_completion")
 		}
+		llmErr := errors.ErrLLM("llm", err).
+			WithContext("question", question).
+			WithContext("prompt_length", fmt.Sprintf("%d", len(prompt)))
 		if q.logger != nil {
-			q.logger.Error(ctx, "Failed to generate answer", err, map[string]interface{}{"question": question})
+			q.logger.Error(ctx, "Failed to generate answer", llmErr, map[string]interface{}{"question": question})
 		}
 		if q.tracer != nil {
 			if span, ok := q.tracer.Extract(ctx); ok {
-				span.SetError(err)
+				span.SetError(llmErr)
 			}
 		}
 		status = "error"
-		return nil, fmt.Errorf("failed to generate answer: %w", err)
+		return nil, llmErr
 	}
 	if q.logger != nil {
 		q.logger.Debug(ctx, "LLM completion completed", map[string]interface{}{
@@ -692,12 +720,12 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 // QueryStream performs a streaming RAG query
 func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts QueryOptions) (<-chan StreamResponse, error) {
 	if question == "" {
-		return nil, fmt.Errorf("question is required")
+		return nil, errors.ErrInvalidInput("question is required")
 	}
 
 	// Check if advanced RAG patterns are requested
 	if opts.UseMultiHopRAG || opts.UseAgenticRAG {
-		return nil, fmt.Errorf("streaming is not supported for advanced RAG patterns (multi-hop or agentic RAG)")
+		return nil, errors.ErrInvalidInput("streaming is not supported for advanced RAG patterns (multi-hop or agentic RAG)")
 	}
 
 	// Determine routing for the query
@@ -749,11 +777,13 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 
 	queryEmbeddings, err := q.embedder.Embed(ctx, []string{queryToEmbed})
 	if err != nil {
-		return nil, fmt.Errorf("failed to embed query: %w", err)
+		return nil, errors.ErrEmbedding("embedder", err).
+			WithContext("question", question)
 	}
 
 	if len(queryEmbeddings) == 0 {
-		return nil, fmt.Errorf("failed to generate query embedding")
+		return nil, errors.ErrEmbedding("embedder", fmt.Errorf("no embeddings generated")).
+			WithContext("question", question)
 	}
 
 	var results []core.Result
@@ -767,14 +797,14 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 		} else {
 			// Fall back to vector search
 			searchOpts := vectorstore.SearchOptions{
-				TopK: topK * 2, // Get more results for reranking
+				TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 			}
 			results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 		}
 	case "vector":
 		// Use vector search
 		searchOpts := vectorstore.SearchOptions{
-			TopK: topK * 2, // Get more results for reranking
+			TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 		}
 		results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 	case "hybrid":
@@ -786,21 +816,24 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 		} else {
 			// Use default vector search
 			searchOpts := vectorstore.SearchOptions{
-				TopK: topK * 2, // Get more results for reranking
+				TopK: topK * opts.rerankMultiplier(), // Get more results for reranking
 			}
 			results, err = q.store.Search(ctx, queryEmbeddings[0], searchOpts)
 		}
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to search: %w", err)
+		return nil, errors.ErrRetrieval(err).
+			WithContext("question", question).
+			WithContext("route_type", routeResult.Type)
 	}
 
 	// Use reranker if available
 	if q.reranker != nil && len(results) > 0 {
 		results, err = q.reranker.Rerank(ctx, question, results)
 		if err != nil {
-			return nil, fmt.Errorf("failed to rerank: %w", err)
+			return nil, errors.ErrRetrieval(err).
+				WithContext("question", question)
 		}
 	}
 
@@ -830,7 +863,9 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 	// Get streaming response from LLM
 	llmCh, err := q.llm.CompleteStream(ctx, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start streaming: %w", err)
+		return nil, errors.ErrLLM("llm", err).
+			WithContext("question", question).
+			WithContext("prompt_length", fmt.Sprintf("%d", len(prompt)))
 	}
 
 	// Create response channel
@@ -890,7 +925,9 @@ func (q *QueryHandler) BatchQuery(ctx context.Context, questions []string, opts 
 	for i, question := range questions {
 		response, err := q.Query(ctx, question, opts)
 		if err != nil {
-			return nil, fmt.Errorf("failed to query: %w", err)
+			return nil, errors.Wrap(err, errors.ErrorTypeRetrieval, "failed to query in batch").
+				WithContext("question_index", fmt.Sprintf("%d", i)).
+				WithContext("question", question)
 		}
 		responses[i] = response
 	}

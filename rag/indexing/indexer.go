@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/errors"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -18,6 +19,25 @@ import (
 
 // Source represents a document source for indexing
 type Source = core.Source
+
+// IndexerConfig holds configurable parameters for the Indexer
+type IndexerConfig struct {
+	// WorkerCount is the number of concurrent workers for directory indexing (default: 10)
+	WorkerCount int
+	// FileChannelBuffer is the buffer size for the file channel in directory indexing (default: 100)
+	FileChannelBuffer int
+	// ErrorChannelBuffer is the buffer size for the error channel in directory indexing (default: 10)
+	ErrorChannelBuffer int
+}
+
+// DefaultIndexerConfig returns the default indexer configuration
+func DefaultIndexerConfig() IndexerConfig {
+	return IndexerConfig{
+		WorkerCount:        10,
+		FileChannelBuffer:  100,
+		ErrorChannelBuffer: 10,
+	}
+}
 
 // Indexer handles document indexing operations
 type Indexer struct {
@@ -28,6 +48,7 @@ type Indexer struct {
 	metrics       Metrics
 	logger        Logger
 	tracer        Tracer
+	config        IndexerConfig
 }
 
 // Embedder defines the interface for embedding providers
@@ -73,7 +94,22 @@ func NewIndexer(
 		metrics:       metrics,
 		logger:        logger,
 		tracer:        tracer,
+		config:        DefaultIndexerConfig(),
 	}
+}
+
+// WithConfig sets the indexer configuration
+func (i *Indexer) WithConfig(config IndexerConfig) *Indexer {
+	if config.WorkerCount > 0 {
+		i.config.WorkerCount = config.WorkerCount
+	}
+	if config.FileChannelBuffer > 0 {
+		i.config.FileChannelBuffer = config.FileChannelBuffer
+	}
+	if config.ErrorChannelBuffer > 0 {
+		i.config.ErrorChannelBuffer = config.ErrorChannelBuffer
+	}
+	return i
 }
 
 // Index adds documents to the RAG engine
@@ -94,7 +130,7 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 	}
 
 	if source.Type == "" {
-		err := fmt.Errorf("type is required")
+		err := errors.ErrInvalidInput("source type is required")
 		if i.metrics != nil {
 			i.metrics.RecordErrorCount(ctx, "invalid_input")
 		}
@@ -111,7 +147,7 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 	}
 
 	if source.Content == "" && source.Path == "" {
-		err := fmt.Errorf("content or path is required")
+		err := errors.ErrInvalidInput("content or path is required")
 		if i.metrics != nil {
 			i.metrics.RecordErrorCount(ctx, "invalid_input")
 		}
@@ -134,7 +170,7 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 		if r, ok := source.Reader.(io.Reader); ok {
 			reader = r
 		} else {
-			err := fmt.Errorf("invalid reader type")
+			err := errors.ErrInvalidInput("reader must implement io.Reader interface")
 			if i.metrics != nil {
 				i.metrics.RecordErrorCount(ctx, "invalid_input")
 			}
@@ -210,7 +246,7 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
-		return fmt.Errorf("failed to parse document: %w", err)
+		return errors.ErrParsing(source.Type, err)
 	}
 	if i.logger != nil {
 		i.logger.Debug(ctx, "Document parsed", map[string]interface{}{
@@ -256,7 +292,8 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
-		return fmt.Errorf("failed to embed chunks: %w", err)
+		return errors.ErrEmbedding("embedder", err).
+			WithContext("chunks_count", fmt.Sprintf("%d", len(chunks)))
 	}
 	if i.logger != nil {
 		i.logger.Debug(ctx, "Chunks embedded", map[string]interface{}{
@@ -281,7 +318,8 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
-		return fmt.Errorf("failed to store chunks: %w", err)
+		return errors.ErrStorage("add chunks", err).
+			WithContext("chunks_count", fmt.Sprintf("%d", len(chunks)))
 	}
 	if i.logger != nil {
 		i.logger.Debug(ctx, "Chunks stored", map[string]interface{}{
@@ -353,13 +391,13 @@ func (i *Indexer) AsyncBatchIndex(ctx context.Context, sources []Source) error {
 func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) error {
 	// Create a wait group for concurrency
 	var wg sync.WaitGroup
-	// Create a channel to receive files (buffered for 100 files)
-	fileChan := make(chan string, 100)
-	// Create a channel to receive errors (buffered for 10 errors)
-	errChan := make(chan error, 10)
+	// Create a channel to receive files
+	fileChan := make(chan string, i.config.FileChannelBuffer)
+	// Create a channel to receive errors
+	errChan := make(chan error, i.config.ErrorChannelBuffer)
 
-	// Start 10 worker goroutines
-	workerCount := 10 // Optimal balance for most systems
+	// Start worker goroutines
+	workerCount := i.config.WorkerCount
 	for workerID := 0; workerID < workerCount; workerID++ {
 		wg.Add(1)
 		go func() {
@@ -413,14 +451,18 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 	}()
 
 	// Collect all errors
-	var errors []error
+	var indexErrors []error
 	for err := range errChan {
-		errors = append(errors, err)
+		indexErrors = append(indexErrors, err)
 	}
 
 	// Return aggregated errors if any
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to index some files: %v", errors)
+	if len(indexErrors) > 0 {
+		return errors.NewError(errors.ErrorTypeStorage, fmt.Sprintf("failed to index %d files in directory %s", len(indexErrors), directoryPath)).
+			WithContext("failed_count", fmt.Sprintf("%d", len(indexErrors))).
+			WithContext("directory", directoryPath).
+			WithSuggestion("Check the individual file errors for details").
+			WithSuggestion("Ensure all files are in supported formats")
 	}
 
 	return nil
@@ -430,8 +472,11 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 func (i *Indexer) AsyncIndexDirectory(ctx context.Context, directoryPath string) error {
 	go func() {
 		if err := i.IndexDirectory(ctx, directoryPath); err != nil {
-			// Log error (in a real implementation, you would use a logger)
-			fmt.Printf("Error indexing directory: %v\n", err)
+			if i.logger != nil {
+				i.logger.Error(ctx, "Async directory indexing failed", err, map[string]interface{}{
+					"directory": directoryPath,
+				})
+			}
 		}
 	}()
 

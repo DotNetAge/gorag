@@ -226,8 +226,14 @@ func (a *AgenticRAG) analyzeTask(ctx context.Context, state *AgentState) (action
 		return "finish", "", "Error analyzing task"
 	}
 
-	// Parse response
-	return a.parseTaskAnalysis(response)
+	// Parse response using structured parser
+	decision, err := ParseAgentDecision(response)
+	if err != nil {
+		// Fallback to finish if parsing fails
+		return "finish", "", fmt.Sprintf("Failed to parse decision: %v", err)
+	}
+
+	return decision.Action, decision.Query, decision.Reasoning
 }
 
 // performRetrieval performs the actual retrieval based on the generated query
@@ -245,33 +251,6 @@ func (a *AgenticRAG) performRetrieval(ctx context.Context, query string, topK in
 	return a.vectorStore.Search(ctx, embeddings[0], searchOpts)
 }
 
-// parseTaskAnalysis parses the task analysis response from LLM
-func (a *AgenticRAG) parseTaskAnalysis(response string) (action string, query string, reasoning string) {
-	// Default to finish if parsing fails
-	action = "finish"
-	reasoning = response
-
-	// Extract action and query
-	lines := strings.Split(response, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToLower(line), "action:") {
-			action = strings.TrimSpace(strings.TrimPrefix(line, "action:"))
-		} else if strings.HasPrefix(strings.ToLower(line), "query:") {
-			query = strings.TrimSpace(strings.TrimPrefix(line, "query:"))
-		} else if strings.HasPrefix(strings.ToLower(line), "reasoning:") {
-			reasoning = strings.TrimSpace(strings.TrimPrefix(line, "reasoning:"))
-		}
-	}
-
-	// Normalize action
-	action = strings.ToLower(action)
-	if action != "retrieve" && action != "finish" {
-		action = "finish"
-	}
-
-	return action, query, reasoning
-}
 
 // deduplicateAndSort deduplicates and sorts results by score
 func (a *AgenticRAG) deduplicateAndSort(results []core.Result, topK int) []core.Result {
@@ -323,10 +302,28 @@ Options:
 1. retrieve - Generate a search query to get more information
 2. finish - You have enough information to complete the task
 
-Respond with:
-action: [retrieve|finish]
-query: [search query if retrieve]
-reasoning: [your reasoning for this decision]`
+IMPORTANT: Respond in JSON format with the following structure:
+{
+  "action": "retrieve" or "finish",
+  "query": "your search query (required if action is retrieve)",
+  "reasoning": "your reasoning for this decision",
+  "confidence": 0.0-1.0 (your confidence in this decision)
+}
+
+Example responses:
+{
+  "action": "retrieve",
+  "query": "AI trends 2024",
+  "reasoning": "Need more specific information about recent AI developments",
+  "confidence": 0.85
+}
+
+{
+  "action": "finish",
+  "query": "",
+  "reasoning": "Have sufficient information to answer the question comprehensively",
+  "confidence": 0.95
+}`
 
 	defaultReflectPrompt = `You are an AI assistant reflecting on the retrieval process.
 
@@ -340,5 +337,12 @@ Previous reasoning:
 
 Please reflect on whether you have enough information to complete the task. If not, identify what specific information is missing and what search query would help retrieve it.
 
-Respond with your reflection and any recommended next steps.`
+IMPORTANT: Respond in JSON format with the following structure:
+{
+  "has_enough_info": true or false,
+  "missing_info": ["list", "of", "missing", "information"],
+  "recommended_query": "suggested search query if has_enough_info is false",
+  "recommended_action": "what to do next",
+  "confidence": 0.0-1.0
+}`
 )
