@@ -31,6 +31,9 @@ func (h *HyDE) WithPromptTemplate(template string) *HyDE {
 
 // EnhanceQuery enhances the query using HyDE
 func (h *HyDE) EnhanceQuery(ctx context.Context, query string) (string, error) {
+	if h == nil {
+		return query, nil // Fallback to original query
+	}
 	// Generate hypothetical document
 	hypotheticalDoc, err := h.generateHypotheticalDocument(ctx, query)
 	if err != nil {

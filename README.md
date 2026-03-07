@@ -35,6 +35,8 @@
 - **⚡⚡ Concurrent File Processing** - **10 concurrent workers** for blazing-fast directory indexing
 - **📁 Large File Support** - **Streaming parsers** handle 100M+ files without memory issues
 - **🔄 Async Directory Indexing** - Background processing for large document collections
+- **🔍 Multi-hop RAG** - Handle complex questions requiring information from multiple documents
+- **🤖 Agentic RAG** - Autonomous retrieval with intelligent decision-making
 
 ## 🏆 Why GoRAG? - Competitive Advantages
 
@@ -56,6 +58,8 @@
 | **Production Ready**                        | ✅               | ❌         | ❌          | ❌        |
 | **Type Safety**                             | ✅               | ❌         | ❌          | ❌        |
 | **Cloud Native**                            | ✅               | ❌         | ❌          | ❌        |
+| **Multi-hop RAG**                           | ✅               | ⚠️ Limited | ⚠️ Limited  | ❌        |
+| **Agentic RAG**                             | ✅               | ❌         | ❌          | ❌        |
 
 ### 🚀 Performance & Scalability Comparison
 
@@ -325,6 +329,134 @@ func main() {
 - ✅ **Streaming large files** - Handles 100M+ files without memory issues
 - ✅ **Error aggregation** - Collects all errors and returns them at once
 - ✅ **Context cancellation** - Respects context cancellation for graceful shutdown
+
+### 🔍 Advanced RAG Patterns
+
+#### Multi-hop RAG for Complex Questions
+
+Use multi-hop RAG to handle complex questions that require information from multiple documents:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+)
+
+func main() {
+    ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
+    
+    // Create RAG engine
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
+    engine, err := rag.New(
+        rag.WithVectorStore(memory.NewStore()),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Index documents about different companies
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "Apple is investing heavily in AI research and development. They have launched several AI features in iOS 18 including Apple Intelligence.",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "Microsoft has made significant AI investments through OpenAI and has integrated AI features across its product lineup including Office 365 and Azure.",
+    })
+    
+    // Use multi-hop RAG for complex comparison question
+    resp, err := engine.Query(ctx, "Compare Apple and Microsoft's AI investments", rag.QueryOptions{
+        UseMultiHopRAG: true,
+        MaxHops: 3, // Maximum number of retrieval hops
+    })
+    
+    log.Println("Answer:", resp.Answer)
+    log.Println("Sources:", len(resp.Sources), "documents used")
+}
+```
+
+#### Agentic RAG for Autonomous Retrieval
+
+Use agentic RAG for autonomous retrieval with intelligent decision-making:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+)
+
+func main() {
+    ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
+    
+    // Create RAG engine
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
+    engine, err := rag.New(
+        rag.WithVectorStore(memory.NewStore()),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Index various documents about AI trends
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "AI trends in 2024 include generative AI, multimodal models, and AI ethics.",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "Generative AI is being applied across industries including healthcare, finance, and education.",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "Multimodal AI models can process text, images, and audio simultaneously.",
+    })
+    
+    // Use agentic RAG for comprehensive research task
+    resp, err := engine.Query(ctx, "Write a report on AI trends in 2024", rag.QueryOptions{
+        UseAgenticRAG: true,
+        AgentInstructions: "Please generate a comprehensive report on AI trends in 2024, including key technologies, applications, and future outlook.",
+    })
+    
+    log.Println("Report:", resp.Answer)
+    log.Println("Sources:", len(resp.Sources), "documents used")
+}
+```
+
+**Key Benefits of Advanced RAG:**
+- ✅ **Multi-hop RAG** - Breaks down complex questions into multiple retrieval steps
+- ✅ **Agentic RAG** - Autonomously decides what information to retrieve and when
+- ✅ **Intelligent decision-making** - Evaluates retrieval results and refines queries
+- ✅ **Comprehensive answers** - Aggregates information from multiple sources
+- ✅ **Context-aware** - Adapts retrieval strategy based on task requirements
 
 ## Installation
 

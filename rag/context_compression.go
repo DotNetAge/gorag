@@ -47,7 +47,7 @@ func (c *ContextCompressor) WithSummaryPrompt(prompt string) *ContextCompressor 
 
 // Compress compresses and optimizes context
 func (c *ContextCompressor) Compress(ctx context.Context, query string, results []vectorstore.Result) ([]vectorstore.Result, error) {
-	if len(results) == 0 {
+	if c == nil || len(results) == 0 {
 		return results, nil
 	}
 

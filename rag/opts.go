@@ -1,0 +1,143 @@
+package rag
+
+import (
+	"github.com/DotNetAge/gorag/embedding"
+	"github.com/DotNetAge/gorag/llm"
+	"github.com/DotNetAge/gorag/observability"
+	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/rag/retrieval"
+	"github.com/DotNetAge/gorag/vectorstore"
+)
+
+// QueryOptions configures query behavior
+type QueryOptions struct {
+	TopK              int
+	PromptTemplate    string
+	Stream            bool
+	UseMultiHopRAG    bool   // Use multi-hop RAG for complex questions
+	UseAgenticRAG     bool   // Use agentic RAG with autonomous retrieval
+	MaxHops           int    // Maximum number of hops for multi-hop RAG
+	AgentInstructions string // Instructions for agentic RAG
+}
+
+// Option configures the Engine
+type Option func(*Engine)
+
+// WithParser sets the default document parser
+func WithParser(p parser.Parser) Option {
+	return func(e *Engine) {
+		e.defaultParser = p
+	}
+}
+
+// WithParsers sets multiple parsers for different formats
+func WithParsers(parsers map[string]parser.Parser) Option {
+	return func(e *Engine) {
+		e.parsers = parsers
+	}
+}
+
+// WithVectorStore sets the vector store
+func WithVectorStore(s vectorstore.Store) Option {
+	return func(e *Engine) {
+		e.store = s
+	}
+}
+
+// WithEmbedder sets the embedding provider
+func WithEmbedder(e embedding.Provider) Option {
+	return func(engine *Engine) {
+		engine.embedder = e
+	}
+}
+
+// WithLLM sets the LLM client
+func WithLLM(l llm.Client) Option {
+	return func(e *Engine) {
+		e.llm = l
+	}
+}
+
+// WithRetriever sets the hybrid retriever
+func WithRetriever(r *retrieval.HybridRetriever) Option {
+	return func(e *Engine) {
+		e.retriever = r
+	}
+}
+
+// WithReranker sets the reranker
+func WithReranker(r *retrieval.Reranker) Option {
+	return func(e *Engine) {
+		e.reranker = r
+	}
+}
+
+// WithCache sets the query cache
+func WithCache(c Cache) Option {
+	return func(e *Engine) {
+		e.cache = c
+	}
+}
+
+// WithRouter sets the query router
+func WithRouter(r Router) Option {
+	return func(e *Engine) {
+		e.router = r
+	}
+}
+
+// WithMetrics sets the metrics collector
+func WithMetrics(m observability.Metrics) Option {
+	return func(e *Engine) {
+		e.metrics = m
+	}
+}
+
+// WithLogger sets the logger
+func WithLogger(l observability.Logger) Option {
+	return func(e *Engine) {
+		e.logger = l
+	}
+}
+
+// WithTracer sets the tracer
+func WithTracer(t observability.Tracer) Option {
+	return func(e *Engine) {
+		e.tracer = t
+	}
+}
+
+// WithHyDE sets the HyDE instance for query enhancement
+func WithHyDE(h *HyDE) Option {
+	return func(e *Engine) {
+		e.hydration = h
+	}
+}
+
+// WithContextCompressor sets the context compressor for optimizing context
+func WithContextCompressor(c *ContextCompressor) Option {
+	return func(e *Engine) {
+		e.compressor = c
+	}
+}
+
+// WithConversationManager sets the conversation manager
+func WithConversationManager(cm *ConversationManager) Option {
+	return func(e *Engine) {
+		e.conversationManager = cm
+	}
+}
+
+// WithMultiHopRAG sets the multi-hop RAG component
+func WithMultiHopRAG(multiHop *retrieval.MultiHopRAG) Option {
+	return func(e *Engine) {
+		e.multiHopRAG = multiHop
+	}
+}
+
+// WithAgenticRAG sets the agentic RAG component
+func WithAgenticRAG(agentic *retrieval.AgenticRAG) Option {
+	return func(e *Engine) {
+		e.agenticRAG = agentic
+	}
+}

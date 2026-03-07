@@ -35,6 +35,8 @@
 - **⚡⚡ 并发文件处理** - **10个并发工作线程**，极速目录索引
 - **📁 大文件支持** - **流式解析器**，轻松处理100M+文件无内存压力
 - **🔄 异步目录索引** - 后台处理大型文档集合
+- **🔍 多跳RAG** - 处理需要从多个文档获取信息的复杂问题
+- **🤖 智能体RAG** - 具有自主决策能力的智能检索
 
 ## 🏆 为什么选择 GoRAG？ - 竞争优势
 
@@ -56,6 +58,8 @@
 | **生产就绪**             | ✅              | ❌         | ❌          | ❌        |
 | **类型安全**             | ✅              | ❌         | ❌          | ❌        |
 | **云原生**               | ✅              | ❌         | ❌          | ❌        |
+| **多跳RAG**             | ✅              | ⚠️ 有限支持   | ⚠️ 有限支持   | ❌        |
+| **智能体RAG**           | ✅              | ❌         | ❌          | ❌        |
 
 ### 🚀 性能与可扩展性比较
 
@@ -325,6 +329,134 @@ func main() {
 - ✅ **流式大文件** - 处理100M+文件无内存问题
 - ✅ **错误聚合** - 收集所有错误并统一返回
 - ✅ **上下文取消** - 尊重上下文取消，实现优雅关闭
+
+### 🔍 高级RAG模式
+
+#### 多跳RAG处理复杂问题
+
+使用多跳RAG处理需要从多个文档获取信息的复杂问题：
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+)
+
+func main() {
+    ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
+    
+    // 创建 RAG 引擎
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
+    engine, err := rag.New(
+        rag.WithVectorStore(memory.NewStore()),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 索引关于不同公司的文档
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "苹果公司正在大力投资AI研究和开发。他们在iOS 18中推出了包括Apple Intelligence在内的多项AI功能。",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "微软通过OpenAI进行了重大AI投资，并在其产品阵容中集成了AI功能，包括Office 365和Azure。",
+    })
+    
+    // 使用多跳RAG处理复杂比较问题
+    resp, err := engine.Query(ctx, "比较苹果和微软的AI投资", rag.QueryOptions{
+        UseMultiHopRAG: true,
+        MaxHops: 3, // 最大检索跳数
+    })
+    
+    log.Println("答案:", resp.Answer)
+    log.Println("来源:", len(resp.Sources), "个文档被使用")
+}
+```
+
+#### 智能体RAG实现自主检索
+
+使用智能体RAG实现具有自主决策能力的智能检索：
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+)
+
+func main() {
+    ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
+    
+    // 创建 RAG 引擎
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
+    engine, err := rag.New(
+        rag.WithVectorStore(memory.NewStore()),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 索引关于AI趋势的各种文档
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "2024年的AI趋势包括生成式AI、多模态模型和AI伦理。",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "生成式AI正在医疗、金融和教育等行业得到应用。",
+    })
+    
+    err = engine.Index(ctx, rag.Source{
+        Type: "text",
+        Content: "多模态AI模型可以同时处理文本、图像和音频。",
+    })
+    
+    // 使用智能体RAG进行综合研究任务
+    resp, err := engine.Query(ctx, "撰写一份关于2024年AI趋势的报告", rag.QueryOptions{
+        UseAgenticRAG: true,
+        AgentInstructions: "请生成一份关于2024年AI趋势的综合报告，包括关键技术、应用和未来展望。",
+    })
+    
+    log.Println("报告:", resp.Answer)
+    log.Println("来源:", len(resp.Sources), "个文档被使用")
+}
+```
+
+**高级RAG的核心优势：**
+- ✅ **多跳RAG** - 将复杂问题分解为多个检索步骤
+- ✅ **智能体RAG** - 自主决定检索什么信息以及何时检索
+- ✅ **智能决策** - 评估检索结果并优化查询
+- ✅ **全面回答** - 汇总来自多个来源的信息
+- ✅ **上下文感知** - 根据任务需求调整检索策略
 
 ## 安装
 
