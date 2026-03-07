@@ -4,28 +4,29 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockKeywordStore struct {
-	results []vectorstore.Result
+	results []core.Result
 }
 
-func (m *mockKeywordStore) Search(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
+func (m *mockKeywordStore) Search(ctx context.Context, query string, topK int) ([]core.Result, error) {
 	return m.results, nil
 }
 
 type mockVectorStore struct {
-	results []vectorstore.Result
+	results []core.Result
 }
 
-func (m *mockVectorStore) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (m *mockVectorStore) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	return nil
 }
 
-func (m *mockVectorStore) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (m *mockVectorStore) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	return m.results, nil
 }
 
@@ -33,25 +34,25 @@ func (m *mockVectorStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (m *mockVectorStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
+func (m *mockVectorStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
 	return m.results, nil
 }
 
-func (m *mockVectorStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
+func (m *mockVectorStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
 	return m.results, nil
 }
 
 func TestHybridRetriever_Search(t *testing.T) {
-	vectorResults := []vectorstore.Result{
+	vectorResults := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "vec1",
 				Content: "Vector result 1",
 			},
 			Score: 0.9,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "vec2",
 				Content: "Vector result 2",
 			},
@@ -59,16 +60,16 @@ func TestHybridRetriever_Search(t *testing.T) {
 		},
 	}
 
-	keywordResults := []vectorstore.Result{
+	keywordResults := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "key1",
 				Content: "Keyword result 1",
 			},
 			Score: 0.7,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "vec1", // Same as vector result
 				Content: "Vector result 1",
 			},
@@ -117,9 +118,9 @@ func TestHybridRetriever_Search(t *testing.T) {
 }
 
 func TestHybridRetriever_CombineResults(t *testing.T) {
-	vectorResults := []vectorstore.Result{
+	vectorResults := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "Document 1",
 			},
@@ -127,16 +128,16 @@ func TestHybridRetriever_CombineResults(t *testing.T) {
 		},
 	}
 
-	keywordResults := []vectorstore.Result{
+	keywordResults := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "Document 1",
 			},
 			Score: 0.7,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc2",
 				Content: "Document 2",
 			},

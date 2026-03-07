@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gorag/core"
 	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
-	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,23 +21,23 @@ func TestContextCompressor_Compress(t *testing.T) {
 	compressor := NewContextCompressor(llmClient)
 
 	// Create test results
-	results := []vectorstore.Result{
+	results := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "1",
 				Content: "Go is a programming language designed for simplicity and efficiency. It is statically typed and compiled.",
 			},
 			Score: 0.9,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "2",
 				Content: "Go has garbage collection and concurrency support. It is widely used for backend development.",
 			},
 			Score: 0.85,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "3",
 				Content: "Python is a high-level programming language known for its readability.",
 			},
@@ -70,16 +70,16 @@ func TestContextCompressor_RemoveRedundancy(t *testing.T) {
 	compressor := NewContextCompressor(llmClient).WithSimilarityThreshold(0.7)
 
 	// Create test results with redundancy
-	results := []vectorstore.Result{
+	results := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "1",
 				Content: "Go is a programming language designed for simplicity and efficiency.",
 			},
 			Score: 0.9,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "2",
 				Content: "Go is a programming language designed for simplicity and efficiency. It is statically typed.",
 			},
@@ -95,7 +95,7 @@ func TestContextCompressor_RemoveRedundancy(t *testing.T) {
 	// Verify redundancy removal
 	assert.LessOrEqual(t, len(compressed), len(results))
 	t.Logf("Original results: %d, Compressed results: %d", len(results), len(compressed))
-	
+
 	// If redundancy was not removed, log the similarity score for debugging
 	if len(compressed) == len(results) {
 		similarity := compressor.calculateSimilarity(

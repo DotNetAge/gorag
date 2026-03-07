@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
@@ -16,7 +17,7 @@ type HybridRetriever struct {
 
 // KeywordStore defines the interface for keyword search
 type KeywordStore interface {
-	Search(ctx context.Context, query string, topK int) ([]vectorstore.Result, error)
+	Search(ctx context.Context, query string, topK int) ([]core.Result, error)
 }
 
 // NewHybridRetriever creates a new hybrid retriever
@@ -35,7 +36,7 @@ func NewHybridRetriever(vectorStore vectorstore.Store, keywordStore KeywordStore
 }
 
 // Search performs hybrid search
-func (r *HybridRetriever) Search(ctx context.Context, query string, embedding []float32, topK int) ([]vectorstore.Result, error) {
+func (r *HybridRetriever) Search(ctx context.Context, query string, embedding []float32, topK int) ([]core.Result, error) {
 	// Perform vector search
 	vectorResults, err := r.vectorStore.Search(ctx, embedding, vectorstore.SearchOptions{
 		TopK: topK * 2, // Get more results for reranking
@@ -55,15 +56,15 @@ func (r *HybridRetriever) Search(ctx context.Context, query string, embedding []
 }
 
 // KeywordSearch performs keyword-only search
-func (r *HybridRetriever) KeywordSearch(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
+func (r *HybridRetriever) KeywordSearch(ctx context.Context, query string, topK int) ([]core.Result, error) {
 	// Perform keyword search only
 	return r.keywordStore.Search(ctx, query, topK)
 }
 
 // combineResults combines vector and keyword search results
-func (r *HybridRetriever) combineResults(vectorResults, keywordResults []vectorstore.Result, topK int) []vectorstore.Result {
+func (r *HybridRetriever) combineResults(vectorResults, keywordResults []core.Result, topK int) []core.Result {
 	// Create a map to store combined results
-	resultMap := make(map[string]vectorstore.Result)
+	resultMap := make(map[string]core.Result)
 
 	// Add vector results with weight
 	for _, result := range vectorResults {
@@ -84,7 +85,7 @@ func (r *HybridRetriever) combineResults(vectorResults, keywordResults []vectors
 	}
 
 	// Convert map to slice
-	var combinedResults []vectorstore.Result
+	var combinedResults []core.Result
 	for _, result := range resultMap {
 		combinedResults = append(combinedResults, result)
 	}

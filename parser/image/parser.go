@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 )
 
@@ -20,9 +20,9 @@ func New() *Parser {
 }
 
 // Parse parses an image file and returns chunks with media data
-func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	var chunks []parser.Chunk
-	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
+	var chunks []core.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk core.Chunk) error {
 		chunks = append(chunks, chunk)
 		return nil
 	})
@@ -30,7 +30,7 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 }
 
 // ParseWithCallback parses image and calls the callback for each chunk
-func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(core.Chunk) error) error {
 	// Read the entire image data
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -48,7 +48,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 	}
 
 	// Create a single chunk for the entire image
-	chunk := parser.Chunk{
+	chunk := core.Chunk{
 		ID:      uuid.New().String(),
 		Content: "[Image content]", // Placeholder for text representation
 		Metadata: map[string]string{

@@ -3,6 +3,7 @@ package qdrant
 import (
 	"context"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/qdrant/go-client/qdrant"
 )
@@ -76,7 +77,7 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 	return store, nil
 }
 
-func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	if len(chunks) == 0 || len(embeddings) == 0 || len(chunks) != len(embeddings) {
 		return nil
 	}
@@ -106,7 +107,7 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 	return err
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	topK := opts.TopK
 	if topK <= 0 {
 		topK = 5
@@ -132,7 +133,7 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 		return nil, err
 	}
 
-	var vectorResults []vectorstore.Result
+	var vectorResults []core.Result
 	for _, hit := range response {
 		var content string
 		if hit.Payload != nil {
@@ -159,8 +160,8 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 			id = hit.Id.GetUuid()
 		}
 
-		vectorResults = append(vectorResults, vectorstore.Result{
-			Chunk: vectorstore.Chunk{
+		vectorResults = append(vectorResults, core.Result{
+			Chunk: core.Chunk{
 				ID:       id,
 				Content:  content,
 				Metadata: metadata,

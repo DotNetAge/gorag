@@ -12,22 +12,22 @@ func TestChunk(t *testing.T) {
 	chunk := Chunk{
 		ID:      "1",
 		Content: "Test content",
-		Metadata: Metadata{
-			Source:    "test.txt",
-			Page:      1,
-			Position:  0,
-			Type:      "text",
-			CreatedAt: time.Now(),
+		Metadata: map[string]string{
+			"Source":    "test.txt",
+			"Page":      "1",
+			"Position":  "0",
+			"Type":      "text",
+			"CreatedAt": time.Now().String(),
 		},
 	}
 
 	assert.Equal(t, "1", chunk.ID)
 	assert.Equal(t, "Test content", chunk.Content)
-	assert.Equal(t, "test.txt", chunk.Metadata.Source)
-	assert.Equal(t, 1, chunk.Metadata.Page)
-	assert.Equal(t, 0, chunk.Metadata.Position)
-	assert.Equal(t, "text", chunk.Metadata.Type)
-	assert.NotZero(t, chunk.Metadata.CreatedAt)
+	assert.Equal(t, "test.txt", chunk.Metadata["Source"])
+	assert.Equal(t, "1", chunk.Metadata["Page"])
+	assert.Equal(t, "0", chunk.Metadata["Position"])
+	assert.Equal(t, "text", chunk.Metadata["Type"])
+	assert.NotEmpty(t, chunk.Metadata["CreatedAt"])
 }
 
 func TestResult(t *testing.T) {
@@ -36,12 +36,12 @@ func TestResult(t *testing.T) {
 		Chunk: Chunk{
 			ID:      "1",
 			Content: "Test content",
-			Metadata: Metadata{
-				Source:    "test.txt",
-				Page:      1,
-				Position:  0,
-				Type:      "text",
-				CreatedAt: time.Now(),
+			Metadata: map[string]string{
+				"Source":    "test.txt",
+				"Page":      "1",
+				"Position":  "0",
+				"Type":      "text",
+				"CreatedAt": time.Now().String(),
 			},
 		},
 		Score: 0.95,
@@ -49,7 +49,7 @@ func TestResult(t *testing.T) {
 
 	assert.Equal(t, "1", result.ID)
 	assert.Equal(t, "Test content", result.Content)
-	assert.Equal(t, "test.txt", result.Metadata.Source)
+	assert.Equal(t, "test.txt", result.Metadata["Source"])
 	assert.Equal(t, float32(0.95), result.Score)
 }
 
@@ -83,13 +83,13 @@ func TestSource(t *testing.T) {
 
 func TestMetadata_Defaults(t *testing.T) {
 	// Test Metadata with default values
-	metadata := Metadata{}
+	metadata := map[string]string{}
 
-	assert.Empty(t, metadata.Source)
-	assert.Zero(t, metadata.Page)
-	assert.Zero(t, metadata.Position)
-	assert.Empty(t, metadata.Type)
-	assert.Zero(t, metadata.CreatedAt)
+	assert.Empty(t, metadata["Source"])
+	assert.Empty(t, metadata["Page"])
+	assert.Empty(t, metadata["Position"])
+	assert.Empty(t, metadata["Type"])
+	assert.Empty(t, metadata["CreatedAt"])
 }
 
 func TestSearchOptions_Defaults(t *testing.T) {

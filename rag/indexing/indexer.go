@@ -10,18 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // Source represents a document source for indexing
-type Source struct {
-	Type    string      // Document type/format (e.g., "text", ".pdf", ".docx")
-	Path    string      // File path (if indexing a file)
-	Content string      // Text content (if indexing a string)
-	Reader  interface{} // Reader interface (if indexing from a reader)
-}
+type Source = core.Source
 
 // Indexer handles document indexing operations
 type Indexer struct {
@@ -232,10 +228,10 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 		return nil
 	}
 
-	vsChunks := make([]vectorstore.Chunk, len(chunks))
+	vsChunks := make([]core.Chunk, len(chunks))
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		vsChunks[i] = vectorstore.Chunk{
+		vsChunks[i] = core.Chunk{
 			ID:        chunk.ID,
 			Content:   chunk.Content,
 			Metadata:  chunk.Metadata,

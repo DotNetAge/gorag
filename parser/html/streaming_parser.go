@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 	"golang.org/x/net/html"
 )
@@ -30,7 +30,7 @@ func NewStreamingParser() *StreamingParser {
 }
 
 // Parse parses HTML into chunks using streaming processing
-func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	// Parse HTML document using streaming parser
 	tokenizer := html.NewTokenizer(r)
 
@@ -65,9 +65,9 @@ func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chun
 	text := buf.String()
 	chunks := p.splitText(text)
 
-	result := make([]parser.Chunk, len(chunks))
+	result := make([]core.Chunk, len(chunks))
 	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
+		result[i] = core.Chunk{
 			ID:      uuid.New().String(),
 			Content: chunk,
 			Metadata: map[string]string{

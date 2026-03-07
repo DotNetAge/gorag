@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/DotNetAge/gorag/vectorstore"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,11 +57,11 @@ func TestStore_Add(t *testing.T) {
 	}
 
 	// Test with empty chunks
-	err := store.Add(context.Background(), []vectorstore.Chunk{}, [][]float32{})
+	err := store.Add(context.Background(), []core.Chunk{}, [][]float32{})
 	require.NoError(t, err)
 
 	// Test with mismatched lengths
-	err = store.Add(context.Background(), []vectorstore.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
+	err = store.Add(context.Background(), []core.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
 	require.NoError(t, err)
 }
 

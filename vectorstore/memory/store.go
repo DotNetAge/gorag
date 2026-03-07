@@ -6,13 +6,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // Store implements an in-memory vector store
 type Store struct {
 	mu         sync.RWMutex
-	documents  map[string]vectorstore.Chunk
+	documents  map[string]core.Chunk
 	embeddings map[string][]float32
 	// Precomputed norms for faster similarity calculation
 	norms map[string]float32
@@ -21,14 +22,14 @@ type Store struct {
 // NewStore creates a new in-memory store
 func NewStore() *Store {
 	return &Store{
-		documents:  make(map[string]vectorstore.Chunk),
+		documents:  make(map[string]core.Chunk),
 		embeddings: make(map[string][]float32),
 		norms:      make(map[string]float32),
 	}
 }
 
 // Add adds chunks to the store
-func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -42,7 +43,7 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 }
 
 // Search performs similarity search
-func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -54,7 +55,7 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	if capacity > 1000 { // Limit capacity for large stores
 		capacity = 1000
 	}
-	results := make([]vectorstore.Result, 0, capacity)
+	results := make([]core.Result, 0, capacity)
 
 	for id, embedding := range s.embeddings {
 		// Apply metadata filter if provided
@@ -64,7 +65,7 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 
 		score := cosineSimilarity(query, embedding, queryNorm, s.norms[id])
 		if score >= opts.MinScore {
-			results = append(results, vectorstore.Result{
+			results = append(results, core.Result{
 				Chunk: s.documents[id],
 				Score: score,
 			})
@@ -75,7 +76,7 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 }
 
 // SearchStructured performs structured search with filters
-func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
+func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -87,7 +88,7 @@ func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.Structu
 	if capacity > 1000 { // Limit capacity for large stores
 		capacity = 1000
 	}
-	results := make([]vectorstore.Result, 0, capacity)
+	results := make([]core.Result, 0, capacity)
 
 	for id, embedding := range s.embeddings {
 		// Apply filters
@@ -97,7 +98,7 @@ func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.Structu
 
 		score := cosineSimilarity(embedding, embedding, queryNorm, s.norms[id])
 		if score >= query.MinScore {
-			results = append(results, vectorstore.Result{
+			results = append(results, core.Result{
 				Chunk: s.documents[id],
 				Score: score,
 			})
@@ -108,15 +109,15 @@ func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.Structu
 }
 
 // GetByMetadata retrieves chunks by metadata
-func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
+func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var results []vectorstore.Result
+	var results []core.Result
 
 	for _, chunk := range s.documents {
 		if s.matchesMetadata(chunk.Metadata, metadata) {
-			results = append(results, vectorstore.Result{
+			results = append(results, core.Result{
 				Chunk: chunk,
 				Score: 1.0, // Exact match
 			})
@@ -231,9 +232,9 @@ func cosineSimilarity(a, b []float32, normA, normB float32) float32 {
 }
 
 // topK returns top K results by score using a more efficient algorithm
-func topK(results []vectorstore.Result, k int) []vectorstore.Result {
+func topK(results []core.Result, k int) []core.Result {
 	if k <= 0 || len(results) == 0 {
-		return []vectorstore.Result{}
+		return []core.Result{}
 	}
 
 	if k >= len(results) {
@@ -250,7 +251,7 @@ func topK(results []vectorstore.Result, k int) []vectorstore.Result {
 }
 
 // quickSort sorts results by score in descending order
-func quickSort(results []vectorstore.Result, low, high int) {
+func quickSort(results []core.Result, low, high int) {
 	if low < high {
 		pivot := partition(results, low, high)
 		quickSort(results, low, pivot-1)
@@ -259,7 +260,7 @@ func quickSort(results []vectorstore.Result, low, high int) {
 }
 
 // partition is used by quickSort
-func partition(results []vectorstore.Result, low, high int) int {
+func partition(results []core.Result, low, high int) int {
 	pivot := results[high].Score
 	i := low - 1
 	for j := low; j < high; j++ {
@@ -273,7 +274,7 @@ func partition(results []vectorstore.Result, low, high int) int {
 }
 
 // quickSelect finds the k-th largest element
-func quickSelect(results []vectorstore.Result, low, high, k int) {
+func quickSelect(results []core.Result, low, high, k int) {
 	if low < high {
 		pivot := partition(results, low, high)
 		if pivot == k-1 {

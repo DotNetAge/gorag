@@ -9,8 +9,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/parser"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +37,7 @@ func NewSemanticParser(embedder embedding.Provider) *SemanticParser {
 }
 
 // Parse parses text into semantically meaningful chunks
-func (p *SemanticParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+func (p *SemanticParser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	content, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -46,9 +46,9 @@ func (p *SemanticParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk
 	text := string(content)
 	chunks := p.splitSemantically(text, ctx)
 
-	result := make([]parser.Chunk, len(chunks))
+	result := make([]core.Chunk, len(chunks))
 	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
+		result[i] = core.Chunk{
 			ID:      uuid.New().String(),
 			Content: chunk,
 			Metadata: map[string]string{

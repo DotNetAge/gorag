@@ -1,5 +1,7 @@
 package rag
 
+import "github.com/DotNetAge/gorag/core"
+
 // Source represents a document source for indexing
 //
 // Source defines the input for the indexing process. It can represent:
@@ -13,19 +15,14 @@ package rag
 // Example:
 //
 //	// Index a text string
-//	source1 := rag.Source{
+//	source1 := core.Source{
 //	    Type:    "text",
 //	    Content: "Go is an open source programming language...",
 //	}
 //
 //	// Index a file
-//	source2 := rag.Source{
+//	source2 := core.Source{
 //	    Type: ".pdf",
 //	    Path: "/path/to/document.pdf",
 //	}
-type Source struct {
-	Type    string      // Document type/format (e.g., "text", ".pdf", ".docx")
-	Path    string      // File path (if indexing a file)
-	Content string      // Text content (if indexing a string)
-	Reader  interface{} // Reader interface (if indexing from a reader)
-}
+type Source = core.Source

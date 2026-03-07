@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -64,7 +65,7 @@ func (rf *RAGFusion) WithQueryPrompt(prompt string) *RAGFusion {
 }
 
 // Search performs RAG-Fusion search
-func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int) ([]vectorstore.Result, error) {
+func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int) ([]core.Result, error) {
 	// Generate query variations
 	queries, err := rf.generateQueryVariations(ctx, originalQuery)
 	if err != nil {
@@ -79,7 +80,7 @@ func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int)
 	queries = rf.deduplicateQueries(queries)
 
 	// Perform search for each query
-	allResults := make(map[string]vectorstore.Result)
+	allResults := make(map[string]core.Result)
 	ranks := make(map[string][]int)
 
 	for _, query := range queries {
@@ -188,9 +189,9 @@ func (rf *RAGFusion) deduplicateQueries(queries []string) []string {
 }
 
 // fuseResults fuses results using reciprocal rank fusion
-func (rf *RAGFusion) fuseResults(results map[string]vectorstore.Result, ranks map[string][]int) []vectorstore.Result {
+func (rf *RAGFusion) fuseResults(results map[string]core.Result, ranks map[string][]int) []core.Result {
 	type scoredResult struct {
-		vectorstore.Result
+		core.Result
 		score float32
 	}
 
@@ -214,8 +215,8 @@ func (rf *RAGFusion) fuseResults(results map[string]vectorstore.Result, ranks ma
 		return scoredResults[i].score > scoredResults[j].score
 	})
 
-	// Convert back to vectorstore.Result
-	fused := make([]vectorstore.Result, len(scoredResults))
+	// Convert back to core.Result
+	fused := make([]core.Result, len(scoredResults))
 	for i, sr := range scoredResults {
 		fused[i] = sr.Result
 		fused[i].Score = sr.score

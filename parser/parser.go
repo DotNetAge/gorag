@@ -3,6 +3,8 @@ package parser
 import (
 	"context"
 	"io"
+
+	"github.com/DotNetAge/gorag/core"
 )
 
 // Parser defines the interface for document parsers
@@ -18,7 +20,7 @@ import (
 //         chunkOverlap int
 //     }
 //
-//     func (p *TextParser) Parse(ctx context.Context, r io.Reader) ([]Chunk, error) {
+//     func (p *TextParser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 //         // Parse text into chunks
 //     }
 //
@@ -33,37 +35,13 @@ type Parser interface {
 	// - r: Reader containing the document content
 	//
 	// Returns:
-	// - []Chunk: Slice of parsed document chunks
+	// - []core.Chunk: Slice of parsed document chunks
 	// - error: Error if parsing fails
-	Parse(ctx context.Context, r io.Reader) ([]Chunk, error)
+	Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error)
 	
 	// SupportedFormats returns the file formats supported by this parser
 	//
 	// Returns:
 	// - []string: Slice of supported file extensions (e.g., [".txt", ".md"])
 	SupportedFormats() []string
-}
-
-// Chunk represents a parsed document chunk
-//
-// A Chunk is a piece of a document that has been parsed and
-// prepared for embedding and storage in the vector store.
-//
-// Example:
-//
-//     chunk := Chunk{
-//         ID:       "chunk-1",
-//         Content:  "Go is an open source programming language...",
-//         Metadata: map[string]string{
-//             "source": "example.txt",
-//             "page":   "1",
-//         },
-//         MediaType: "text/plain",
-//     }
-type Chunk struct {
-	ID         string            // Unique identifier for the chunk
-	Content    string            // Text content of the chunk
-	Metadata   map[string]string // Metadata about the chunk (source, position, etc.)
-	MediaType  string            // Media type (e.g., "text/plain", "image/jpeg")
-	MediaData  []byte            // Binary data for non-text content (e.g., images)
 }

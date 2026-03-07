@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 )
 
@@ -30,7 +30,7 @@ func NewStreamingParser() *StreamingParser {
 }
 
 // Parse parses JSON into chunks using streaming processing
-func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	// Use json.Decoder for streaming processing
 	decoder := json.NewDecoder(r)
 
@@ -50,9 +50,9 @@ func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chun
 	text := string(content)
 	chunks := p.splitText(text)
 
-	result := make([]parser.Chunk, len(chunks))
+	result := make([]core.Chunk, len(chunks))
 	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
+		result[i] = core.Chunk{
 			ID:      uuid.New().String(),
 			Content: chunk,
 			Metadata: map[string]string{

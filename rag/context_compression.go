@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/llm"
-	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // ContextCompressor compresses and optimizes context for LLM input
@@ -46,7 +46,7 @@ func (c *ContextCompressor) WithSummaryPrompt(prompt string) *ContextCompressor 
 }
 
 // Compress compresses and optimizes context
-func (c *ContextCompressor) Compress(ctx context.Context, query string, results []vectorstore.Result) ([]vectorstore.Result, error) {
+func (c *ContextCompressor) Compress(ctx context.Context, query string, results []core.Result) ([]core.Result, error) {
 	if c == nil || len(results) == 0 {
 		return results, nil
 	}
@@ -67,8 +67,8 @@ func (c *ContextCompressor) Compress(ctx context.Context, query string, results 
 }
 
 // filterByRelevance filters results by relevance score
-func (c *ContextCompressor) filterByRelevance(results []vectorstore.Result) []vectorstore.Result {
-	var filtered []vectorstore.Result
+func (c *ContextCompressor) filterByRelevance(results []core.Result) []core.Result {
+	var filtered []core.Result
 	for _, result := range results {
 		// Filter out results with very low relevance
 		if result.Score > 0.3 {
@@ -79,12 +79,12 @@ func (c *ContextCompressor) filterByRelevance(results []vectorstore.Result) []ve
 }
 
 // removeRedundancy removes redundant content
-func (c *ContextCompressor) removeRedundancy(results []vectorstore.Result) []vectorstore.Result {
+func (c *ContextCompressor) removeRedundancy(results []core.Result) []core.Result {
 	if len(results) <= 1 {
 		return results
 	}
 
-	var unique []vectorstore.Result
+	var unique []core.Result
 	seen := make(map[string]bool)
 
 	for _, result := range results {
@@ -114,8 +114,8 @@ func (c *ContextCompressor) removeRedundancy(results []vectorstore.Result) []vec
 }
 
 // reorderByRelevance reorders results by relevance score
-func (c *ContextCompressor) reorderByRelevance(results []vectorstore.Result) []vectorstore.Result {
-	sorted := make([]vectorstore.Result, len(results))
+func (c *ContextCompressor) reorderByRelevance(results []core.Result) []core.Result {
+	sorted := make([]core.Result, len(results))
 	copy(sorted, results)
 
 	sort.Slice(sorted, func(i, j int) bool {
@@ -126,8 +126,8 @@ func (c *ContextCompressor) reorderByRelevance(results []vectorstore.Result) []v
 }
 
 // truncateToContextSize truncates results to fit the context window
-func (c *ContextCompressor) truncateToContextSize(results []vectorstore.Result, query string) []vectorstore.Result {
-	var selected []vectorstore.Result
+func (c *ContextCompressor) truncateToContextSize(results []core.Result, query string) []core.Result {
+	var selected []core.Result
 	totalSize := len(query)
 
 	for _, result := range results {

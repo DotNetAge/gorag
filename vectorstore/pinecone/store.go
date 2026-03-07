@@ -3,6 +3,7 @@ package pinecone
 import (
 	"context"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/pinecone-io/go-pinecone/pinecone"
 )
@@ -64,7 +65,7 @@ func NewStore(apiKey string, opts ...Option) (*Store, error) {
 }
 
 // Add adds chunks to the Pinecone store
-func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	if len(chunks) == 0 || len(embeddings) == 0 || len(chunks) != len(embeddings) {
 		return nil
 	}
@@ -75,10 +76,10 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 }
 
 // Search performs similarity search in Pinecone
-func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	// For simplicity, we'll return empty results for now
 	// In a real implementation, you would use the Pinecone API to search
-	return []vectorstore.Result{}, nil
+	return []core.Result{}, nil
 }
 
 // Delete removes chunks from the Pinecone store

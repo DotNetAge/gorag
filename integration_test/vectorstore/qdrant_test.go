@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/integration_test/testcontainers"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/DotNetAge/gorag/vectorstore/qdrant"
@@ -39,7 +40,7 @@ func TestQdrantStore(t *testing.T) {
 	defer store.Close()
 
 	// Test adding vectors
-	chunks := []vectorstore.Chunk{
+	chunks := []core.Chunk{
 		{ID: "00000000-0000-0000-0000-000000000001", Content: "test content 1"},
 		{ID: "00000000-0000-0000-0000-000000000002", Content: "test content 2"},
 	}

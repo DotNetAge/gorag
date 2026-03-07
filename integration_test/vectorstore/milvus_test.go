@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/integration_test/testcontainers"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/DotNetAge/gorag/vectorstore/milvus"
@@ -37,7 +38,7 @@ func TestMilvusStore(t *testing.T) {
 	defer store.Close()
 
 	// Test adding vectors
-	chunks := []vectorstore.Chunk{
+	chunks := []core.Chunk{
 		{ID: "1", Content: "test content 1"},
 		{ID: "2", Content: "test content 2"},
 	}

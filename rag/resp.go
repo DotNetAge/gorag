@@ -1,11 +1,11 @@
 package rag
 
-import "github.com/DotNetAge/gorag/vectorstore"
+import "github.com/DotNetAge/gorag/core"
 
 // StreamResponse represents a streaming RAG query response
 type StreamResponse struct {
 	Chunk   string
-	Sources []vectorstore.Result
+	Sources []core.Result
 	Done    bool
 	Error   error
 }
@@ -13,5 +13,5 @@ type StreamResponse struct {
 // Response represents the RAG query response
 type Response struct {
 	Answer  string
-	Sources []vectorstore.Result
+	Sources []core.Result
 }

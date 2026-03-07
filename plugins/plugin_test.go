@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/parser"
@@ -286,8 +287,8 @@ func TestLLMPlugin_Interface(t *testing.T) {
 // mockParserImpl is a mock parser implementation
 type mockParserImpl struct{}
 
-func (m *mockParserImpl) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	return []parser.Chunk{}, nil
+func (m *mockParserImpl) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
+	return []core.Chunk{}, nil
 }
 
 func (m *mockParserImpl) SupportedFormats() []string {
@@ -297,24 +298,24 @@ func (m *mockParserImpl) SupportedFormats() []string {
 // mockStoreImpl is a mock vector store implementation
 type mockStoreImpl struct{}
 
-func (m *mockStoreImpl) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (m *mockStoreImpl) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	return nil
 }
 
-func (m *mockStoreImpl) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{}, nil
+func (m *mockStoreImpl) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
+	return []core.Result{}, nil
 }
 
 func (m *mockStoreImpl) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (m *mockStoreImpl) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{}, nil
+func (m *mockStoreImpl) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
+	return []core.Result{}, nil
 }
 
-func (m *mockStoreImpl) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{}, nil
+func (m *mockStoreImpl) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
+	return []core.Result{}, nil
 }
 
 // mockEmbedderImpl is a mock embedding provider implementation

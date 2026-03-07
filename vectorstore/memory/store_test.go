@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func TestStore_Add(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test chunks and embeddings
-	chunks := []vectorstore.Chunk{
+	chunks := []core.Chunk{
 		{
 			ID:      uuid.New().String(),
 			Content: "Test content 1",
@@ -68,7 +69,7 @@ func TestStore_Add_Empty(t *testing.T) {
 	ctx := context.Background()
 
 	// Test adding empty chunks
-	err := store.Add(ctx, []vectorstore.Chunk{}, [][]float32{})
+	err := store.Add(ctx, []core.Chunk{}, [][]float32{})
 	require.NoError(t, err)
 
 	// Verify no chunks were added
@@ -85,7 +86,7 @@ func TestStore_Search(t *testing.T) {
 	ctx := context.Background()
 
 	// Add test data
-	chunks := []vectorstore.Chunk{
+	chunks := []core.Chunk{
 		{
 			ID:      "1",
 			Content: "Apple is a fruit",
@@ -153,13 +154,13 @@ func TestStore_Search_TopK(t *testing.T) {
 	ctx := context.Background()
 
 	// Add test data
-	chunks := make([]vectorstore.Chunk, 5)
+	chunks := make([]core.Chunk, 5)
 	embeddings := make([][]float32, 5)
 
 	for i := 0; i < 5; i++ {
-		chunks[i] = vectorstore.Chunk{
+		chunks[i] = core.Chunk{
 			ID:      string(rune('1' + i)),
-			Content: "Content " + string(rune('1' + i)),
+			Content: "Content " + string(rune('1'+i)),
 		}
 		// Create embeddings where first vector is most similar to query
 		embeddings[i] = []float32{float32(1.0 - float64(i)*0.1), float32(0.1 * float64(i)), 0.0}
@@ -190,7 +191,7 @@ func TestStore_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	// Add test data
-	chunks := []vectorstore.Chunk{
+	chunks := []core.Chunk{
 		{
 			ID:      "1",
 			Content: "Content 1",
@@ -327,7 +328,7 @@ func TestCosineSimilarity(t *testing.T) {
 			name:     "similar vectors",
 			a:        []float32{1, 2, 3},
 			b:        []float32{2, 4, 6}, // Scaled version of a
-			expected: 1, // Should be 1 since they're in the same direction
+			expected: 1,                  // Should be 1 since they're in the same direction
 		},
 		{
 			name:     "different lengths",
@@ -348,12 +349,12 @@ func TestCosineSimilarity(t *testing.T) {
 }
 
 func TestTopK(t *testing.T) {
-	results := []vectorstore.Result{
-		{Score: 0.5, Chunk: vectorstore.Chunk{ID: "1"}},
-		{Score: 0.9, Chunk: vectorstore.Chunk{ID: "2"}},
-		{Score: 0.3, Chunk: vectorstore.Chunk{ID: "3"}},
-		{Score: 0.7, Chunk: vectorstore.Chunk{ID: "4"}},
-		{Score: 0.1, Chunk: vectorstore.Chunk{ID: "5"}},
+	results := []core.Result{
+		{Score: 0.5, Chunk: core.Chunk{ID: "1"}},
+		{Score: 0.9, Chunk: core.Chunk{ID: "2"}},
+		{Score: 0.3, Chunk: core.Chunk{ID: "3"}},
+		{Score: 0.7, Chunk: core.Chunk{ID: "4"}},
+		{Score: 0.1, Chunk: core.Chunk{ID: "5"}},
 	}
 
 	// Test with k=3

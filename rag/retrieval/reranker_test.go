@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/DotNetAge/gorag/vectorstore"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,23 +22,23 @@ func (m *mockLLM) CompleteStream(ctx context.Context, prompt string) (<-chan str
 }
 
 func TestReranker_Rerank(t *testing.T) {
-	results := []vectorstore.Result{
+	results := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "Document 1",
 			},
 			Score: 0.9,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc2",
 				Content: "Document 2",
 			},
 			Score: 0.8,
 		},
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc3",
 				Content: "Document 3",
 			},
@@ -84,9 +84,9 @@ func TestReranker_Rerank(t *testing.T) {
 }
 
 func TestReranker_BuildPrompt(t *testing.T) {
-	results := []vectorstore.Result{
+	results := []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "Test content 1",
 			},

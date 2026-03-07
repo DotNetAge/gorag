@@ -2,6 +2,8 @@ package vectorstore
 
 import (
 	"context"
+
+	"github.com/DotNetAge/gorag/core"
 )
 
 // Store defines the interface for vector storage
@@ -17,11 +19,11 @@ import (
 //         mutex   sync.RWMutex
 //     }
 //
-//     func (s *MemoryStore) Add(ctx context.Context, chunks []Chunk, embeddings [][]float32) error {
+//     func (s *MemoryStore) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 //         // Store chunks and embeddings in memory
 //     }
 //
-//     func (s *MemoryStore) Search(ctx context.Context, query []float32, opts SearchOptions) ([]Result, error) {
+//     func (s *MemoryStore) Search(ctx context.Context, query []float32, opts SearchOptions) ([]core.Result, error) {
 //         // Search for similar embeddings
 //     }
 type Store interface {
@@ -34,7 +36,7 @@ type Store interface {
 	//
 	// Returns:
 	// - error: Error if storage fails
-	Add(ctx context.Context, chunks []Chunk, embeddings [][]float32) error
+	Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error
 	
 	// Search searches for similar vectors to the query embedding
 	//
@@ -44,9 +46,9 @@ type Store interface {
 	// - opts: Search options (TopK, filters, etc.)
 	//
 	// Returns:
-	// - []Result: Slice of search results
+	// - []core.Result: Slice of search results
 	// - error: Error if search fails
-	Search(ctx context.Context, query []float32, opts SearchOptions) ([]Result, error)
+	Search(ctx context.Context, query []float32, opts SearchOptions) ([]core.Result, error)
 	
 	// SearchStructured performs a structured search with filters
 	//
@@ -56,9 +58,9 @@ type Store interface {
 	// - embedding: Query embedding
 	//
 	// Returns:
-	// - []Result: Slice of search results
+	// - []core.Result: Slice of search results
 	// - error: Error if search fails
-	SearchStructured(ctx context.Context, query *StructuredQuery, embedding []float32) ([]Result, error)
+	SearchStructured(ctx context.Context, query *StructuredQuery, embedding []float32) ([]core.Result, error)
 	
 	// Delete removes vectors by their IDs
 	//
@@ -77,51 +79,9 @@ type Store interface {
 	// - metadata: Metadata filter
 	//
 	// Returns:
-	// - []Result: Slice of matching results
+	// - []core.Result: Slice of matching results
 	// - error: Error if retrieval fails
-	GetByMetadata(ctx context.Context, metadata map[string]string) ([]Result, error)
-}
-
-// Chunk represents a document chunk in the vector store
-//
-// A Chunk contains the content and metadata of a piece of a document
-// that has been stored in the vector store.
-//
-// Example:
-//
-//     chunk := Chunk{
-//         ID:       "chunk-1",
-//         Content:  "Go is an open source programming language...",
-//         Metadata: map[string]string{
-//             "source": "example.txt",
-//             "page":   "1",
-//         },
-//         MediaType: "text/plain",
-//     }
-type Chunk struct {
-	ID         string            // Unique identifier for the chunk
-	Content    string            // Text content of the chunk
-	Metadata   map[string]string // Metadata about the chunk
-	MediaType  string            // Media type (e.g., "text/plain", "image/jpeg")
-	MediaData  []byte            // Binary data for non-text content
-}
-
-// Result represents a search result
-//
-// A Result contains a chunk and its similarity score to the query.
-//
-// Example:
-//
-//     result := Result{
-//         Chunk: Chunk{
-//             ID:      "chunk-1",
-//             Content: "Go is an open source programming language...",
-//         },
-//         Score: 0.95, // High similarity score
-//     }
-type Result struct {
-	Chunk          // Embedded chunk
-	Score float32  // Similarity score (0.0-1.0)
+	GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error)
 }
 
 // SearchOptions configures search behavior

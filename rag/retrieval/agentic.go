@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -41,13 +42,13 @@ type AgenticRAG struct {
 // Response represents a RAG query response
 type Response struct {
 	Answer  string
-	Sources []vectorstore.Result
+	Sources []core.Result
 }
 
 // AgentState represents the current state of the agent
 type AgentState struct {
 	Task           string
-	RetrievedInfo  []vectorstore.Result
+	RetrievedInfo  []core.Result
 	Reasoning      []string
 	IterationCount int
 	Completed      bool
@@ -91,11 +92,11 @@ func (a *AgenticRAG) WithReflectPrompt(prompt string) *AgenticRAG {
 }
 
 // Search performs agentic retrieval
-func (a *AgenticRAG) Search(ctx context.Context, task string, topK int) ([]vectorstore.Result, error) {
+func (a *AgenticRAG) Search(ctx context.Context, task string, topK int) ([]core.Result, error) {
 	// Initialize agent state
 	state := &AgentState{
 		Task:           task,
-		RetrievedInfo:  []vectorstore.Result{},
+		RetrievedInfo:  []core.Result{},
 		Reasoning:      []string{},
 		IterationCount: 0,
 		Completed:      false,
@@ -230,7 +231,7 @@ func (a *AgenticRAG) analyzeTask(ctx context.Context, state *AgentState) (action
 }
 
 // performRetrieval performs the actual retrieval based on the generated query
-func (a *AgenticRAG) performRetrieval(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
+func (a *AgenticRAG) performRetrieval(ctx context.Context, query string, topK int) ([]core.Result, error) {
 	// Get embedding for query
 	embeddings, err := a.embedder.Embed(ctx, []string{query})
 	if err != nil {
@@ -273,10 +274,10 @@ func (a *AgenticRAG) parseTaskAnalysis(response string) (action string, query st
 }
 
 // deduplicateAndSort deduplicates and sorts results by score
-func (a *AgenticRAG) deduplicateAndSort(results []vectorstore.Result, topK int) []vectorstore.Result {
+func (a *AgenticRAG) deduplicateAndSort(results []core.Result, topK int) []core.Result {
 	// Deduplicate results
 	seen := make(map[string]bool)
-	var uniqueResults []vectorstore.Result
+	var uniqueResults []core.Result
 
 	for _, result := range results {
 		if !seen[result.ID] {

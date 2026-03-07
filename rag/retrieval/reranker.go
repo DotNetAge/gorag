@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/llm"
-	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // Reranker implements result reranking using LLM
@@ -38,7 +38,7 @@ func (r *Reranker) WithPrompt(prompt string) *Reranker {
 }
 
 // Rerank reranks search results based on relevance to the query
-func (r *Reranker) Rerank(ctx context.Context, query string, results []vectorstore.Result) ([]vectorstore.Result, error) {
+func (r *Reranker) Rerank(ctx context.Context, query string, results []core.Result) ([]core.Result, error) {
 	if len(results) <= r.topK {
 		return results, nil
 	}
@@ -73,7 +73,7 @@ func (r *Reranker) Rerank(ctx context.Context, query string, results []vectorsto
 }
 
 // buildRerankPrompt builds the prompt for reranking
-func (r *Reranker) buildRerankPrompt(query string, results []vectorstore.Result) string {
+func (r *Reranker) buildRerankPrompt(query string, results []core.Result) string {
 	prompt := r.prompt
 	prompt = strings.Replace(prompt, "{query}", query, 1)
 

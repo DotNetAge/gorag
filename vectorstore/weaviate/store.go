@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate/auth"
@@ -90,7 +91,7 @@ func (s *Store) ensureCollectionExists(ctx context.Context) error {
 	return s.client.Schema().ClassCreator().WithClass(class).Do(ctx)
 }
 
-func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	if len(chunks) == 0 || len(embeddings) == 0 || len(chunks) != len(embeddings) {
 		return nil
 	}
@@ -118,7 +119,7 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 	return nil
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	nearVector := s.client.GraphQL().NearVectorArgBuilder().
 		WithVector(query)
 
@@ -147,10 +148,10 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	data := result.Data["Get"].(map[string]interface{})
 	objects, ok := data[s.collection].([]interface{})
 	if !ok {
-		return []vectorstore.Result{}, nil
+		return []core.Result{}, nil
 	}
 
-	results := make([]vectorstore.Result, 0, len(objects))
+	results := make([]core.Result, 0, len(objects))
 	for _, obj := range objects {
 		object := obj.(map[string]interface{})
 
@@ -163,8 +164,8 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 			content = c
 		}
 
-		results = append(results, vectorstore.Result{
-			Chunk: vectorstore.Chunk{
+		results = append(results, core.Result{
+			Chunk: core.Chunk{
 				ID:      id,
 				Content: content,
 			},

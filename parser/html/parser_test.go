@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +34,7 @@ func TestParser_Parse(t *testing.T) {
 	chunks, err = p.Parse(context.Background(), reader)
 	require.NoError(t, err)
 	// For simple HTML, check that we get chunks (they might be empty if text extraction fails)
-	assert.IsType(t, []parser.Chunk{}, chunks)
+	assert.IsType(t, []core.Chunk{}, chunks)
 
 	// Test with complex HTML
 	complexHTML := `
@@ -53,7 +53,7 @@ func TestParser_Parse(t *testing.T) {
 	chunks, err = p.Parse(context.Background(), reader)
 	require.NoError(t, err)
 	// For complex HTML, check that we get chunks (they might be empty if text extraction fails)
-	assert.IsType(t, []parser.Chunk{}, chunks)
+	assert.IsType(t, []core.Chunk{}, chunks)
 
 	// Test that chunks have expected structure if they exist
 	for _, chunk := range chunks {
@@ -82,7 +82,7 @@ func TestParser_extractText(t *testing.T) {
 	chunks, err := p.Parse(context.Background(), reader)
 	require.NoError(t, err)
 	// For simple HTML, check that we get chunks (they might be empty if text extraction fails)
-	assert.IsType(t, []parser.Chunk{}, chunks)
+	assert.IsType(t, []core.Chunk{}, chunks)
 	// Check that script and style tags are not included
 	for _, chunk := range chunks {
 		assert.NotContains(t, chunk.Content, "script")

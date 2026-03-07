@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 )
 
@@ -25,9 +25,9 @@ func NewParser() *Parser {
 }
 
 // Parse parses text into chunks
-func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	var chunks []parser.Chunk
-	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
+	var chunks []core.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk core.Chunk) error {
 		chunks = append(chunks, chunk)
 		return nil
 	})
@@ -35,7 +35,7 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 }
 
 // ParseWithCallback parses text and calls the callback for each chunk
-func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(core.Chunk) error) error {
 	// Read all content first for accurate chunking
 	content, err := io.ReadAll(r)
 	if err != nil {
@@ -59,7 +59,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 			chunkText := text[i:end]
 
 			// Create chunk
-			chunk := parser.Chunk{
+			chunk := core.Chunk{
 				ID:      uuid.New().String(),
 				Content: strings.TrimSpace(chunkText),
 				Metadata: map[string]string{
@@ -84,7 +84,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 
 	// Handle empty text
 	if position == 0 {
-		chunk := parser.Chunk{
+		chunk := core.Chunk{
 			ID:      uuid.New().String(),
 			Content: "",
 			Metadata: map[string]string{

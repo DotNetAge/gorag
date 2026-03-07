@@ -7,22 +7,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockParserImpl struct {
-	parseFunc func(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
+	parseFunc func(ctx context.Context, r io.Reader) ([]core.Chunk, error)
 }
 
-func (m *mockParserImpl) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+func (m *mockParserImpl) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	if m.parseFunc != nil {
 		return m.parseFunc(ctx, r)
 	}
 	content, _ := io.ReadAll(r)
-	return []parser.Chunk{
+	return []core.Chunk{
 		{
 			ID:      "chunk1",
 			Content: string(content),
@@ -57,15 +57,15 @@ func (m *mockEmbedder) Dimension() int {
 }
 
 type mockStore struct {
-	addFunc      func(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error
-	searchFunc   func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error)
+	addFunc      func(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error
+	searchFunc   func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error)
 	deleteFunc   func(ctx context.Context, ids []string) error
 	searchCalled bool
 	addCalled    bool
 	deleteCalled bool
 }
 
-func (m *mockStore) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (m *mockStore) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	m.addCalled = true
 	if m.addFunc != nil {
 		return m.addFunc(ctx, chunks, embeddings)
@@ -73,14 +73,14 @@ func (m *mockStore) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddi
 	return nil
 }
 
-func (m *mockStore) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (m *mockStore) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	m.searchCalled = true
 	if m.searchFunc != nil {
 		return m.searchFunc(ctx, query, opts)
 	}
-	return []vectorstore.Result{
+	return []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "相关文档内容",
 				Metadata: map[string]string{
@@ -100,10 +100,10 @@ func (m *mockStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (m *mockStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{
+func (m *mockStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
+	return []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
+			Chunk: core.Chunk{
 				ID:      "doc1",
 				Content: "相关文档内容",
 				Metadata: map[string]string{
@@ -115,12 +115,12 @@ func (m *mockStore) SearchStructured(ctx context.Context, query *vectorstore.Str
 	}, nil
 }
 
-func (m *mockStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{
+func (m *mockStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
+	return []core.Result{
 		{
-			Chunk: vectorstore.Chunk{
-				ID:      "doc1",
-				Content: "相关文档内容",
+			Chunk: core.Chunk{
+				ID:       "doc1",
+				Content:  "相关文档内容",
 				Metadata: metadata,
 			},
 			Score: 1.0,
@@ -164,8 +164,8 @@ func TestNewEngine(t *testing.T) {
 			expectedErr: false,
 		},
 		{
-			name:        "missing parser",
-			opts:        []Option{
+			name: "missing parser",
+			opts: []Option{
 				WithEmbedder(&mockEmbedder{}),
 				WithVectorStore(&mockStore{}),
 				WithLLM(&mockLLM{}),
@@ -232,9 +232,9 @@ func TestEngine_Index(t *testing.T) {
 				Content: "测试文档内容",
 			},
 			setupMock: func(store *mockStore, p *mockParserImpl, embedder *mockEmbedder) {
-				p.parseFunc = func(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+				p.parseFunc = func(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 					content, _ := io.ReadAll(r)
-					return []parser.Chunk{
+					return []core.Chunk{
 						{
 							ID:      "chunk1",
 							Content: string(content),
@@ -254,7 +254,7 @@ func TestEngine_Index(t *testing.T) {
 				Content: "测试文档内容",
 			},
 			setupMock: func(store *mockStore, p *mockParserImpl, embedder *mockEmbedder) {
-				p.parseFunc = func(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+				p.parseFunc = func(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 					return nil, errors.New("parse failed")
 				}
 			},
@@ -282,7 +282,7 @@ func TestEngine_Index(t *testing.T) {
 				Content: "测试文档内容",
 			},
 			setupMock: func(store *mockStore, p *mockParserImpl, embedder *mockEmbedder) {
-				store.addFunc = func(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+				store.addFunc = func(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 					return errors.New("storage failed")
 				}
 			},
@@ -340,10 +340,10 @@ func TestEngine_Query(t *testing.T) {
 				TopK: 5,
 			},
 			setupMock: func(store *mockStore, llm *mockLLM) {
-				store.searchFunc = func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
-					return []vectorstore.Result{
+				store.searchFunc = func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
+					return []core.Result{
 						{
-							Chunk: vectorstore.Chunk{
+							Chunk: core.Chunk{
 								ID:      "doc1",
 								Content: "RAG是检索增强生成技术",
 								Metadata: map[string]string{
@@ -369,7 +369,7 @@ func TestEngine_Query(t *testing.T) {
 				TopK: 5,
 			},
 			setupMock: func(store *mockStore, llm *mockLLM) {
-				store.searchFunc = func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+				store.searchFunc = func(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 					return nil, errors.New("search failed")
 				}
 			},

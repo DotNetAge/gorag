@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/observability"
@@ -166,7 +167,7 @@ type QueryOptions struct {
 // StreamResponse represents a streaming RAG query response
 type StreamResponse struct {
 	Chunk   string
-	Sources []vectorstore.Result
+	Sources []core.Result
 	Done    bool
 	Error   error
 }
@@ -174,7 +175,7 @@ type StreamResponse struct {
 // Response represents the RAG query response
 type Response struct {
 	Answer  string
-	Sources []vectorstore.Result
+	Sources []core.Result
 }
 
 // Source represents a document source for indexing
@@ -251,7 +252,7 @@ func NewContextCompressor(llm llm.Client) *ContextCompressor {
 }
 
 // Compress compresses the context
-func (c *ContextCompressor) Compress(ctx interface{}, question string, results []vectorstore.Result) ([]vectorstore.Result, error) {
+func (c *ContextCompressor) Compress(ctx interface{}, question string, results []core.Result) ([]core.Result, error) {
 	// Implementation will be added later
 	return results, nil
 }

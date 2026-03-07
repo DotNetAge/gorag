@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	embedOllama "github.com/DotNetAge/gorag/embedding/ollama"
 	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/rag"
 	"github.com/DotNetAge/gorag/rag/retrieval"
-	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,6 +133,6 @@ func TestRAGEngine_CompleteFlow(t *testing.T) {
 // mockKeywordStore implements the retrieval.KeywordStore interface
 type mockKeywordStore struct{}
 
-func (m *mockKeywordStore) Search(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
-	return []vectorstore.Result{}, nil
+func (m *mockKeywordStore) Search(ctx context.Context, query string, topK int) ([]core.Result, error) {
+	return []core.Result{}, nil
 }

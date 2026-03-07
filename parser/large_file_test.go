@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/parser/html"
 	"github.com/DotNetAge/gorag/parser/json"
@@ -102,7 +103,7 @@ func TestLargeFileParsing(t *testing.T) {
 
 				start := time.Now()
 				var chunkCount int
-				err = test.parser.(parser.StreamingParser).ParseWithCallback(ctx, f, func(chunk parser.Chunk) error {
+				err = test.parser.(parser.StreamingParser).ParseWithCallback(ctx, f, func(chunk core.Chunk) error {
 					chunkCount++
 					return nil
 				})

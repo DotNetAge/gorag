@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 )
 
@@ -26,9 +26,9 @@ func NewParser() *Parser {
 }
 
 // Parse parses YAML into chunks
-func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	var chunks []parser.Chunk
-	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
+	var chunks []core.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk core.Chunk) error {
 		chunks = append(chunks, chunk)
 		return nil
 	})
@@ -36,7 +36,7 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 }
 
 // ParseWithCallback parses YAML and calls the callback for each chunk
-func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(core.Chunk) error) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024) // 10MB buffer for large lines
 
@@ -58,7 +58,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 				chunkText := string(buffer[:p.chunkSize])
 
 				// Create chunk
-				chunk := parser.Chunk{
+				chunk := core.Chunk{
 					ID:      uuid.New().String(),
 					Content: strings.TrimSpace(chunkText),
 					Metadata: map[string]string{
@@ -92,7 +92,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 
 	// Process remaining content
 	if len(buffer) > 0 {
-		chunk := parser.Chunk{
+		chunk := core.Chunk{
 			ID:      uuid.New().String(),
 			Content: strings.TrimSpace(string(buffer)),
 			Metadata: map[string]string{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
@@ -80,7 +81,7 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 }
 
 // Add adds chunks to the Milvus store
-func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings [][]float32) error {
+func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
 	if len(chunks) == 0 || len(embeddings) == 0 || len(chunks) != len(embeddings) {
 		return nil
 	}
@@ -125,7 +126,7 @@ func (s *Store) Add(ctx context.Context, chunks []vectorstore.Chunk, embeddings 
 }
 
 // Search performs similarity search in Milvus
-func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]vectorstore.Result, error) {
+func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.SearchOptions) ([]core.Result, error) {
 	topK := opts.TopK
 	if topK <= 0 {
 		topK = 5
@@ -146,7 +147,7 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	}
 
 	// Convert results
-	var vectorResults []vectorstore.Result
+	var vectorResults []core.Result
 	for _, result := range results {
 		// Get content column
 		contentCol, ok := result.Fields.GetColumn("content").(*entity.ColumnVarChar)
@@ -171,8 +172,8 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 				continue
 			}
 
-			vectorResults = append(vectorResults, vectorstore.Result{
-				Chunk: vectorstore.Chunk{
+			vectorResults = append(vectorResults, core.Result{
+				Chunk: core.Chunk{
 					ID:      fmt.Sprintf("%d", id),
 					Content: content,
 				},

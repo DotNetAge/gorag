@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/rag/retrieval"
@@ -27,7 +28,7 @@ type QueryOptions struct {
 // StreamResponse represents a streaming RAG query response
 type StreamResponse struct {
 	Chunk   string
-	Sources []vectorstore.Result
+	Sources []core.Result
 	Done    bool
 	Error   error
 }
@@ -35,7 +36,7 @@ type StreamResponse struct {
 // Response represents the RAG query response
 type Response struct {
 	Answer  string
-	Sources []vectorstore.Result
+	Sources []core.Result
 }
 
 // Cache defines the interface for query result caching
@@ -62,7 +63,7 @@ type HyDE interface {
 
 // ContextCompressor defines the interface for context compression
 type ContextCompressor interface {
-	Compress(ctx context.Context, question string, results []vectorstore.Result) ([]vectorstore.Result, error)
+	Compress(ctx context.Context, question string, results []core.Result) ([]core.Result, error)
 }
 
 // Embedder defines the interface for embedding providers
@@ -182,7 +183,7 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 
 		// Collect all chunks
 		var answer strings.Builder
-		var sources []vectorstore.Result
+		var sources []core.Result
 		var finalErr error
 
 		for resp := range ch {
@@ -495,7 +496,7 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 		return nil, err
 	}
 
-	var results []vectorstore.Result
+	var results []core.Result
 
 	// Execute search based on route type
 	switch routeResult.Type {
@@ -755,7 +756,7 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 		return nil, fmt.Errorf("failed to generate query embedding")
 	}
 
-	var results []vectorstore.Result
+	var results []core.Result
 
 	// Execute search based on route type
 	switch routeResult.Type {

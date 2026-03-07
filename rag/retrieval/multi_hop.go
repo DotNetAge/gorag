@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -71,8 +72,8 @@ func (m *MultiHopRAG) WithQueryPrompt(prompt string) *MultiHopRAG {
 }
 
 // Search performs multi-hop retrieval
-func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]vectorstore.Result, error) {
-	var allResults []vectorstore.Result
+func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]core.Result, error) {
+	var allResults []core.Result
 	currentQuery := query
 	hopCount := 0
 
@@ -193,7 +194,7 @@ type AnalysisResult struct {
 }
 
 // analyzeResults analyzes search results to determine if more information is needed
-func (m *MultiHopRAG) analyzeResults(ctx context.Context, query string, results []vectorstore.Result) (*AnalysisResult, error) {
+func (m *MultiHopRAG) analyzeResults(ctx context.Context, query string, results []core.Result) (*AnalysisResult, error) {
 	// Build analysis prompt
 	prompt := m.analysisPrompt
 	prompt = strings.Replace(prompt, "{query}", query, 1)
@@ -235,10 +236,10 @@ func (m *MultiHopRAG) generateFollowUpQuery(ctx context.Context, originalQuery, 
 }
 
 // deduplicateAndSort deduplicates and sorts results by score
-func (m *MultiHopRAG) deduplicateAndSort(results []vectorstore.Result, topK int) []vectorstore.Result {
+func (m *MultiHopRAG) deduplicateAndSort(results []core.Result, topK int) []core.Result {
 	// Deduplicate results
 	seen := make(map[string]bool)
-	var uniqueResults []vectorstore.Result
+	var uniqueResults []core.Result
 
 	for _, result := range results {
 		if !seen[result.ID] {

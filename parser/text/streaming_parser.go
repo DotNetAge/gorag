@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +29,7 @@ func NewStreamingParser() *StreamingParser {
 }
 
 // Parse parses text into chunks using streaming processing
-func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	var chunks []string
 	var currentBuffer strings.Builder
 	var overlapBuffer strings.Builder
@@ -77,10 +77,10 @@ func (p *StreamingParser) Parse(ctx context.Context, r io.Reader) ([]parser.Chun
 		}
 	}
 
-	// Convert chunks to parser.Chunk format
-	result := make([]parser.Chunk, len(chunks))
+	// Convert chunks to core.Chunk format
+	result := make([]core.Chunk, len(chunks))
 	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
+		result[i] = core.Chunk{
 			ID:      uuid.New().String(),
 			Content: chunk,
 			Metadata: map[string]string{
