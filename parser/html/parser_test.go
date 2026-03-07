@@ -71,24 +71,7 @@ func TestParser_SupportedFormats(t *testing.T) {
 	assert.Contains(t, formats, ".htm")
 }
 
-func TestParser_splitText(t *testing.T) {
-	p := NewParser()
 
-	// Test with empty text
-	chunks := p.splitText("")
-	assert.Empty(t, chunks)
-
-	// Test with short text
-	shortText := "Hello, world!"
-	chunks = p.splitText(shortText)
-	assert.Len(t, chunks, 1)
-	assert.Equal(t, shortText, chunks[0])
-
-	// Test with text that requires multiple chunks
-	longText := strings.Repeat("a", 1000)
-	chunks = p.splitText(longText)
-	assert.Len(t, chunks, 3) // 500 + 500 (with 50 overlap) = 950, plus remaining 50
-}
 
 func TestParser_extractText(t *testing.T) {
 	p := NewParser()

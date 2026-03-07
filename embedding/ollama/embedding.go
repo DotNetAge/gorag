@@ -101,60 +101,68 @@ func (p *Provider) Dimension() int {
 }
 
 func (p *Provider) doEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := EmbeddingRequest{
-		Model: p.config.Model,
-		Input: texts[0],
-	}
+	// For Ollama, we need to handle each text individually
+	// because the Ollama API doesn't support batch embedding
+	var allEmbeddings [][]float32
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/api/embed", p.config.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err == nil {
-			return nil, fmt.Errorf("error: %s", errResp.Error)
+	for _, text := range texts {
+		reqBody := EmbeddingRequest{
+			Model: p.config.Model,
+			Input: text,
 		}
 
-		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		jsonData, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		url := fmt.Sprintf("%s/api/embed", p.config.BaseURL)
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := p.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			var errResp ErrorResponse
+			if err := json.Unmarshal(body, &errResp); err == nil {
+				return nil, fmt.Errorf("error: %s", errResp.Error)
+			}
+
+			return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+
+		// Check if response is empty
+		if len(body) == 0 {
+			return nil, fmt.Errorf("empty response body")
+		}
+
+		var respData EmbeddingResponse
+		if err := json.Unmarshal(body, &respData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w, response: %s", err, string(body))
+		}
+
+		// Check if embeddings array is empty
+		if len(respData.Embeddings) == 0 {
+			return nil, fmt.Errorf("no embeddings returned in response: %s", string(body))
+		}
+
+		allEmbeddings = append(allEmbeddings, respData.Embeddings...)
 	}
 
-	// Check if response is empty
-	if len(body) == 0 {
-		return nil, fmt.Errorf("empty response body")
-	}
-
-	var respData EmbeddingResponse
-	if err := json.Unmarshal(body, &respData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w, response: %s", err, string(body))
-	}
-
-	// Check if embeddings array is empty
-	if len(respData.Embeddings) == 0 {
-		return nil, fmt.Errorf("no embeddings returned in response: %s", string(body))
-	}
-
-	return respData.Embeddings, nil
+	return allEmbeddings, nil
 }
 
 func isRetryableError(err error) bool {

@@ -33,6 +33,14 @@ func (m *mockVectorStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
+func (m *mockVectorStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
+	return m.results, nil
+}
+
+func (m *mockVectorStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
+	return m.results, nil
+}
+
 func TestHybridRetriever_Search(t *testing.T) {
 	vectorResults := []vectorstore.Result{
 		{

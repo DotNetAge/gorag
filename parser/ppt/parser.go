@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/google/uuid"
 )
 
 // Parser implements a PPT parser
- type Parser struct {
+type Parser struct {
 	chunkSize    int
 	chunkOverlap int
 }
@@ -26,33 +25,61 @@ func NewParser() *Parser {
 
 // Parse parses PPT file into chunks
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	// Read the PPT file content
-	content, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read PPT file: %w", err)
+	var chunks []parser.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	return chunks, err
+}
+
+// ParseWithCallback parses PPT and calls the callback for each chunk
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+	// Calculate file size by reading through the reader
+	var size int64
+	buf := make([]byte, 4096)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			n, err := r.Read(buf)
+			if err == io.EOF {
+				goto endOfFile
+			}
+			if err != nil {
+				return fmt.Errorf("failed to read PPT file: %w", err)
+			}
+			size += int64(n)
+		}
 	}
+
+endOfFile:
 
 	// For now, we'll just create a simple chunk with the file size
 	// In a real implementation, we would parse the PPT file structure
 	// and extract text content from slides
-	text := fmt.Sprintf("PPT file with size: %d bytes\n", len(content))
+	text := fmt.Sprintf("PPT file with size: %d bytes\n", size)
 	text += "Note: PPT parsing is currently basic. In a future version, we'll extract text from slides."
 
-	chunks := p.splitText(text)
-
-	result := make([]parser.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
-			ID:      uuid.New().String(),
-			Content: chunk,
-			Metadata: map[string]string{
-				"type":     "ppt",
-				"position": fmt.Sprintf("%d", i),
-			},
-		}
+	// Create a single chunk
+	chunk := parser.Chunk{
+		ID:      uuid.New().String(),
+		Content: text,
+		Metadata: map[string]string{
+			"type":     "ppt",
+			"position": "0",
+			"size":     fmt.Sprintf("%d", size),
+		},
 	}
 
-	return result, nil
+	// Call callback
+	if err := callback(chunk); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SupportedFormats returns supported formats
@@ -60,29 +87,3 @@ func (p *Parser) SupportedFormats() []string {
 	return []string{".pptx", ".ppt"}
 }
 
-// splitText splits text into chunks with overlap
-func (p *Parser) splitText(text string) []string {
-	var chunks []string
-
-	// Handle empty text
-	if len(text) == 0 {
-		chunks = append(chunks, "")
-		return chunks
-	}
-
-	for i := 0; i < len(text); i += p.chunkSize - p.chunkOverlap {
-		end := i + p.chunkSize
-		if end > len(text) {
-			end = len(text)
-		}
-
-		chunk := text[i:end]
-		chunks = append(chunks, strings.TrimSpace(chunk))
-
-		if end >= len(text) {
-			break
-		}
-	}
-
-	return chunks
-}

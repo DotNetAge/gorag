@@ -26,57 +26,82 @@ func NewParser() *Parser {
 
 // Parse parses text into chunks
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+	var chunks []parser.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	return chunks, err
+}
+
+// ParseWithCallback parses text and calls the callback for each chunk
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+	// Read all content first for accurate chunking
 	content, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	text := string(content)
-	chunks := p.splitText(text)
+	var position int
 
-	result := make([]parser.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
-			ID:      uuid.New().String(),
-			Content: chunk,
-			Metadata: map[string]string{
-				"type":     "text",
-				"position": fmt.Sprintf("%d", i),
-			},
+	// Split text into chunks with overlap
+	for i := 0; i < len(text); i += p.chunkSize - p.chunkOverlap {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			end := i + p.chunkSize
+			if end > len(text) {
+				end = len(text)
+			}
+
+			chunkText := text[i:end]
+
+			// Create chunk
+			chunk := parser.Chunk{
+				ID:      uuid.New().String(),
+				Content: strings.TrimSpace(chunkText),
+				Metadata: map[string]string{
+					"type":     "text",
+					"position": fmt.Sprintf("%d", position),
+				},
+			}
+
+			// Call callback
+			if err := callback(chunk); err != nil {
+				return err
+			}
+
+			position++
+
+			// If we've reached the end, break
+			if end >= len(text) {
+				break
+			}
 		}
 	}
 
-	return result, nil
+	// Handle empty text
+	if position == 0 {
+		chunk := parser.Chunk{
+			ID:      uuid.New().String(),
+			Content: "",
+			Metadata: map[string]string{
+				"type":     "text",
+				"position": "0",
+			},
+		}
+
+		if err := callback(chunk); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SupportedFormats returns supported formats
 func (p *Parser) SupportedFormats() []string {
 	return []string{".txt", ".md"}
-}
-
-// splitText splits text into chunks with overlap
-func (p *Parser) splitText(text string) []string {
-	var chunks []string
-
-	// Handle empty text
-	if len(text) == 0 {
-		chunks = append(chunks, "")
-		return chunks
-	}
-
-	for i := 0; i < len(text); i += p.chunkSize - p.chunkOverlap {
-		end := i + p.chunkSize
-		if end > len(text) {
-			end = len(text)
-		}
-
-		chunk := text[i:end]
-		chunks = append(chunks, strings.TrimSpace(chunk))
-
-		if end >= len(text) {
-			break
-		}
-	}
-
-	return chunks
 }

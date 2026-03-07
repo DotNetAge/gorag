@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/google/uuid"
@@ -22,20 +21,30 @@ func New() *Parser {
 
 // Parse parses an image file and returns chunks with media data
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
+	var chunks []parser.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	return chunks, err
+}
+
+// ParseWithCallback parses image and calls the callback for each chunk
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
 	// Read the entire image data
-	data, err := ioutil.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image data: %w", err)
+		return fmt.Errorf("failed to read image data: %w", err)
 	}
 
 	if len(data) == 0 {
-		return nil, fmt.Errorf("empty image data")
+		return fmt.Errorf("empty image data")
 	}
 
 	// Determine media type based on file signature
 	mediaType := detectMediaType(data)
 	if mediaType == "" {
-		return nil, fmt.Errorf("unknown image format")
+		return fmt.Errorf("unknown image format")
 	}
 
 	// Create a single chunk for the entire image
@@ -51,7 +60,12 @@ func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error)
 		MediaData: data,
 	}
 
-	return []parser.Chunk{chunk}, nil
+	// Call callback
+	if err := callback(chunk); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SupportedFormats returns the list of supported image formats
@@ -81,3 +95,4 @@ func detectMediaType(data []byte) string {
 		return ""
 	}
 }
+

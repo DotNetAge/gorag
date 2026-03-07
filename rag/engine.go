@@ -5,13 +5,25 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
+	"github.com/DotNetAge/gorag/parser/docx"
+	"github.com/DotNetAge/gorag/parser/excel"
+	"github.com/DotNetAge/gorag/parser/html"
+	"github.com/DotNetAge/gorag/parser/image"
+	"github.com/DotNetAge/gorag/parser/json"
+	"github.com/DotNetAge/gorag/parser/pdf"
+	"github.com/DotNetAge/gorag/parser/ppt"
+	"github.com/DotNetAge/gorag/parser/text"
+	"github.com/DotNetAge/gorag/parser/yaml"
 	"github.com/DotNetAge/gorag/rag/retrieval"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/google/uuid"
@@ -19,26 +31,37 @@ import (
 
 // Engine represents the RAG engine
 type Engine struct {
-	parser    parser.Parser
-	embedder  embedding.Provider
-	store     vectorstore.Store
-	llm       llm.Client
-	retriever *retrieval.HybridRetriever
-	reranker  *retrieval.Reranker
-	cache     Cache
-	router    Router
-	metrics   observability.Metrics
-	logger    observability.Logger
-	tracer    observability.Tracer
+	parsers             map[string]parser.Parser
+	defaultParser       parser.Parser
+	embedder            embedding.Provider
+	store               vectorstore.Store
+	llm                 llm.Client
+	retriever           *retrieval.HybridRetriever
+	reranker            *retrieval.Reranker
+	hydration           *HyDE
+	compressor          *ContextCompressor
+	conversationManager *ConversationManager
+	cache               Cache
+	router              Router
+	metrics             observability.Metrics
+	logger              observability.Logger
+	tracer              observability.Tracer
 }
 
 // Option configures the Engine
 type Option func(*Engine)
 
-// WithParser sets the document parser
+// WithParser sets the default document parser
 func WithParser(p parser.Parser) Option {
 	return func(e *Engine) {
-		e.parser = p
+		e.defaultParser = p
+	}
+}
+
+// WithParsers sets multiple parsers for different formats
+func WithParsers(parsers map[string]parser.Parser) Option {
+	return func(e *Engine) {
+		e.parsers = parsers
 	}
 }
 
@@ -112,15 +135,42 @@ func WithTracer(t observability.Tracer) Option {
 	}
 }
 
+// WithHyDE sets the HyDE instance for query enhancement
+func WithHyDE(h *HyDE) Option {
+	return func(e *Engine) {
+		e.hydration = h
+	}
+}
+
+// WithContextCompressor sets the context compressor for optimizing context
+func WithContextCompressor(c *ContextCompressor) Option {
+	return func(e *Engine) {
+		e.compressor = c
+	}
+}
+
+// WithConversationManager sets the conversation manager for multi-turn conversations
+func WithConversationManager(cm *ConversationManager) Option {
+	return func(e *Engine) {
+		e.conversationManager = cm
+	}
+}
+
 // New creates a new RAG engine
 func New(opts ...Option) (*Engine, error) {
-	engine := &Engine{}
+	engine := &Engine{
+		parsers: make(map[string]parser.Parser),
+	}
 	for _, opt := range opts {
 		opt(engine)
 	}
 
-	if engine.parser == nil {
-		return nil, fmt.Errorf("parser is required")
+	// Auto-load all built-in parsers
+	engine.loadDefaultParsers()
+
+	if engine.defaultParser == nil {
+		// Set text parser as default if no default parser is provided
+		engine.defaultParser = text.NewParser()
 	}
 	if engine.embedder == nil {
 		return nil, fmt.Errorf("embedder is required")
@@ -133,6 +183,73 @@ func New(opts ...Option) (*Engine, error) {
 	}
 
 	return engine, nil
+}
+
+// loadDefaultParsers loads all built-in parsers
+func (e *Engine) loadDefaultParsers() {
+	// Text parser
+	textParser := text.NewParser()
+	for _, format := range textParser.SupportedFormats() {
+		e.parsers[format] = textParser
+	}
+
+	// JSON parser
+	jsonParser := json.NewParser()
+	for _, format := range jsonParser.SupportedFormats() {
+		e.parsers[format] = jsonParser
+	}
+
+	// HTML parser
+	htmlParser := html.NewParser()
+	for _, format := range htmlParser.SupportedFormats() {
+		e.parsers[format] = htmlParser
+	}
+
+	// YAML parser
+	yamlParser := yaml.NewParser()
+	for _, format := range yamlParser.SupportedFormats() {
+		e.parsers[format] = yamlParser
+	}
+
+	// Excel parser
+	excelParser := excel.NewParser()
+	for _, format := range excelParser.SupportedFormats() {
+		e.parsers[format] = excelParser
+	}
+
+	// PDF parser
+	pdfParser := pdf.NewParser()
+	for _, format := range pdfParser.SupportedFormats() {
+		e.parsers[format] = pdfParser
+	}
+
+	// DOCX parser
+	docxParser := docx.NewParser()
+	for _, format := range docxParser.SupportedFormats() {
+		e.parsers[format] = docxParser
+	}
+
+	// PPT parser
+	pptParser := ppt.NewParser()
+	for _, format := range pptParser.SupportedFormats() {
+		e.parsers[format] = pptParser
+	}
+
+	// Image parser
+	imageParser := image.New()
+	for _, format := range imageParser.SupportedFormats() {
+		e.parsers[format] = imageParser
+	}
+}
+
+// AddParser adds a parser for a specific format
+func (e *Engine) AddParser(format string, p parser.Parser) {
+	e.parsers[format] = p
+}
+
+// SetDefaultParser sets the default parser for unknown formats
+func (e *Engine) SetDefaultParser(p parser.Parser) {
+	e.defaultParser = p
 }
 
 // QueryOptions configures query behavior
@@ -235,6 +352,27 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 			status = "error"
 			return err
 		}
+	} else if source.Path != "" {
+		// Read file from path
+		file, err := os.Open(source.Path)
+		if err != nil {
+			err := fmt.Errorf("failed to open file: %w", err)
+			if e.metrics != nil {
+				e.metrics.RecordErrorCount(ctx, "invalid_input")
+			}
+			if e.logger != nil {
+				e.logger.Error(ctx, "Failed to open file", err, map[string]interface{}{"path": source.Path})
+			}
+			if e.tracer != nil {
+				if span, ok := e.tracer.Extract(ctx); ok {
+					span.SetError(err)
+				}
+			}
+			status = "error"
+			return err
+		}
+		defer file.Close()
+		reader = file
 	}
 
 	if reader == nil {
@@ -255,7 +393,13 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	}
 
 	parseStartTime := time.Now()
-	chunks, err := e.parser.Parse(ctx, reader)
+	// Get the appropriate parser for the source type
+	p, ok := e.parsers[source.Type]
+	if !ok {
+		// Use default parser if no specific parser is found
+		p = e.defaultParser
+	}
+	chunks, err := p.Parse(ctx, reader)
 	if err != nil {
 		if e.metrics != nil {
 			e.metrics.RecordErrorCount(ctx, "parsing")
@@ -273,9 +417,10 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	}
 	if e.logger != nil {
 		e.logger.Debug(ctx, "Document parsed", map[string]interface{}{
-			"duration": time.Since(parseStartTime).Seconds(),
+			"duration":     time.Since(parseStartTime).Seconds(),
 			"chunks_count": len(chunks),
-			"source_type": source.Type,
+			"source_type":  source.Type,
+			"parser":       p.SupportedFormats()[0],
 		})
 	}
 
@@ -290,11 +435,11 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
 		vsChunks[i] = vectorstore.Chunk{
-			ID:         chunk.ID,
-			Content:    chunk.Content,
-			Metadata:   chunk.Metadata,
-			MediaType:  chunk.MediaType,
-			MediaData:  chunk.MediaData,
+			ID:        chunk.ID,
+			Content:   chunk.Content,
+			Metadata:  chunk.Metadata,
+			MediaType: chunk.MediaType,
+			MediaData: chunk.MediaData,
 		}
 		texts[i] = chunk.Content
 	}
@@ -318,8 +463,8 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	}
 	if e.logger != nil {
 		e.logger.Debug(ctx, "Chunks embedded", map[string]interface{}{
-			"duration": time.Since(embedStartTime).Seconds(),
-			"chunks_count": len(chunks),
+			"duration":         time.Since(embedStartTime).Seconds(),
+			"chunks_count":     len(chunks),
 			"embeddings_count": len(embeddings),
 		})
 	}
@@ -343,7 +488,7 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	}
 	if e.logger != nil {
 		e.logger.Debug(ctx, "Chunks stored", map[string]interface{}{
-			"duration": time.Since(storeStartTime).Seconds(),
+			"duration":     time.Since(storeStartTime).Seconds(),
 			"chunks_count": len(chunks),
 		})
 	}
@@ -358,9 +503,9 @@ func (e *Engine) Index(ctx context.Context, source Source) error {
 	// Log index
 	if e.logger != nil {
 		e.logger.Info(ctx, "Index completed", map[string]interface{}{
-			"duration": time.Since(startTime).Seconds(),
+			"duration":     time.Since(startTime).Seconds(),
 			"chunks_count": len(chunks),
-			"source_type": source.Type,
+			"source_type":  source.Type,
 		})
 	}
 
@@ -421,6 +566,94 @@ func (e *Engine) AsyncBatchIndex(ctx context.Context, sources []Source) error {
 		if err := e.BatchIndex(ctx, sources); err != nil {
 			// Log error (in a real implementation, you would use a logger)
 			fmt.Printf("Error batch indexing documents: %v\n", err)
+		}
+	}()
+
+	return nil
+}
+
+// IndexDirectory indexes all files in a directory recursively
+func (e *Engine) IndexDirectory(ctx context.Context, directoryPath string) error {
+	// Create a wait group for concurrency
+	var wg sync.WaitGroup
+	// Create a channel to receive files
+	fileChan := make(chan string, 100)
+	// Create a channel to receive errors
+	errChan := make(chan error, 10)
+
+	// Start worker goroutines
+	workerCount := 10 // Adjust based on system resources
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for filePath := range fileChan {
+				// Get file extension
+				ext := strings.ToLower(filepath.Ext(filePath))
+				
+				// Create source
+				source := Source{
+					Type: ext,
+					Path: filePath,
+				}
+				
+				// Index file
+				if err := e.Index(ctx, source); err != nil {
+					errChan <- fmt.Errorf("failed to index file %s: %w", filePath, err)
+				}
+			}
+		}()
+	}
+
+	// Walk directory and send files to workers
+	go func() {
+		defer close(fileChan)
+		if err := filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				// Check if we have a parser for this file extension
+				ext := strings.ToLower(filepath.Ext(path))
+				if _, ok := e.parsers[ext]; ok {
+					select {
+					case fileChan <- path:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			errChan <- fmt.Errorf("failed to walk directory: %w", err)
+		}
+	}()
+
+	// Wait for all workers to finish
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	// Collect errors
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to index some files: %v", errors)
+	}
+
+	return nil
+}
+
+// AsyncIndexDirectory indexes all files in a directory recursively asynchronously
+func (e *Engine) AsyncIndexDirectory(ctx context.Context, directoryPath string) error {
+	go func() {
+		if err := e.IndexDirectory(ctx, directoryPath); err != nil {
+			// Log error (in a real implementation, you would use a logger)
+			fmt.Printf("Error indexing directory: %v\n", err)
 		}
 	}()
 
@@ -514,8 +747,8 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 		// Log query
 		if e.logger != nil {
 			e.logger.Info(ctx, "Streaming query completed", map[string]interface{}{
-				"question": question,
-				"duration": time.Since(startTime).Seconds(),
+				"question":      question,
+				"duration":      time.Since(startTime).Seconds(),
 				"answer_length": len(response.Answer),
 				"sources_count": len(response.Sources),
 			})
@@ -556,8 +789,8 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 			// Log query
 			if e.logger != nil {
 				e.logger.Info(ctx, "Query completed from cache", map[string]interface{}{
-					"question": question,
-					"duration": time.Since(startTime).Seconds(),
+					"question":      question,
+					"duration":      time.Since(startTime).Seconds(),
 					"answer_length": len(cachedResponse.Answer),
 					"sources_count": len(cachedResponse.Sources),
 				})
@@ -605,7 +838,19 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 		topK = routeTopK
 	}
 
-	queryEmbeddings, err := e.embedder.Embed(ctx, []string{question})
+	// Enhance query using HyDE if available
+	queryToEmbed := question
+	if e.hydration != nil {
+		enhancedQuery, err := e.hydration.EnhanceQuery(ctx, question)
+		if err == nil {
+			queryToEmbed = enhancedQuery
+			if e.logger != nil {
+				e.logger.Debug(ctx, "Query enhanced with HyDE", map[string]interface{}{"original_query": question, "enhanced_query_length": len(enhancedQuery)})
+			}
+		}
+	}
+
+	queryEmbeddings, err := e.embedder.Embed(ctx, []string{queryToEmbed})
 	if err != nil {
 		if e.metrics != nil {
 			e.metrics.RecordErrorCount(ctx, "embedding")
@@ -712,8 +957,24 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 		}
 		if e.logger != nil {
 			e.logger.Debug(ctx, "Reranking completed", map[string]interface{}{
-				"duration": time.Since(rerankStartTime).Seconds(),
+				"duration":      time.Since(rerankStartTime).Seconds(),
 				"results_count": len(results),
+			})
+		}
+	}
+
+	// Use context compressor if available
+	if e.compressor != nil && len(results) > 0 {
+		compressStartTime := time.Now()
+		results, err = e.compressor.Compress(ctx, question, results)
+		if err != nil {
+			if e.logger != nil {
+				e.logger.Warn(ctx, "Failed to compress context, using original results", map[string]interface{}{"error": err.Error()})
+			}
+		} else if e.logger != nil {
+			e.logger.Debug(ctx, "Context compression completed", map[string]interface{}{
+				"duration":         time.Since(compressStartTime).Seconds(),
+				"compressed_count": len(results),
 			})
 		}
 	}
@@ -779,7 +1040,7 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 	}
 	if e.logger != nil {
 		e.logger.Debug(ctx, "LLM completion completed", map[string]interface{}{
-			"duration": time.Since(llmStartTime).Seconds(),
+			"duration":      time.Since(llmStartTime).Seconds(),
 			"answer_length": len(answer),
 		})
 	}
@@ -805,11 +1066,11 @@ func (e *Engine) Query(ctx context.Context, question string, opts QueryOptions) 
 	// Log query
 	if e.logger != nil {
 		e.logger.Info(ctx, "Query completed", map[string]interface{}{
-			"question": question,
-			"duration": time.Since(startTime).Seconds(),
+			"question":      question,
+			"duration":      time.Since(startTime).Seconds(),
 			"answer_length": len(response.Answer),
 			"sources_count": len(response.Sources),
-			"route_type": routeResult.Type,
+			"route_type":    routeResult.Type,
 		})
 	}
 
@@ -857,7 +1118,19 @@ func (e *Engine) QueryStream(ctx context.Context, question string, opts QueryOpt
 		topK = routeTopK
 	}
 
-	queryEmbeddings, err := e.embedder.Embed(ctx, []string{question})
+	// Enhance query using HyDE if available
+	queryToEmbed := question
+	if e.hydration != nil {
+		enhancedQuery, err := e.hydration.EnhanceQuery(ctx, question)
+		if err == nil {
+			queryToEmbed = enhancedQuery
+			if e.logger != nil {
+				e.logger.Debug(ctx, "Query enhanced with HyDE", map[string]interface{}{"original_query": question, "enhanced_query_length": len(enhancedQuery)})
+			}
+		}
+	}
+
+	queryEmbeddings, err := e.embedder.Embed(ctx, []string{queryToEmbed})
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
@@ -996,7 +1269,7 @@ func buildPrompt(question string, contexts []string, template string) string {
 		for i, ctx := range contexts {
 			contextStr.WriteString(fmt.Sprintf("%d. %s\n", i+1, ctx))
 		}
-		
+
 		// Replace placeholders
 		result := strings.ReplaceAll(template, "{question}", question)
 		result = strings.ReplaceAll(result, "{context}", contextStr.String())

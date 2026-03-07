@@ -10,18 +10,24 @@ import (
 
 // Config represents the main configuration structure for GoRAG
 type Config struct {
-	RAG        RAGConfig        `yaml:"rag"`
-	Embedding  EmbeddingConfig  `yaml:"embedding"`
-	LLM        LLMConfig        `yaml:"llm"`
+	RAG         RAGConfig         `yaml:"rag"`
+	Embedding   EmbeddingConfig   `yaml:"embedding"`
+	LLM         LLMConfig         `yaml:"llm"`
 	VectorStore VectorStoreConfig `yaml:"vectorstore"`
-	Logging    LoggingConfig    `yaml:"logging"`
+	Logging     LoggingConfig     `yaml:"logging"`
 }
 
 // RAGConfig represents RAG engine configuration
 type RAGConfig struct {
-	TopK         int `yaml:"topK" default:"5"`
-	ChunkSize    int `yaml:"chunkSize" default:"1000"`
-	ChunkOverlap int `yaml:"chunkOverlap" default:"100"`
+	TopK                  int     `yaml:"topK" default:"5"`
+	ChunkSize             int     `yaml:"chunkSize" default:"1000"`
+	ChunkOverlap          int     `yaml:"chunkOverlap" default:"100"`
+	UseSemanticChunking   bool    `yaml:"useSemanticChunking" default:"false"`
+	UseHyDE               bool    `yaml:"useHyDE" default:"false"`
+	UseRAGFusion          bool    `yaml:"useRAGFusion" default:"false"`
+	UseContextCompression bool    `yaml:"useContextCompression" default:"false"`
+	RAGFusionQueries      int     `yaml:"ragFusionQueries" default:"4"`
+	RAGFusionWeight       float64 `yaml:"ragFusionWeight" default:"0.5"`
 }
 
 // EmbeddingConfig represents embedding provider configuration
@@ -29,6 +35,8 @@ type EmbeddingConfig struct {
 	Provider string       `yaml:"provider" default:"openai"`
 	OpenAI   OpenAIConfig `yaml:"openai"`
 	Ollama   OllamaConfig `yaml:"ollama"`
+	Cohere   CohereConfig `yaml:"cohere"`
+	Voyage   VoyageConfig `yaml:"voyage"`
 }
 
 // LLMConfig represents LLM client configuration
@@ -42,12 +50,12 @@ type LLMConfig struct {
 
 // VectorStoreConfig represents vector store configuration
 type VectorStoreConfig struct {
-	Type     string          `yaml:"type" default:"memory"`
-	Memory   MemoryConfig    `yaml:"memory"`
-	Milvus   MilvusConfig    `yaml:"milvus"`
-	Qdrant   QdrantConfig    `yaml:"qdrant"`
-	Weaviate WeaviateConfig  `yaml:"weaviate"`
-	Pinecone PineconeConfig  `yaml:"pinecone"`
+	Type     string         `yaml:"type" default:"memory"`
+	Memory   MemoryConfig   `yaml:"memory"`
+	Milvus   MilvusConfig   `yaml:"milvus"`
+	Qdrant   QdrantConfig   `yaml:"qdrant"`
+	Weaviate WeaviateConfig `yaml:"weaviate"`
+	Pinecone PineconeConfig `yaml:"pinecone"`
 }
 
 // LoggingConfig represents logging configuration
@@ -82,6 +90,20 @@ type AzureOpenAIConfig struct {
 	Model      string `yaml:"model"`
 	Endpoint   string `yaml:"endpoint"`
 	APIVersion string `yaml:"apiVersion" default:"2024-03-01-preview"`
+}
+
+// CohereConfig represents Cohere configuration
+type CohereConfig struct {
+	APIKey  string `yaml:"apiKey"`
+	Model   string `yaml:"model" default:"embed-english-v3.0"`
+	BaseURL string `yaml:"baseURL" default:"https://api.cohere.ai/v1"`
+}
+
+// VoyageConfig represents Voyage configuration
+type VoyageConfig struct {
+	APIKey  string `yaml:"apiKey"`
+	Model   string `yaml:"model" default:"voyage-2"`
+	BaseURL string `yaml:"baseURL" default:"https://api.voyageai.com/v1"`
 }
 
 // MemoryConfig represents memory vector store configuration
@@ -170,6 +192,12 @@ func (l *Loader) loadFromEnv(config *Config) {
 		config.Embedding.OpenAI.APIKey = apiKey
 		config.LLM.OpenAI.APIKey = apiKey
 	}
+	if apiKey := os.Getenv("GORAG_COHERE_API_KEY"); apiKey != "" {
+		config.Embedding.Cohere.APIKey = apiKey
+	}
+	if apiKey := os.Getenv("GORAG_VOYAGE_API_KEY"); apiKey != "" {
+		config.Embedding.Voyage.APIKey = apiKey
+	}
 
 	if provider := os.Getenv("GORAG_LLM_PROVIDER"); provider != "" {
 		config.LLM.Provider = provider
@@ -218,6 +246,12 @@ func (c *Config) SetDefaults() {
 	if c.RAG.ChunkOverlap == 0 {
 		c.RAG.ChunkOverlap = 100
 	}
+	if c.RAG.RAGFusionQueries == 0 {
+		c.RAG.RAGFusionQueries = 4
+	}
+	if c.RAG.RAGFusionWeight == 0 {
+		c.RAG.RAGFusionWeight = 0.5
+	}
 
 	if c.Embedding.Provider == "" {
 		c.Embedding.Provider = "openai"
@@ -233,6 +267,18 @@ func (c *Config) SetDefaults() {
 	}
 	if c.Embedding.Ollama.BaseURL == "" {
 		c.Embedding.Ollama.BaseURL = "http://localhost:11434"
+	}
+	if c.Embedding.Cohere.Model == "" {
+		c.Embedding.Cohere.Model = "embed-english-v3.0"
+	}
+	if c.Embedding.Cohere.BaseURL == "" {
+		c.Embedding.Cohere.BaseURL = "https://api.cohere.ai/v1"
+	}
+	if c.Embedding.Voyage.Model == "" {
+		c.Embedding.Voyage.Model = "voyage-2"
+	}
+	if c.Embedding.Voyage.BaseURL == "" {
+		c.Embedding.Voyage.BaseURL = "https://api.voyageai.com/v1"
 	}
 
 	if c.LLM.Provider == "" {
@@ -294,6 +340,12 @@ func (c *Config) SetDefaults() {
 func (c *Config) Validate() error {
 	if c.Embedding.Provider == "openai" && c.Embedding.OpenAI.APIKey == "" {
 		return fmt.Errorf("OpenAI API key is required for embedding")
+	}
+	if c.Embedding.Provider == "cohere" && c.Embedding.Cohere.APIKey == "" {
+		return fmt.Errorf("Cohere API key is required for embedding")
+	}
+	if c.Embedding.Provider == "voyage" && c.Embedding.Voyage.APIKey == "" {
+		return fmt.Errorf("Voyage API key is required for embedding")
 	}
 
 	if c.LLM.Provider == "openai" && c.LLM.OpenAI.APIKey == "" {

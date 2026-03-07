@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DotNetAge/gorag/llm"
@@ -89,21 +90,56 @@ func (r *Reranker) buildRerankPrompt(query string, results []vectorstore.Result)
 // getRelevanceScores gets relevance scores from LLM
 func (r *Reranker) getRelevanceScores(ctx context.Context, prompt string, count int) ([]float32, error) {
 	// Get response from LLM
-	_, err := r.llm.Complete(ctx, prompt)
+	response, err := r.llm.Complete(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse scores from response
-	// This is a simplification - in a real implementation, we'd need more robust parsing
-	scores := make([]float32, count)
-	for i := range scores {
-		scores[i] = 0.5 // Default score if parsing fails
-	}
-
-	// TODO: Implement proper parsing of LLM response for scores
+	scores := r.parseScores(response, count)
 
 	return scores, nil
+}
+
+// parseScores parses relevance scores from LLM response
+func (r *Reranker) parseScores(response string, expectedCount int) []float32 {
+	scores := make([]float32, expectedCount)
+	
+	// Default scores if parsing fails
+	for i := range scores {
+		scores[i] = 0.5
+	}
+	
+	// Try to extract comma-separated scores
+	// Example: "0.9, 0.7, 0.3, 0.1"
+	
+	// Clean response
+	response = strings.TrimSpace(response)
+	response = strings.Trim(response, "\n")
+	
+	// Split by comma
+	scoreStrs := strings.Split(response, ",")
+	
+	// Parse each score
+	for i, scoreStr := range scoreStrs {
+		if i >= expectedCount {
+			break
+		}
+		
+		scoreStr = strings.TrimSpace(scoreStr)
+		score, err := strconv.ParseFloat(scoreStr, 32)
+		if err == nil {
+			// Clamp score between 0 and 1
+			if score < 0 {
+				score = 0
+			} else if score > 1 {
+				score = 1
+			}
+			scores[i] = float32(score)
+		}
+	}
+	
+	return scores
 }
 
 const defaultRerankPrompt = `

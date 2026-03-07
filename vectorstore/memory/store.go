@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -56,6 +57,11 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	results := make([]vectorstore.Result, 0, capacity)
 
 	for id, embedding := range s.embeddings {
+		// Apply metadata filter if provided
+		if !s.matchesMetadata(s.documents[id].Metadata, opts.Metadata) {
+			continue
+		}
+
 		score := cosineSimilarity(query, embedding, queryNorm, s.norms[id])
 		if score >= opts.MinScore {
 			results = append(results, vectorstore.Result{
@@ -66,6 +72,121 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	}
 
 	return topK(results, opts.TopK), nil
+}
+
+// SearchStructured performs structured search with filters
+func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]vectorstore.Result, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Precompute query norm for faster calculation
+	queryNorm := computeNorm(embedding)
+
+	// Use a fixed-size slice for results to reduce allocations
+	capacity := len(s.embeddings)
+	if capacity > 1000 { // Limit capacity for large stores
+		capacity = 1000
+	}
+	results := make([]vectorstore.Result, 0, capacity)
+
+	for id, embedding := range s.embeddings {
+		// Apply filters
+		if !s.matchesFilters(s.documents[id].Metadata, query.Filters) {
+			continue
+		}
+
+		score := cosineSimilarity(embedding, embedding, queryNorm, s.norms[id])
+		if score >= query.MinScore {
+			results = append(results, vectorstore.Result{
+				Chunk: s.documents[id],
+				Score: score,
+			})
+		}
+	}
+
+	return topK(results, query.TopK), nil
+}
+
+// GetByMetadata retrieves chunks by metadata
+func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]vectorstore.Result, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var results []vectorstore.Result
+
+	for _, chunk := range s.documents {
+		if s.matchesMetadata(chunk.Metadata, metadata) {
+			results = append(results, vectorstore.Result{
+				Chunk: chunk,
+				Score: 1.0, // Exact match
+			})
+		}
+	}
+
+	return results, nil
+}
+
+// matchesMetadata checks if chunk metadata matches the filter
+func (s *Store) matchesMetadata(chunkMetadata, filterMetadata map[string]string) bool {
+	if filterMetadata == nil || len(filterMetadata) == 0 {
+		return true
+	}
+
+	for key, value := range filterMetadata {
+		if chunkValue, exists := chunkMetadata[key]; !exists || chunkValue != value {
+			return false
+		}
+	}
+
+	return true
+}
+
+// matchesFilters checks if chunk metadata matches all filter conditions
+func (s *Store) matchesFilters(metadata map[string]string, filters []vectorstore.FilterCondition) bool {
+	for _, filter := range filters {
+		if !s.matchesFilter(metadata, filter) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesFilter checks if chunk metadata matches a single filter condition
+func (s *Store) matchesFilter(metadata map[string]string, filter vectorstore.FilterCondition) bool {
+	value, exists := metadata[filter.Field]
+	if !exists {
+		return false
+	}
+
+	switch filter.Operator {
+	case vectorstore.FilterOpEq:
+		return value == filter.Value
+	case vectorstore.FilterOpNeq:
+		return value != filter.Value
+	case vectorstore.FilterOpContains:
+		if strValue, ok := filter.Value.(string); ok {
+			return strings.Contains(value, strValue)
+		}
+	case vectorstore.FilterOpIn:
+		if sliceValue, ok := filter.Value.([]interface{}); ok {
+			for _, v := range sliceValue {
+				if value == v {
+					return true
+				}
+			}
+		}
+	case vectorstore.FilterOpNin:
+		if sliceValue, ok := filter.Value.([]interface{}); ok {
+			for _, v := range sliceValue {
+				if value == v {
+					return false
+				}
+			}
+			return true
+		}
+	}
+
+	return false
 }
 
 // Delete removes chunks from the store

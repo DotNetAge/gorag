@@ -27,34 +27,107 @@ func NewParser() *Parser {
 
 // Parse parses JSON into chunks
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]parser.Chunk, error) {
-	var data interface{}
-	err := json.NewDecoder(r).Decode(&data)
+	var chunks []parser.Chunk
+	err := p.ParseWithCallback(ctx, r, func(chunk parser.Chunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	return chunks, err
+}
+
+// ParseWithCallback parses JSON and calls the callback for each chunk
+func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback func(parser.Chunk) error) error {
+	decoder := json.NewDecoder(r)
+
+	// Read opening token
+	token, err := decoder.Token()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Convert to pretty-printed JSON string
-	content, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return nil, err
-	}
+	var buffer strings.Builder
+	var position int
 
-	text := string(content)
-	chunks := p.splitText(text)
+	// Process JSON tokens
+	for decoder.More() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// Encode token back to JSON string
+			tokenBytes, err := json.Marshal(token)
+			if err != nil {
+				return err
+			}
+			buffer.WriteString(string(tokenBytes))
 
-	result := make([]parser.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		result[i] = parser.Chunk{
-			ID:      uuid.New().String(),
-			Content: chunk,
-			Metadata: map[string]string{
-				"type":     "json",
-				"position": fmt.Sprintf("%d", i),
-			},
+			// Check if we have enough content for a chunk
+			if buffer.Len() >= p.chunkSize {
+				// Create chunk with overlap
+				chunkText := buffer.String()
+				if len(chunkText) > p.chunkSize {
+					chunkText = chunkText[:p.chunkSize]
+				}
+
+				// Create chunk
+				chunk := parser.Chunk{
+					ID:      uuid.New().String(),
+					Content: strings.TrimSpace(chunkText),
+					Metadata: map[string]string{
+						"type":     "json",
+						"position": fmt.Sprintf("%d", position),
+					},
+				}
+
+				// Call callback
+				if err := callback(chunk); err != nil {
+					return err
+				}
+
+				// Keep overlap for next chunk
+				if p.chunkOverlap > 0 && buffer.Len() > p.chunkOverlap {
+					remaining := buffer.String()[p.chunkSize-p.chunkOverlap:]
+					buffer.Reset()
+					buffer.WriteString(remaining)
+				} else {
+					buffer.Reset()
+				}
+
+				position++
+			}
+
+			// Read next token
+			token, err = decoder.Token()
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	return result, nil
+	// Process last token
+	tokenBytes, err := json.Marshal(token)
+	if err != nil {
+		return err
+	}
+	buffer.WriteString(string(tokenBytes))
+
+	// Process remaining content
+	if buffer.Len() > 0 {
+		chunk := parser.Chunk{
+			ID:      uuid.New().String(),
+			Content: strings.TrimSpace(buffer.String()),
+			Metadata: map[string]string{
+				"type":     "json",
+				"position": fmt.Sprintf("%d", position),
+			},
+		}
+
+		if err := callback(chunk); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SupportedFormats returns supported formats
@@ -62,29 +135,3 @@ func (p *Parser) SupportedFormats() []string {
 	return []string{".json"}
 }
 
-// splitText splits text into chunks with overlap
-func (p *Parser) splitText(text string) []string {
-	var chunks []string
-
-	// Handle empty text
-	if len(text) == 0 {
-		chunks = append(chunks, "")
-		return chunks
-	}
-
-	for i := 0; i < len(text); i += p.chunkSize - p.chunkOverlap {
-		end := i + p.chunkSize
-		if end > len(text) {
-			end = len(text)
-		}
-
-		chunk := text[i:end]
-		chunks = append(chunks, strings.TrimSpace(chunk))
-
-		if end >= len(text) {
-			break
-		}
-	}
-
-	return chunks
-}
