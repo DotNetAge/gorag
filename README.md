@@ -11,29 +11,34 @@
 
 ## Features
 
-- **High Performance** - Built for production with low latency and high throughput
-- **Modular Design** - Pluggable parsers, vector stores, and LLM providers
-- **Cloud Native** - Kubernetes friendly, single binary deployment
-- **Type Safe** - Full type safety with Go's strong typing
-- **Production Ready** - Observability, metrics, and error handling built-in
-- **Hybrid Retrieval** - Combine vector and keyword search for better results
-- **Reranking** - LLM-based result reranking for improved relevance
-- **Streaming Responses** - Real-time streaming for better user experience
-- **Plugin System** - Extensible architecture for custom functionality
-- **CLI Tool** - Command-line interface for easy usage
-- **Comprehensive Testing** - 85%+ test coverage with integration tests using Testcontainers
-- **Multi-modal Support** - Process images and other media types
-- **Configuration Management** - Flexible YAML and environment variable configuration
-- **Custom Prompt Templates** - Create custom prompt formats with placeholders
-- **Performance Benchmarks** - Built-in benchmarking for performance optimization
-- **Semantic Chunking** - Intelligent document chunking based on semantic meaning
-- **HyDE (Hypothetical Document Embeddings)** - Improve query understanding with generated context
-- **RAG-Fusion** - Enhance retrieval with multiple query perspectives
-- **Context Compression** - Optimize context window usage for better results
-- **Multi-turn Conversation Support** - Maintain conversation context across queries
-- **Dynamic Parser Management** - Add multiple parsers for different file formats and automatically select the appropriate one
+- **🚀 High Performance** - Built for production with low latency and high throughput
+- **📦 Modular Design** - Pluggable parsers, vector stores, and LLM providers
+- **☁️ Cloud Native** - Kubernetes friendly, single binary deployment
+- **🔒 Type Safe** - Full type safety with Go's strong typing
+- **✅ Production Ready** - Observability, metrics, and error handling built-in
+- **🔍 Hybrid Retrieval** - Combine vector and keyword search for better results
+- **📊 Reranking** - LLM-based result reranking for improved relevance
+- **⚡ Streaming Responses** - Real-time streaming for better user experience
+- **🔌 Plugin System** - Extensible architecture for custom functionality
+- **🛠️ CLI Tool** - Command-line interface for easy usage
+- **🧪 Comprehensive Testing** - 85%+ test coverage with integration tests using Testcontainers
+- **🖼️ Multi-modal Support** - Process images and other media types
+- **⚙️ Configuration Management** - Flexible YAML and environment variable configuration
+- **📝 Custom Prompt Templates** - Create custom prompt formats with placeholders
+- **📈 Performance Benchmarks** - Built-in benchmarking for performance optimization
+- **🧠 Semantic Chunking** - Intelligent document chunking based on semantic meaning
+- **💡 HyDE (Hypothetical Document Embeddings)** - Improve query understanding with generated context
+- **🔄 RAG-Fusion** - Enhance retrieval with multiple query perspectives
+- **🗜️ Context Compression** - Optimize context window usage for better results
+- **💬 Multi-turn Conversation Support** - Maintain conversation context across queries
+- **🤖 Dynamic Parser Management** - Add multiple parsers for different file formats and automatically select the appropriate one
+- **⚡⚡ Concurrent File Processing** - **10 concurrent workers** for blazing-fast directory indexing
+- **📁 Large File Support** - **Streaming parsers** handle 100M+ files without memory issues
+- **🔄 Async Directory Indexing** - Background processing for large document collections
 
-## Semantic Understanding Capabilities Comparison
+## 🏆 Why GoRAG? - Competitive Advantages
+
+### Semantic Understanding Capabilities Comparison
 
 | Feature                                     | GoRAG           | LangChain | LlamaIndex | Haystack |
 | ------------------------------------------- | --------------- | --------- | ---------- | -------- |
@@ -52,6 +57,19 @@
 | **Type Safety**                             | ✅               | ❌         | ❌          | ❌        |
 | **Cloud Native**                            | ✅               | ❌         | ❌          | ❌        |
 
+### 🚀 Performance & Scalability Comparison
+
+| Feature                         | GoRAG                         | LangChain               | LlamaIndex              | Haystack                |
+| ------------------------------- | ----------------------------- | ----------------------- | ----------------------- | ----------------------- |
+| **Concurrent File Processing**  | ✅ **10 workers built-in**     | ❌ Manual implementation | ❌ Manual implementation | ❌ Manual implementation |
+| **Async Directory Indexing**    | ✅ **Built-in support**        | ❌ Not available         | ❌ Not available         | ❌ Not available         |
+| **Streaming Large File Parser** | ✅ **100M+ files**             | ⚠️ Limited               | ⚠️ Limited               | ⚠️ Limited               |
+| **Automatic Parser Selection**  | ✅ **By file extension**       | ⚠️ Manual configuration  | ⚠️ Manual configuration  | ⚠️ Manual configuration  |
+| **Memory Efficient**            | ✅ **Streaming processing**    | ❌ Loads entire file     | ❌ Loads entire file     | ❌ Loads entire file     |
+| **Error Aggregation**           | ✅ **Unified error handling**  | ❌ Manual handling       | ❌ Manual handling       | ❌ Manual handling       |
+| **Bible-Scale Processing**      | ✅ **10,100 docs tested**      | ❌ Not optimized         | ❌ Not optimized         | ❌ Not optimized         |
+| **Multi-format Support**        | ✅ **9 formats auto-detected** | ⚠️ Manual setup          | ⚠️ Manual setup          | ⚠️ Manual setup          |
+
 ## Performance Benchmarks
 
 ### GoRAG Performance Results (Comprehensive Test Data)
@@ -67,7 +85,7 @@
 | **Multiple Documents Query** (10 documents)                | ~6.9s                         |
 | **Large-Scale Query** (100 documents)                      | ~9.7s                         |
 | **Bible-Scale Query** (10,100 documents)                   | ~20.5s                        |
-| **Mixed-Formats Query** (71 Bible files, htm/txt)           | ~26.8s                        |
+| **Mixed-Formats Query** (71 Bible files, htm/txt)          | ~26.8s                        |
 
 ### Performance Comparison (Relative)
 
@@ -185,6 +203,8 @@ These results validate that GoRAG is designed for production use cases with subs
 
 ## Quick Start
 
+### Basic Usage
+
 ```go
 package main
 
@@ -241,6 +261,70 @@ func main() {
     log.Println(resp.Answer)
 }
 ```
+
+### ⚡ Concurrent Directory Indexing (Unique Feature!)
+
+GoRAG provides **built-in concurrent directory indexing** - a feature not available in other RAG frameworks!
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    
+    embedder "github.com/DotNetAge/gorag/embedding/openai"
+    llm "github.com/DotNetAge/gorag/llm/openai"
+    "github.com/DotNetAge/gorag/rag"
+    "github.com/DotNetAge/gorag/vectorstore/memory"
+)
+
+func main() {
+    ctx := context.Background()
+    apiKey := os.Getenv("OPENAI_API_KEY")
+    
+    // Create RAG engine - parsers are auto-loaded!
+    embedderInstance, _ := embedder.New(embedder.Config{APIKey: apiKey})
+    llmInstance, _ := llm.New(llm.Config{APIKey: apiKey})
+    
+    engine, err := rag.New(
+        rag.WithVectorStore(memory.NewStore()),
+        rag.WithEmbedder(embedderInstance),
+        rag.WithLLM(llmInstance),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 🚀 Index entire directory with 10 concurrent workers!
+    // Automatically detects file types and selects appropriate parsers
+    err = engine.IndexDirectory(ctx, "./documents")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Or use async indexing for background processing
+    err = engine.AsyncIndexDirectory(ctx, "./large-document-collection")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Query as usual
+    resp, err := engine.Query(ctx, "What information is in my documents?", rag.QueryOptions{
+        TopK: 5,
+    })
+    
+    log.Println(resp.Answer)
+}
+```
+
+**Key Benefits:**
+- ✅ **10 concurrent workers** - Process multiple files simultaneously
+- ✅ **Automatic parser selection** - Detects file types by extension (.pdf, .docx, .html, etc.)
+- ✅ **Streaming large files** - Handles 100M+ files without memory issues
+- ✅ **Error aggregation** - Collects all errors and returns them at once
+- ✅ **Context cancellation** - Respects context cancellation for graceful shutdown
 
 ## Installation
 
