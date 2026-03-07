@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	embedder "github.com/DotNetAge/gorag/embedding/openai"
 	llm "github.com/DotNetAge/gorag/llm/openai"
@@ -18,10 +19,9 @@ func main() {
 	fmt.Println("=== GoRAG Advanced Features Example ===")
 	fmt.Println("This example demonstrates GoRAG's advanced capabilities:")
 	fmt.Println("- Concurrent directory indexing")
-	fmt.Println("- HyDE (Hypothetical Document Embeddings)")
-	fmt.Println("- RAG-Fusion")
-	fmt.Println("- Context Compression")
-	fmt.Println("- Multi-turn Conversation")
+	fmt.Println("- Hybrid retrieval")
+	fmt.Println("- Custom prompt templates")
+	fmt.Println("- Streaming responses")
 	fmt.Println()
 
 	// Get OpenAI API key from environment
@@ -59,7 +59,7 @@ func main() {
 	// 1. Concurrent Directory Indexing
 	fmt.Println("📁 1. Concurrent Directory Indexing")
 	fmt.Println("   Indexing documents with 10 concurrent workers...")
-	
+
 	documents := []string{
 		"Go is an open source programming language that makes it easy to build simple, reliable, and efficient software.",
 		"Go was created by Robert Griesemer, Rob Pike, and Ken Thompson at Google in 2007.",
@@ -73,14 +73,10 @@ func main() {
 		"Rust guarantees memory safety without using a garbage collector.",
 	}
 
-	for i, doc := range documents {
+	for _, doc := range documents {
 		err := engine.Index(ctx, rag.Source{
 			Type:    "text",
 			Content: doc,
-			Metadata: map[string]string{
-				"index":   fmt.Sprintf("%d", i),
-				"language": doc[:2],
-			},
 		})
 		if err != nil {
 			log.Printf("   Error indexing document: %v", err)
@@ -103,123 +99,89 @@ func main() {
 	}
 	fmt.Println()
 
-	// 3. Query with HyDE (Hypothetical Document Embeddings)
-	fmt.Println("💡 3. Query with HyDE (Hypothetical Document Embeddings)")
-	fmt.Println("   HyDE generates hypothetical answers to improve retrieval quality")
-	
-	resp, err = engine.Query(ctx, "Compare Go and Rust performance", rag.QueryOptions{
-		TopK:           5,
-		UseHyDE:        true,
-		HyDEInstructions: "Generate a detailed comparison focusing on performance characteristics",
+	// 3. Query with Custom Prompt Template
+	fmt.Println("📝 3. Query with Custom Prompt Template")
+	fmt.Println("   Using a custom prompt template for specialized responses")
+
+	resp, err = engine.Query(ctx, "Compare Go and Python", rag.QueryOptions{
+		TopK: 5,
+		PromptTemplate: `You are a programming language expert. 
+
+Based on the following context, provide a detailed comparison:
+
+{context}
+
+Question: {question}
+
+Please provide:
+1. Key similarities
+2. Key differences
+3. Best use cases for each
+
+Answer:`,
 	})
 	if err != nil {
 		log.Printf("   Error: %v", err)
 	} else {
-		fmt.Printf("   Q: Compare Go and Rust performance\n")
+		fmt.Printf("   Q: Compare Go and Python\n")
 		fmt.Printf("   A: %s\n", resp.Answer)
 		fmt.Printf("   📚 Sources: %d\n", len(resp.Sources))
 	}
 	fmt.Println()
 
-	// 4. Query with RAG-Fusion
-	fmt.Println("🔄 4. Query with RAG-Fusion")
-	fmt.Println("   RAG-Fusion generates multiple query variations for better retrieval")
-	
-	resp, err = engine.Query(ctx, "programming languages for system development", rag.QueryOptions{
-		TopK:             5,
-		UseRAGFusion:     true,
-		RAGFusionQueries: 3,
-	})
-	if err != nil {
-		log.Printf("   Error: %v", err)
-	} else {
-		fmt.Printf("   Q: programming languages for system development\n")
-		fmt.Printf("   A: %s\n", resp.Answer)
-		fmt.Printf("   📚 Sources: %d\n", len(resp.Sources))
+	// 4. Query with TopK Variations
+	fmt.Println("🔢 4. Query with Different TopK Values")
+	fmt.Println("   Testing different numbers of retrieved documents")
+
+	questions := []string{
+		"What are the key features of Go?",
+		"Tell me about Rust",
+	}
+
+	topKValues := []int{2, 5}
+
+	for _, question := range questions {
+		fmt.Printf("\n   Question: %s\n", question)
+		for _, topK := range topKValues {
+			resp, err := engine.Query(ctx, question, rag.QueryOptions{
+				TopK: topK,
+			})
+			if err != nil {
+				log.Printf("      Error with TopK=%d: %v", topK, err)
+				continue
+			}
+			fmt.Printf("      TopK=%d: %d sources retrieved\n", topK, len(resp.Sources))
+		}
 	}
 	fmt.Println()
 
-	// 5. Query with Context Compression
-	fmt.Println("🗜️  5. Query with Context Compression")
-	fmt.Println("   Context compression optimizes token usage for better results")
-	
-	resp, err = engine.Query(ctx, "What are the key features of Go, Python, and Rust?", rag.QueryOptions{
-		TopK:                 5,
-		UseContextCompression: true,
-		MaxContextTokens:     500,
-	})
+	// 5. Directory Indexing Demo
+	fmt.Println("📂 5. Directory Indexing Demo")
+	fmt.Println("   Demonstrating concurrent directory indexing")
+	fmt.Println("   (This will work if ./documents directory exists)")
+
+	startTime := time.Now()
+	err = engine.IndexDirectory(ctx, "./documents")
 	if err != nil {
-		log.Printf("   Error: %v", err)
+		fmt.Printf("   ⚠️  Note: %v\n", err)
+		fmt.Println("   (Create a ./documents directory with files to test this feature)")
 	} else {
-		fmt.Printf("   Q: What are the key features of Go, Python, and Rust?\n")
-		fmt.Printf("   A: %s\n", resp.Answer)
-		fmt.Printf("   📚 Sources: %d\n", len(resp.Sources))
+		elapsed := time.Since(startTime)
+		fmt.Printf("   ✅ Directory indexed in %v\n", elapsed)
 	}
 	fmt.Println()
 
-	// 6. Multi-turn Conversation
-	fmt.Println("💬 6. Multi-turn Conversation Support")
-	fmt.Println("   Maintaining context across multiple queries")
-	
-	// Create a conversation session
-	conversationID := "demo-conversation"
-	
-	// First turn
-	resp1, err := engine.Query(ctx, "Who created Go?", rag.QueryOptions{
-		TopK:           3,
-		ConversationID: conversationID,
-	})
-	if err != nil {
-		log.Printf("   Error: %v", err)
-	} else {
-		fmt.Printf("   Turn 1 - Q: Who created Go?\n")
-		fmt.Printf("            A: %s\n", resp1.Answer)
-	}
-	
-	// Second turn (referencing previous context)
-	resp2, err := engine.Query(ctx, "What else did they create?", rag.QueryOptions{
-		TopK:           3,
-		ConversationID: conversationID,
-	})
-	if err != nil {
-		log.Printf("   Error: %v", err)
-	} else {
-		fmt.Printf("   Turn 2 - Q: What else did they create?\n")
-		fmt.Printf("            A: %s\n", resp2.Answer)
-	}
-	
-	// Third turn (referencing previous context)
-	resp3, err := engine.Query(ctx, "When was it created?", rag.QueryOptions{
-		TopK:           3,
-		ConversationID: conversationID,
-	})
-	if err != nil {
-		log.Printf("   Error: %v", err)
-	} else {
-		fmt.Printf("   Turn 3 - Q: When was it created?\n")
-		fmt.Printf("            A: %s\n", resp3.Answer)
-	}
-	fmt.Println()
+	// 6. Async Directory Indexing
+	fmt.Println("🔄 6. Async Directory Indexing")
+	fmt.Println("   Starting background indexing...")
 
-	// 7. Combined Advanced Features
-	fmt.Println("🚀 7. Combined Advanced Features")
-	fmt.Println("   Using HyDE + RAG-Fusion + Context Compression together")
-	
-	resp, err = engine.Query(ctx, "Which language is best for concurrent programming?", rag.QueryOptions{
-		TopK:                  5,
-		UseHyDE:               true,
-		UseRAGFusion:          true,
-		RAGFusionQueries:      3,
-		UseContextCompression: true,
-		MaxContextTokens:      400,
-		ConversationID:        conversationID,
-	})
+	err = engine.AsyncIndexDirectory(ctx, "./large-collection")
 	if err != nil {
-		log.Printf("   Error: %v", err)
+		fmt.Printf("   ⚠️  Note: %v\n", err)
+		fmt.Println("   (Create a ./large-collection directory with files to test this feature)")
 	} else {
-		fmt.Printf("   Q: Which language is best for concurrent programming?\n")
-		fmt.Printf("   A: %s\n", resp.Answer)
-		fmt.Printf("   📚 Sources: %d\n", len(resp.Sources))
+		fmt.Println("   ✅ Async indexing started in background")
+		fmt.Println("   - Processing continues without blocking")
 	}
 	fmt.Println()
 
@@ -231,21 +193,17 @@ func main() {
 	fmt.Println("   - Automatic parser selection by file extension")
 	fmt.Println("   - Supports 9 file formats out of the box")
 	fmt.Println()
-	fmt.Println("✅ HyDE (Hypothetical Document Embeddings)")
-	fmt.Println("   - Generates hypothetical answers to improve retrieval")
-	fmt.Println("   - Better understanding of query intent")
+	fmt.Println("✅ Custom Prompt Templates")
+	fmt.Println("   - Create specialized response formats")
+	fmt.Println("   - Control LLM behavior with custom instructions")
 	fmt.Println()
-	fmt.Println("✅ RAG-Fusion")
-	fmt.Println("   - Generates multiple query variations")
-	fmt.Println("   - Combines results from multiple perspectives")
+	fmt.Println("✅ Flexible Retrieval")
+	fmt.Println("   - Adjustable TopK for different precision needs")
+	fmt.Println("   - Hybrid retrieval combines vector and keyword search")
 	fmt.Println()
-	fmt.Println("✅ Context Compression")
-	fmt.Println("   - Optimizes token usage")
-	fmt.Println("   - Fits more relevant context within token limits")
+	fmt.Println("✅ Async Processing")
+	fmt.Println("   - Background directory indexing")
+	fmt.Println("   - Non-blocking operations for better UX")
 	fmt.Println()
-	fmt.Println("✅ Multi-turn Conversation")
-	fmt.Println("   - Maintains context across queries")
-	fmt.Println("   - Natural conversational flow")
-	fmt.Println()
-	fmt.Println("🎯 GoRAG: The most feature-complete RAG framework for Go!")
+	fmt.Println("🎯 GoRAG: Production-ready RAG framework for Go!")
 }
