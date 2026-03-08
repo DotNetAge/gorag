@@ -15,6 +15,9 @@ import (
 type Parser struct {
 	chunkSize    int
 	chunkOverlap int
+	cleanScripts bool // Remove <script> tags
+	cleanStyles  bool // Remove <style> tags
+	extractLinks bool // Extract links
 }
 
 // NewParser creates a new HTML parser
@@ -22,7 +25,35 @@ func NewParser() *Parser {
 	return &Parser{
 		chunkSize:    500,
 		chunkOverlap: 50,
+		cleanScripts: true,  // Default: remove scripts
+		cleanStyles:  true,  // Default: remove styles
+		extractLinks: false, // Default: don't extract links
 	}
+}
+
+// SetChunkSize sets the chunk size
+func (p *Parser) SetChunkSize(size int) {
+	p.chunkSize = size
+}
+
+// SetChunkOverlap sets the chunk overlap
+func (p *Parser) SetChunkOverlap(overlap int) {
+	p.chunkOverlap = overlap
+}
+
+// SetCleanScripts sets whether to remove <script> tags
+func (p *Parser) SetCleanScripts(clean bool) {
+	p.cleanScripts = clean
+}
+
+// SetCleanStyles sets whether to remove <style> tags
+func (p *Parser) SetCleanStyles(clean bool) {
+	p.cleanStyles = clean
+}
+
+// SetExtractLinks sets whether to extract links
+func (p *Parser) SetExtractLinks(extract bool) {
+	p.extractLinks = extract
 }
 
 // Parse parses HTML into chunks
@@ -42,6 +73,7 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 
 	var buffer strings.Builder
 	var position int
+	var inSkipTag bool // Track if we're inside a script/style tag
 
 	for {
 		select {
@@ -73,7 +105,26 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 				}
 				return nil
 
+			case html.StartTagToken:
+				// Check if we should skip this tag
+				tagName := tokenizer.Token().Data
+				if (tagName == "script" && p.cleanScripts) || (tagName == "style" && p.cleanStyles) {
+					inSkipTag = true
+				}
+
+			case html.EndTagToken:
+				// Exit skip mode
+				tagName := tokenizer.Token().Data
+				if tagName == "script" || tagName == "style" {
+					inSkipTag = false
+				}
+
 			case html.TextToken:
+				// Skip text inside script/style tags
+				if inSkipTag {
+					continue
+				}
+
 				// Extract text content
 				text := string(tokenizer.Text())
 				buffer.WriteString(text)
@@ -125,4 +176,3 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 func (p *Parser) SupportedFormats() []string {
 	return []string{".html", ".htm"}
 }
-

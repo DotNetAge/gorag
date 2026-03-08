@@ -1,0 +1,189 @@
+package dbschema
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DotNetAge/gorag/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestParser_Parse(t *testing.T) {
+	parser := NewParser()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sqlContent := []byte(`CREATE TABLE users (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(255)
+);`)
+
+	r := bytes.NewReader(sqlContent)
+	chunks, err := parser.Parse(ctx, r)
+	require.NoError(t, err)
+	assert.NotEmpty(t, chunks)
+}
+
+func TestParser_ParseWithCallback(t *testing.T) {
+	parser := NewParser()
+	ctx := context.Background()
+
+	sqlContent := []byte(`CREATE TABLE products (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    price DECIMAL(10,2)
+);
+
+CREATE INDEX idx_name ON products(name);`)
+
+	var chunkCount int
+	var foundTable bool
+
+	err := parser.ParseWithCallback(ctx, bytes.NewReader(sqlContent), func(chunk core.Chunk) error {
+		chunkCount++
+		assert.NotEmpty(t, chunk.ID)
+		assert.Contains(t, chunk.Metadata["type"], "dbschema")
+		if chunk.Metadata["chunk_type"] == "table" {
+			foundTable = true
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Greater(t, chunkCount, 0)
+	assert.True(t, foundTable, "Should find at least one table")
+}
+
+func TestParser_TableExtraction(t *testing.T) {
+	parser := NewParser()
+	parser.SetExtractTables(true)
+	ctx := context.Background()
+
+	sqlContent := []byte(`CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    user_id INT,
+    total DECIMAL(10,2)
+);`)
+
+	var foundOrders bool
+	err := parser.ParseWithCallback(ctx, bytes.NewReader(sqlContent), func(chunk core.Chunk) error {
+		if chunk.Metadata["chunk_type"] == "table" {
+			if chunk.Metadata["table_name"] == "orders" {
+				foundOrders = true
+			}
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.True(t, foundOrders, "Should extract orders table")
+}
+
+func TestParser_IndexExtraction(t *testing.T) {
+	parser := NewParser()
+	parser.SetExtractIndexes(true)
+	ctx := context.Background()
+
+	sqlContent := []byte(`CREATE INDEX idx_email ON users(email);`)
+
+	var foundIndex bool
+	err := parser.ParseWithCallback(ctx, bytes.NewReader(sqlContent), func(chunk core.Chunk) error {
+		if chunk.Metadata["chunk_type"] == "index" {
+			if chunk.Metadata["object_name"] == "idx_email" {
+				foundIndex = true
+			}
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.True(t, foundIndex, "Should extract index")
+}
+
+func TestParser_EmptySQL(t *testing.T) {
+	parser := NewParser()
+	ctx := context.Background()
+
+	sqlContent := []byte(``)
+	chunks, err := parser.Parse(ctx, bytes.NewReader(sqlContent))
+	require.NoError(t, err)
+	_ = chunks
+}
+
+func TestParser_LargeSQL(t *testing.T) {
+	parser := NewParser()
+	parser.SetChunkSize(100)
+	ctx := context.Background()
+
+	var sb strings.Builder
+	for i := 0; i < 20; i++ {
+		sb.WriteString(fmt.Sprintf("CREATE TABLE table_%d (id INT, name VARCHAR(100));\n", i))
+	}
+
+	chunks, err := parser.Parse(ctx, strings.NewReader(sb.String()))
+	require.NoError(t, err)
+	assert.NotEmpty(t, chunks)
+}
+
+func TestParser_ContextCancellation(t *testing.T) {
+	parser := NewParser()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var sb strings.Builder
+	for i := 0; i < 500; i++ {
+		sb.WriteString(fmt.Sprintf("CREATE TABLE t%d (id INT);\n", i))
+	}
+
+	cancel()
+	_, err := parser.Parse(ctx, strings.NewReader(sb.String()))
+	assert.Error(t, err)
+}
+
+func TestParser_CallbackError(t *testing.T) {
+	parser := NewParser()
+	parser.SetChunkSize(20)
+	ctx := context.Background()
+
+	sqlContent := []byte(`-- Comment 1
+-- Comment 2
+SELECT 1;`)
+
+	err := parser.ParseWithCallback(ctx, bytes.NewReader(sqlContent), func(chunk core.Chunk) error {
+		return assert.AnError
+	})
+	assert.Error(t, err)
+}
+
+func TestParser_ChunkConfiguration(t *testing.T) {
+	parser := NewParser()
+	parser.SetChunkSize(400)
+	parser.SetChunkOverlap(40)
+
+	assert.Equal(t, 400, parser.chunkSize)
+	assert.Equal(t, 40, parser.chunkOverlap)
+}
+
+func TestParser_ConfigurationOptions(t *testing.T) {
+	parser := NewParser()
+
+	parser.SetExtractTables(false)
+	parser.SetExtractColumns(false)
+	parser.SetExtractIndexes(false)
+
+	assert.False(t, parser.extractTables)
+	assert.False(t, parser.extractColumns)
+	assert.False(t, parser.extractIndexes)
+}
+
+func TestParser_SupportedFormats(t *testing.T) {
+	parser := NewParser()
+	formats := parser.SupportedFormats()
+	assert.Len(t, formats, 1)
+	assert.Equal(t, ".sql", formats[0])
+}

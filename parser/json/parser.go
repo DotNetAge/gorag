@@ -25,6 +25,16 @@ func NewParser() *Parser {
 	}
 }
 
+// SetChunkSize sets the chunk size
+func (p *Parser) SetChunkSize(size int) {
+	p.chunkSize = size
+}
+
+// SetChunkOverlap sets the chunk overlap
+func (p *Parser) SetChunkOverlap(overlap int) {
+	p.chunkOverlap = overlap
+}
+
 // Parse parses JSON into chunks
 func (p *Parser) Parse(ctx context.Context, r io.Reader) ([]core.Chunk, error) {
 	var chunks []core.Chunk
@@ -134,4 +144,3 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 func (p *Parser) SupportedFormats() []string {
 	return []string{".json"}
 }
-
