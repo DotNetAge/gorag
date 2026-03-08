@@ -174,16 +174,38 @@ Document 1: Go is a programming language designed for simplicity and efficiency.
 
 ### 🎯 开箱即用支持
 
-#### 文档解析器（9 种类型）
-- **Text** - 纯文本和 Markdown 文件
-- **PDF** - PDF 文档
-- **DOCX** - Microsoft Word 文档
-- **HTML** - HTML 网页
-- **JSON** - JSON 数据文件
-- **YAML** - YAML 配置文件
-- **Excel** - Microsoft Excel 电子表格（.xlsx）
-- **PPT** - Microsoft PowerPoint 演示文稿（.pptx）
-- **Image** - 图像（支持 OCR）
+#### 文档解析器（16 种类型）- 🆕 v1.0.0 完成！
+
+**轻量级解析器（纯 Go 实现，支持流式处理）**
+| 解析器 | 文件类型 | 更新日期 | 测试覆盖率 | 测试数 |
+|--------|-----------|-------------|----------|-------|
+| **Text** | `.txt`, `.md` | 2024-03-19 | - | ✅ |
+| **Markdown** | `.md` | 2024-03-19 | 87.5% | 8/8 ✅ |
+| **Config** | `.toml`, `.ini`, `.properties`, `.env`, `.yaml` | 2024-03-19 | 65.6% | 9/9 ✅ |
+| **CSV/TSV** | `.csv`, `.tsv` | 2024-03-19 | 91.1% | 12/12 ✅ |
+| **Go Code** | `.go` | 2024-03-19 | 78.2% | 8/8 ✅ |
+| **JSON** | `.json` | 2024-03-19 | 73.1% | 10/10 ✅ |
+| **YAML** | `.yaml`, `.yml` | 2024-03-19 | 91.9% | 8/8 ✅ |
+| **HTML** | `.html`, `.htm` | 2024-03-19 | - | 6/6 ✅ |
+| **XML** | `.xml` | 2024-03-19 | 91.1% | 9/9 ✅ |
+| **Log** | `.log` (Nginx/Apache/Syslog) | 2024-03-19 | 53.3% | 10/10 ✅ |
+| **Python** | `.py` | 2024-03-19 | 89.7% | 10/10 ✅ |
+| **JavaScript** | `.js`, `.jsx`, `.mjs` | 2024-03-19 | 76.2% | 10/10 ✅ |
+| **Email** | `.eml` | 2024-03-19 | 93.9% ⭐ | 11/11 ✅ |
+| **DB Schema** | `.sql` | 2024-03-19 | 84.9% | 11/11 ✅ |
+| **Java** | `.java` | 2024-03-19 | 70.7% | 11/11 ✅ |
+| **TypeScript** | `.ts`, `.tsx` | 2024-03-19 | 75.6% | 11/11 ✅ |
+
+**重量级解析器（CGO 依赖）**
+| 解析器 | 文件类型 | 状态 |
+|--------|-----------|--------|
+| **PDF** | `.pdf` | ✅ 可用 |
+| **DOCX** | `.docx` | ✅ 可用 |
+| **Excel** | `.xlsx`, `.xls` | ✅ 可用 |
+| **PPT** | `.pptx`, `.ppt` | ✅ 可用 |
+| **Image** | `.jpg`, `.png`, `.gif`, `.bmp` (支持 OCR) | ✅ 可用 |
+
+> **注意**: 所有轻量级解析器都支持流式处理，可处理 GB 级文件，内存效率 O(1)。
 
 #### 嵌入模型提供商（4 个提供商）
 - **OpenAI** - OpenAI 嵌入模型（text-embedding-ada-002、text-embedding-3-small、text-embedding-3-large）

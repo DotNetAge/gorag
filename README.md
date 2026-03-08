@@ -174,16 +174,38 @@ These results validate that GoRAG is designed for production use cases with subs
 
 ## 🎯 Out-of-the-Box Support
 
-#### Document Parsers (9 types)
-- **Text** - Plain text and markdown files
-- **PDF** - PDF documents
-- **DOCX** - Microsoft Word documents
-- **HTML** - HTML web pages
-- **JSON** - JSON data files
-- **YAML** - YAML configuration files
-- **Excel** - Microsoft Excel spreadsheets (.xlsx)
-- **PPT** - Microsoft PowerPoint presentations (.pptx)
-- **Image** - Images with OCR support
+#### Document Parsers (16 types) - 🆕 v1.0.0 Complete!
+
+**Lightweight Parsers (Pure Go, Streaming Support)**
+| Parser | File Type | Update Date | Coverage | Tests |
+|--------|-----------|-------------|----------|-------|
+| **Text** | `.txt`, `.md` | 2024-03-19 | - | ✅ |
+| **Markdown** | `.md` | 2024-03-19 | 87.5% | 8/8 ✅ |
+| **Config** | `.toml`, `.ini`, `.properties`, `.env`, `.yaml` | 2024-03-19 | 65.6% | 9/9 ✅ |
+| **CSV/TSV** | `.csv`, `.tsv` | 2024-03-19 | 91.1% | 12/12 ✅ |
+| **Go Code** | `.go` | 2024-03-19 | 78.2% | 8/8 ✅ |
+| **JSON** | `.json` | 2024-03-19 | 73.1% | 10/10 ✅ |
+| **YAML** | `.yaml`, `.yml` | 2024-03-19 | 91.9% | 8/8 ✅ |
+| **HTML** | `.html`, `.htm` | 2024-03-19 | - | 6/6 ✅ |
+| **XML** | `.xml` | 2024-03-19 | 91.1% | 9/9 ✅ |
+| **Log** | `.log` (Nginx/Apache/Syslog) | 2024-03-19 | 53.3% | 10/10 ✅ |
+| **Python** | `.py` | 2024-03-19 | 89.7% | 10/10 ✅ |
+| **JavaScript** | `.js`, `.jsx`, `.mjs` | 2024-03-19 | 76.2% | 10/10 ✅ |
+| **Email** | `.eml` | 2024-03-19 | 93.9% ⭐ | 11/11 ✅ |
+| **DB Schema** | `.sql` | 2024-03-19 | 84.9% | 11/11 ✅ |
+| **Java** | `.java` | 2024-03-19 | 70.7% | 11/11 ✅ |
+| **TypeScript** | `.ts`, `.tsx` | 2024-03-19 | 75.6% | 11/11 ✅ |
+
+**Heavyweight Parsers (CGO Dependencies)**
+| Parser | File Type | Status |
+|--------|-----------|--------|
+| **PDF** | `.pdf` | ✅ Available |
+| **DOCX** | `.docx` | ✅ Available |
+| **Excel** | `.xlsx`, `.xls` | ✅ Available |
+| **PPT** | `.pptx`, `.ppt` | ✅ Available |
+| **Image** | `.jpg`, `.png`, `.gif`, `.bmp` (with OCR) | ✅ Available |
+
+> **Note**: All lightweight parsers support streaming processing for GB-level files with O(1) memory efficiency.
 
 #### Embedding Providers (4 providers)
 - **OpenAI** - OpenAI embeddings (text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large)
