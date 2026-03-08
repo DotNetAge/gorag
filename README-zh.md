@@ -207,6 +207,38 @@ Document 1: Go is a programming language designed for simplicity and efficiency.
 
 > **注意**: 所有轻量级解析器都支持流式处理，可处理 GB 级文件，内存效率 O(1)。
 
+#### 重量级解析器插件（独立项目）- 🆕 v1.0.0
+
+**音频、视频和网页解析器作为独立插件提供**：
+
+| 插件 | 格式 | 功能 | 测试 | 仓库 |
+|------|------|------|------|------|
+| **gorag-audio** | MP3, WAV, OGG, FLAC, M4A | 语音识别、元数据提取 | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-audio) |
+| **gorag-video** | MP4, AVI, MKV, MOV, FLV, WebM | 音频提取、帧提取、OCR | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-video) |
+| **gorag-webpage** | HTTP/HTTPS URLs, HTML | 元数据、链接、JSON-LD、截图 | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-webpage) |
+
+**安装**:
+```bash
+go get github.com/DotNetAge/gorag-audio
+go get github.com/DotNetAge/gorag-video
+go get github.com/DotNetAge/gorag-webpage
+```
+
+**使用**:
+```go
+import (
+    "github.com/DotNetAge/gorag"
+    "github.com/DotNetAge/gorag-audio"
+    "github.com/DotNetAge/gorag-video"
+    "github.com/DotNetAge/gorag-webpage"
+)
+
+engine := gorag.NewEngine()
+engine.RegisterParser("audio", audio.NewParser())
+engine.RegisterParser("video", video.NewParser())
+engine.RegisterParser("webpage", webpage.NewParser())
+```
+
 #### 嵌入模型提供商（4 个提供商）
 - **OpenAI** - OpenAI 嵌入模型（text-embedding-ada-002、text-embedding-3-small、text-embedding-3-large）
 - **Ollama** - 本地嵌入模型（bge-small-zh-v1.5、nomic-embed-text 等）

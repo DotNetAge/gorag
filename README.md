@@ -207,6 +207,38 @@ These results validate that GoRAG is designed for production use cases with subs
 
 > **Note**: All lightweight parsers support streaming processing for GB-level files with O(1) memory efficiency.
 
+#### Heavyweight Parser Plugins (Independent Projects) - 🆕 v1.0.0
+
+**Audio, Video, and Webpage parsers are available as independent plugins**:
+
+| Plugin | Formats | Features | Tests | Repo |
+|--------|---------|----------|-------|------|
+| **gorag-audio** | MP3, WAV, OGG, FLAC, M4A | Speech-to-text, Metadata | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-audio) |
+| **gorag-video** | MP4, AVI, MKV, MOV, FLV, WebM | Audio extraction, Frames, OCR | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-video) |
+| **gorag-webpage** | HTTP/HTTPS URLs, HTML | Metadata, Links, JSON-LD, Screenshots | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-webpage) |
+
+**Installation**:
+```bash
+go get github.com/DotNetAge/gorag-audio
+go get github.com/DotNetAge/gorag-video
+go get github.com/DotNetAge/gorag-webpage
+```
+
+**Usage**:
+```go
+import (
+    "github.com/DotNetAge/gorag"
+    "github.com/DotNetAge/gorag-audio"
+    "github.com/DotNetAge/gorag-video"
+    "github.com/DotNetAge/gorag-webpage"
+)
+
+engine := gorag.NewEngine()
+engine.RegisterParser("audio", audio.NewParser())
+engine.RegisterParser("video", video.NewParser())
+engine.RegisterParser("webpage", webpage.NewParser())
+```
+
 #### Embedding Providers (4 providers)
 - **OpenAI** - OpenAI embeddings (text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large)
 - **Ollama** - Local embedding models (bge-small-zh-v1.5, nomic-embed-text, etc.)
