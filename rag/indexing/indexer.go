@@ -41,14 +41,18 @@ func DefaultIndexerConfig() IndexerConfig {
 
 // Indexer handles document indexing operations
 type Indexer struct {
-	parsers       map[string]parser.Parser
-	defaultParser parser.Parser
-	embedder      Embedder
-	store         vectorstore.Store
-	metrics       Metrics
-	logger        Logger
-	tracer        Tracer
-	config        IndexerConfig
+	parsers            map[string]parser.Parser
+	defaultParser      parser.Parser
+	embedder           Embedder
+	store              vectorstore.Store
+	metrics            Metrics
+	logger             Logger
+	tracer             Tracer
+	config             IndexerConfig
+	indexedDocuments   int
+	indexingDocuments  int
+	monitoredDocuments int
+	mu                 sync.Mutex
 }
 
 // Embedder defines the interface for embedding providers
@@ -61,6 +65,10 @@ type Metrics interface {
 	RecordErrorCount(ctx context.Context, errorType string)
 	RecordIndexLatency(ctx context.Context, duration time.Duration)
 	RecordIndexCount(ctx context.Context, status string)
+	RecordIndexedDocuments(ctx context.Context, count int)
+	RecordIndexingDocuments(ctx context.Context, count int)
+	RecordMonitoredDocuments(ctx context.Context, count int)
+	RecordSystemMetrics(ctx context.Context, cpuUsage float64, memoryUsage float64)
 }
 
 // Logger defines the interface for logging
@@ -117,6 +125,14 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 	startTime := time.Now()
 	status := "success"
 
+	// Increment indexing documents count
+	i.mu.Lock()
+	i.indexingDocuments++
+	if i.metrics != nil {
+		i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+	}
+	i.mu.Unlock()
+
 	// Start span
 	if i.tracer != nil {
 		var span observability.Span
@@ -143,6 +159,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return err
 	}
 
@@ -160,6 +185,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return err
 	}
 
@@ -183,6 +217,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 				}
 			}
 			status = "error"
+
+			// Decrement indexing documents count
+			i.mu.Lock()
+			i.indexingDocuments--
+			if i.metrics != nil {
+				i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+			}
+			i.mu.Unlock()
+
 			return err
 		}
 	} else if source.Path != "" {
@@ -202,6 +245,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 				}
 			}
 			status = "error"
+
+			// Decrement indexing documents count
+			i.mu.Lock()
+			i.indexingDocuments--
+			if i.metrics != nil {
+				i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+			}
+			i.mu.Unlock()
+
 			return err
 		}
 		defer file.Close()
@@ -222,6 +274,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return err
 	}
 
@@ -246,6 +307,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return errors.ErrParsing(source.Type, err)
 	}
 	if i.logger != nil {
@@ -261,6 +331,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 		if i.logger != nil {
 			i.logger.Info(ctx, "No chunks to index", map[string]interface{}{"source_type": source.Type})
 		}
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return nil
 	}
 
@@ -292,6 +371,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return errors.ErrEmbedding("embedder", err).
 			WithContext("chunks_count", fmt.Sprintf("%d", len(chunks)))
 	}
@@ -318,6 +406,15 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			}
 		}
 		status = "error"
+
+		// Decrement indexing documents count
+		i.mu.Lock()
+		i.indexingDocuments--
+		if i.metrics != nil {
+			i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+		}
+		i.mu.Unlock()
+
 		return errors.ErrStorage("add chunks", err).
 			WithContext("chunks_count", fmt.Sprintf("%d", len(chunks)))
 	}
@@ -326,6 +423,25 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			"duration":     time.Since(storeStartTime).Seconds(),
 			"chunks_count": len(chunks),
 		})
+	}
+
+	// Increment indexed documents count
+	i.mu.Lock()
+	i.indexedDocuments++
+	i.indexingDocuments--
+	if i.metrics != nil {
+		i.metrics.RecordIndexedDocuments(ctx, i.indexedDocuments)
+		i.metrics.RecordIndexingDocuments(ctx, i.indexingDocuments)
+	}
+	i.mu.Unlock()
+
+	// Record system metrics
+	if i.metrics != nil {
+		// In a real implementation, you would collect actual system metrics
+		// For now, we'll use dummy values
+		cpuUsage := 0.0
+		memoryUsage := 0.0
+		i.metrics.RecordSystemMetrics(ctx, cpuUsage, memoryUsage)
 	}
 
 	// Record metrics
@@ -338,9 +454,11 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 	// Log index
 	if i.logger != nil {
 		i.logger.Info(ctx, "Index completed", map[string]interface{}{
-			"duration":     time.Since(startTime).Seconds(),
-			"chunks_count": len(chunks),
-			"source_type":  source.Type,
+			"duration":           time.Since(startTime).Seconds(),
+			"chunks_count":       len(chunks),
+			"source_type":        source.Type,
+			"indexed_documents":  i.indexedDocuments,
+			"indexing_documents": i.indexingDocuments,
 		})
 	}
 

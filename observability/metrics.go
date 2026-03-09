@@ -19,17 +19,30 @@ type Metrics interface {
 	RecordIndexCount(ctx context.Context, status string)
 	// RecordErrorCount records the number of errors
 	RecordErrorCount(ctx context.Context, errorType string)
+	// RecordIndexedDocuments records the number of indexed documents
+	RecordIndexedDocuments(ctx context.Context, count int)
+	// RecordIndexingDocuments records the number of documents being indexed
+	RecordIndexingDocuments(ctx context.Context, count int)
+	// RecordMonitoredDocuments records the number of monitored documents
+	RecordMonitoredDocuments(ctx context.Context, count int)
+	// RecordSystemMetrics records system metrics (CPU, memory)
+	RecordSystemMetrics(ctx context.Context, cpuUsage float64, memoryUsage float64)
 	// Register registers the metrics with Prometheus
 	Register() error
 }
 
 // PrometheusMetrics implements metrics collection using Prometheus
 type PrometheusMetrics struct {
-	queryLatency   prometheus.Histogram
-	indexLatency   prometheus.Histogram
-	queryCount     prometheus.Counter
-	indexCount     prometheus.Counter
-	errorCount     prometheus.Counter
+	queryLatency         prometheus.Histogram
+	indexLatency         prometheus.Histogram
+	queryCount           prometheus.Counter
+	indexCount           prometheus.Counter
+	errorCount           prometheus.Counter
+	indexedDocuments     prometheus.Gauge
+	indexingDocuments    prometheus.Gauge
+	monitoredDocuments   prometheus.Gauge
+	cpuUsage             prometheus.Gauge
+	memoryUsage          prometheus.Gauge
 }
 
 // NewPrometheusMetrics creates a new Prometheus metrics collector
@@ -61,12 +74,42 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 		Help: "Number of RAG errors",
 	})
 
+	indexedDocuments := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "gorag_indexed_documents",
+		Help: "Number of indexed documents",
+	})
+
+	indexingDocuments := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "gorag_indexing_documents",
+		Help: "Number of documents being indexed",
+	})
+
+	monitoredDocuments := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "gorag_monitored_documents",
+		Help: "Number of monitored documents",
+	})
+
+	cpuUsage := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "gorag_cpu_usage_percent",
+		Help: "CPU usage percentage",
+	})
+
+	memoryUsage := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "gorag_memory_usage_mb",
+		Help: "Memory usage in MB",
+	})
+
 	return &PrometheusMetrics{
-		queryLatency: queryLatency,
-		indexLatency: indexLatency,
-		queryCount:   queryCount,
-		indexCount:   indexCount,
-		errorCount:   errorCount,
+		queryLatency:         queryLatency,
+		indexLatency:         indexLatency,
+		queryCount:           queryCount,
+		indexCount:           indexCount,
+		errorCount:           errorCount,
+		indexedDocuments:     indexedDocuments,
+		indexingDocuments:    indexingDocuments,
+		monitoredDocuments:   monitoredDocuments,
+		cpuUsage:             cpuUsage,
+		memoryUsage:          memoryUsage,
 	}
 }
 
@@ -95,6 +138,27 @@ func (m *PrometheusMetrics) RecordErrorCount(ctx context.Context, errorType stri
 	m.errorCount.Inc()
 }
 
+// RecordIndexedDocuments records the number of indexed documents
+func (m *PrometheusMetrics) RecordIndexedDocuments(ctx context.Context, count int) {
+	m.indexedDocuments.Set(float64(count))
+}
+
+// RecordIndexingDocuments records the number of documents being indexed
+func (m *PrometheusMetrics) RecordIndexingDocuments(ctx context.Context, count int) {
+	m.indexingDocuments.Set(float64(count))
+}
+
+// RecordMonitoredDocuments records the number of monitored documents
+func (m *PrometheusMetrics) RecordMonitoredDocuments(ctx context.Context, count int) {
+	m.monitoredDocuments.Set(float64(count))
+}
+
+// RecordSystemMetrics records system metrics (CPU, memory)
+func (m *PrometheusMetrics) RecordSystemMetrics(ctx context.Context, cpuUsage float64, memoryUsage float64) {
+	m.cpuUsage.Set(cpuUsage)
+	m.memoryUsage.Set(memoryUsage)
+}
+
 // Register registers the metrics with Prometheus
 func (m *PrometheusMetrics) Register() error {
 	if err := prometheus.Register(m.queryLatency); err != nil {
@@ -110,6 +174,21 @@ func (m *PrometheusMetrics) Register() error {
 		return err
 	}
 	if err := prometheus.Register(m.errorCount); err != nil {
+		return err
+	}
+	if err := prometheus.Register(m.indexedDocuments); err != nil {
+		return err
+	}
+	if err := prometheus.Register(m.indexingDocuments); err != nil {
+		return err
+	}
+	if err := prometheus.Register(m.monitoredDocuments); err != nil {
+		return err
+	}
+	if err := prometheus.Register(m.cpuUsage); err != nil {
+		return err
+	}
+	if err := prometheus.Register(m.memoryUsage); err != nil {
 		return err
 	}
 	return nil

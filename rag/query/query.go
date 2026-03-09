@@ -86,6 +86,10 @@ type Metrics interface {
 	RecordErrorCount(ctx context.Context, errorType string)
 	RecordQueryLatency(ctx context.Context, duration time.Duration)
 	RecordQueryCount(ctx context.Context, status string)
+	RecordIndexedDocuments(ctx context.Context, count int)
+	RecordIndexingDocuments(ctx context.Context, count int)
+	RecordMonitoredDocuments(ctx context.Context, count int)
+	RecordSystemMetrics(ctx context.Context, cpuUsage float64, memoryUsage float64)
 }
 
 // Logger defines the interface for logging

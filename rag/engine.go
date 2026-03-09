@@ -96,6 +96,9 @@ type Engine struct {
 // - WithParsers: Custom parsers for specific file formats
 // - WithRetriever: Custom hybrid retriever
 // - WithReranker: Custom LLM reranker
+// - WithLogger: Custom logger
+// - WithMetrics: Custom metrics collector
+// - WithTracer: Custom tracer
 //
 // Returns:
 // - *Engine: Newly created RAG engine
@@ -143,6 +146,21 @@ func New(opts ...Option) (*Engine, error) {
 	// Set default parser if not provided
 	if engine.defaultParser == nil {
 		engine.defaultParser = text.NewParser()
+	}
+
+	// Set default logger if not provided
+	if engine.logger == nil {
+		engine.logger = observability.NewJSONLogger()
+	}
+
+	// Set default metrics if not provided
+	if engine.metrics == nil {
+		engine.metrics = observability.NewPrometheusMetrics()
+	}
+
+	// Set default tracer if not provided (using no-op tracer for now)
+	if engine.tracer == nil {
+		engine.tracer = observability.NewNoopTracer()
 	}
 
 	// Validate required components
@@ -399,5 +417,33 @@ func (e *Engine) BatchQuery(ctx context.Context, questions []string, opts QueryO
 // generateChunkID generates a unique chunk ID
 func generateChunkID() string {
 	return uuid.New().String()
+}
+
+// RecordIndexedDocuments records the number of indexed documents
+func (e *Engine) RecordIndexedDocuments(ctx context.Context, count int) {
+	if e.metrics != nil {
+		e.metrics.RecordIndexedDocuments(ctx, count)
+	}
+}
+
+// RecordIndexingDocuments records the number of documents being indexed
+func (e *Engine) RecordIndexingDocuments(ctx context.Context, count int) {
+	if e.metrics != nil {
+		e.metrics.RecordIndexingDocuments(ctx, count)
+	}
+}
+
+// RecordMonitoredDocuments records the number of monitored documents
+func (e *Engine) RecordMonitoredDocuments(ctx context.Context, count int) {
+	if e.metrics != nil {
+		e.metrics.RecordMonitoredDocuments(ctx, count)
+	}
+}
+
+// RecordSystemMetrics records system metrics (CPU, memory)
+func (e *Engine) RecordSystemMetrics(ctx context.Context, cpuUsage float64, memoryUsage float64) {
+	if e.metrics != nil {
+		e.metrics.RecordSystemMetrics(ctx, cpuUsage, memoryUsage)
+	}
 }
 
