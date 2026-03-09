@@ -2,6 +2,7 @@ package qdrant
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -46,9 +47,31 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 		opt(store)
 	}
 
+	// Parse host and port from addr
+	host := addr
+	port := store.port
+
+	// If addr contains a port, split it
+	if len(addr) > 0 && addr[0] != ':' {
+		for i := len(addr) - 1; i >= 0; i-- {
+			if addr[i] == ':' {
+				host = addr[:i]
+				// Extract port from addr
+				portStr := addr[i+1:]
+				if portStr != "" {
+					// Convert port string to int
+					if p, err := strconv.Atoi(portStr); err == nil {
+						port = p
+					}
+				}
+				break
+			}
+		}
+	}
+
 	client, err := qdrant.NewClient(&qdrant.Config{
-		Host: addr,
-		Port: store.port,
+		Host: host,
+		Port: port,
 	})
 	if err != nil {
 		return nil, err
@@ -91,9 +114,11 @@ func (s *Store) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]flo
 			}
 		}
 		payload["content"] = chunk.Content
+		payload["id"] = chunk.ID
 
+		// Use integer ID for Qdrant
 		points[i] = &qdrant.PointStruct{
-			Id:      qdrant.NewIDUUID(chunk.ID),
+			Id:      qdrant.NewIDNum(uint64(i + 1)),
 			Vectors: qdrant.NewVectors(embeddings[i]...),
 			Payload: qdrant.NewValueMap(payload),
 		}
@@ -133,7 +158,105 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 		return nil, err
 	}
 
-	var vectorResults []core.Result
+	return s.parseResults(response), nil
+}
+
+func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
+	topK := query.TopK
+	if topK <= 0 {
+		topK = 5
+	}
+
+	limit := uint64(topK)
+
+	queryRequest := &qdrant.QueryPoints{
+		CollectionName: s.collection,
+		Query:          qdrant.NewQuery(embedding...),
+		Limit:          &limit,
+		WithPayload:    qdrant.NewWithPayload(true),
+	}
+
+	if len(query.Filters) > 0 {
+		conditions := make([]*qdrant.Condition, 0, len(query.Filters))
+		for _, f := range query.Filters {
+			if strValue, ok := f.Value.(string); ok {
+				conditions = append(conditions, qdrant.NewMatchKeyword(f.Field, strValue))
+			}
+		}
+		if len(conditions) > 0 {
+			queryRequest.Filter = &qdrant.Filter{Must: conditions}
+		}
+	}
+
+	response, err := s.client.Query(ctx, queryRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.parseResults(response), nil
+}
+
+func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
+	conditions := make([]*qdrant.Condition, 0, len(metadata))
+	for k, v := range metadata {
+		conditions = append(conditions, qdrant.NewMatchKeyword(k, v))
+	}
+
+	limit := uint64(100)
+	queryRequest := &qdrant.QueryPoints{
+		CollectionName: s.collection,
+		Query:          qdrant.NewQuery(make([]float32, s.dimension)...),
+		Limit:          &limit,
+		WithPayload:    qdrant.NewWithPayload(true),
+	}
+
+	if len(conditions) > 0 {
+		queryRequest.Filter = &qdrant.Filter{Must: conditions}
+	}
+
+	response, err := s.client.Query(ctx, queryRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	results := s.parseResults(response)
+	for i := range results {
+		results[i].Score = 1.0
+	}
+	return results, nil
+}
+
+func (s *Store) Delete(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Create filter for ids
+	conditions := make([]*qdrant.Condition, len(ids))
+	for i, id := range ids {
+		conditions[i] = qdrant.NewMatchKeyword("id", id)
+	}
+
+	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: s.collection,
+		Points: &qdrant.PointsSelector{
+			PointsSelectorOneOf: &qdrant.PointsSelector_Filter{
+				Filter: &qdrant.Filter{
+					Should: conditions,
+				},
+			},
+		},
+	})
+
+	return err
+}
+
+func (s *Store) Close() error {
+	return nil
+}
+
+func (s *Store) parseResults(response []*qdrant.ScoredPoint) []core.Result {
+	var results []core.Result
 	for _, hit := range response {
 		var content string
 		if hit.Payload != nil {
@@ -156,11 +279,15 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 		}
 
 		id := ""
-		if hit.Id != nil {
-			id = hit.Id.GetUuid()
+		if hit.Payload != nil {
+			if idVal, ok := hit.Payload["id"]; ok {
+				if strV, ok := idVal.GetKind().(*qdrant.Value_StringValue); ok {
+					id = strV.StringValue
+				}
+			}
 		}
 
-		vectorResults = append(vectorResults, core.Result{
+		results = append(results, core.Result{
 			Chunk: core.Chunk{
 				ID:       id,
 				Content:  content,
@@ -169,34 +296,5 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 			Score: float32(hit.Score),
 		})
 	}
-
-	return vectorResults, nil
-}
-
-func (s *Store) Delete(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	pointIDs := make([]*qdrant.PointId, len(ids))
-	for i, id := range ids {
-		pointIDs[i] = qdrant.NewIDUUID(id)
-	}
-
-	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: s.collection,
-		Points: &qdrant.PointsSelector{
-			PointsSelectorOneOf: &qdrant.PointsSelector_Points{
-				Points: &qdrant.PointsIdsList{
-					Ids: pointIDs,
-				},
-			},
-		},
-	})
-
-	return err
-}
-
-func (s *Store) Close() error {
-	return nil
+	return results
 }

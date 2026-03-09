@@ -5,87 +5,214 @@ import (
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go/modules/qdrant"
 )
 
-// mockQdrantClient is a mock Qdrant client for testing
-type mockQdrantClient struct {
-	collectionExistsCalled bool
-	collectionExistsResult bool
-	createCollectionCalled bool
-	upsertCalled bool
-	queryCalled bool
-	deleteCalled bool
-}
+func setupQdrantContainer(t *testing.T) (string, func()) {
+	ctx := context.Background()
 
-func (m *mockQdrantClient) CollectionExists(ctx context.Context, collection string) (bool, error) {
-	m.collectionExistsCalled = true
-	return m.collectionExistsResult, nil
-}
+	container, err := qdrant.Run(ctx, "qdrant/qdrant:latest")
+	require.NoError(t, err)
 
-func (m *mockQdrantClient) CreateCollection(ctx context.Context, req interface{}) error {
-	m.createCollectionCalled = true
-	return nil
-}
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
 
-func (m *mockQdrantClient) Upsert(ctx context.Context, req interface{}) (interface{}, error) {
-	m.upsertCalled = true
-	return nil, nil
-}
+	port, err := container.MappedPort(ctx, "6334")
+	require.NoError(t, err)
 
-func (m *mockQdrantClient) Query(ctx context.Context, req interface{}) (interface{}, error) {
-	m.queryCalled = true
-	return nil, nil
-}
+	endpoint := host + ":" + port.Port()
 
-func (m *mockQdrantClient) Delete(ctx context.Context, req interface{}) (interface{}, error) {
-	m.deleteCalled = true
-	return nil, nil
+	cleanup := func() {
+		container.Terminate(ctx)
+	}
+
+	return endpoint, cleanup
 }
 
 func TestNewStore(t *testing.T) {
-	// This test would typically require a real Qdrant connection
-	// For now, we'll skip it and focus on unit tests for other methods
-	t.Skip("Skipping Qdrant connection test - requires running Qdrant server")
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint)
+	require.NoError(t, err)
+	defer store.Close()
+
+	assert.NotNil(t, store)
+	assert.Equal(t, "gorag", store.collection)
+	assert.Equal(t, 1536, store.dimension)
+}
+
+func TestNewStore_WithOptions(t *testing.T) {
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint,
+		WithCollection("test-collection"),
+		WithDimension(768),
+	)
+	require.NoError(t, err)
+	defer store.Close()
+
+	assert.Equal(t, "test-collection", store.collection)
+	assert.Equal(t, 768, store.dimension)
 }
 
 func TestStore_Add(t *testing.T) {
-	// Create a mock store
-	store := &Store{
-		dimension: 1536,
-	}
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
 
 	// Test with empty chunks
-	err := store.Add(context.Background(), []core.Chunk{}, [][]float32{})
+	err = store.Add(ctx, []core.Chunk{}, [][]float32{})
 	require.NoError(t, err)
 
 	// Test with mismatched lengths
-	err = store.Add(context.Background(), []core.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
+	err = store.Add(ctx, []core.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
+	require.NoError(t, err)
+
+	// Test with valid data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world", Metadata: map[string]string{"lang": "en"}},
+		{ID: "2", Content: "你好世界", Metadata: map[string]string{"lang": "zh"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	err = store.Add(ctx, chunks, embeddings)
 	require.NoError(t, err)
 }
 
 func TestStore_Search(t *testing.T) {
-	// Test with default options - this will fail because client is nil
-	// We'll skip this test since it requires a real Qdrant client
-	t.Skip("Skipping Qdrant search test - requires real client")
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world"},
+		{ID: "2", Content: "goodbye world"},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.9, 0.8, 0.7, 0.6},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Search
+	query := []float32{0.1, 0.2, 0.3, 0.4}
+	results, err := store.Search(ctx, query, vectorstore.SearchOptions{TopK: 5})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 1)
+}
+
+func TestStore_SearchStructured(t *testing.T) {
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data with metadata
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world", Metadata: map[string]string{"category": "greeting"}},
+		{ID: "2", Content: "goodbye world", Metadata: map[string]string{"category": "farewell"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.9, 0.8, 0.7, 0.6},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Search with filter
+	query := &vectorstore.StructuredQuery{
+		Query: "hello",
+		Filters: []vectorstore.FilterCondition{
+			{Field: "category", Operator: vectorstore.FilterOpEq, Value: "greeting"},
+		},
+		TopK: 5,
+	}
+	results, err := store.SearchStructured(ctx, query, []float32{0.1, 0.2, 0.3, 0.4})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 0)
+}
+
+func TestStore_GetByMetadata(t *testing.T) {
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "document 1", Metadata: map[string]string{"author": "alice"}},
+		{ID: "2", Content: "document 2", Metadata: map[string]string{"author": "bob"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Get by metadata
+	results, err := store.GetByMetadata(ctx, map[string]string{"author": "alice"})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 0)
 }
 
 func TestStore_Delete(t *testing.T) {
-	// Create a mock store
-	store := &Store{}
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
 
 	// Test with empty IDs
-	err := store.Delete(context.Background(), []string{})
+	err = store.Delete(ctx, []string{})
+	require.NoError(t, err)
+
+	// Add and delete
+	chunks := []core.Chunk{{ID: "1", Content: "test"}}
+	embeddings := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	err = store.Delete(ctx, []string{"1"})
 	require.NoError(t, err)
 }
 
 func TestStore_Close(t *testing.T) {
-	// Create a mock store
-	store := &Store{}
+	endpoint, cleanup := setupQdrantContainer(t)
+	defer cleanup()
 
-	// Test close
-	err := store.Close()
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint)
+	require.NoError(t, err)
+
+	err = store.Close()
 	require.NoError(t, err)
 }
 

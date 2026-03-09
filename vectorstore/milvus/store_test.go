@@ -5,105 +5,214 @@ import (
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go/modules/milvus"
 )
 
-// mockMilvusClient is a mock Milvus client for testing
-type mockMilvusClient struct {
-	hasCollectionCalled bool
-	hasCollectionResult bool
-	createCollectionCalled bool
-	createIndexCalled bool
-	loadCollectionCalled bool
-	insertCalled bool
-	searchCalled bool
-	deleteCalled bool
-	closeCalled bool
-}
+func setupMilvusContainer(t *testing.T) (string, func()) {
+	ctx := context.Background()
 
-func (m *mockMilvusClient) HasCollection(ctx context.Context, collection string) (bool, error) {
-	m.hasCollectionCalled = true
-	return m.hasCollectionResult, nil
-}
+	container, err := milvus.Run(ctx, "milvusdb/milvus:latest")
+	require.NoError(t, err)
 
-func (m *mockMilvusClient) CreateCollection(ctx context.Context, schema interface{}, shardsNum int) error {
-	m.createCollectionCalled = true
-	return nil
-}
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
 
-func (m *mockMilvusClient) CreateIndex(ctx context.Context, collection string, field string, index interface{}, async bool) error {
-	m.createIndexCalled = true
-	return nil
-}
+	port, err := container.MappedPort(ctx, "19530")
+	require.NoError(t, err)
 
-func (m *mockMilvusClient) LoadCollection(ctx context.Context, collection string, async bool) error {
-	m.loadCollectionCalled = true
-	return nil
-}
+	endpoint := host + ":" + port.Port()
 
-func (m *mockMilvusClient) Insert(ctx context.Context, collection string, partitionName string, columns ...interface{}) (interface{}, error) {
-	m.insertCalled = true
-	return nil, nil
-}
+	cleanup := func() {
+		container.Terminate(ctx)
+	}
 
-func (m *mockMilvusClient) Search(ctx context.Context, collection string, partitionNames []string, expr string, outputFields []string, vectors []interface{}, vectorField string, metricType interface{}, topK int, params interface{}) (interface{}, error) {
-	m.searchCalled = true
-	return nil, nil
-}
-
-func (m *mockMilvusClient) Delete(ctx context.Context, collection string, partitionName string, expr string) error {
-	m.deleteCalled = true
-	return nil
-}
-
-func (m *mockMilvusClient) Close() error {
-	m.closeCalled = true
-	return nil
+	return endpoint, cleanup
 }
 
 func TestNewStore(t *testing.T) {
-	// This test would typically require a real Milvus connection
-	// For now, we'll skip it and focus on unit tests for other methods
-	t.Skip("Skipping Milvus connection test - requires running Milvus server")
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint)
+	require.NoError(t, err)
+	defer store.Close()
+
+	assert.NotNil(t, store)
+	assert.Equal(t, "gorag", store.collection)
+	assert.Equal(t, 1536, store.dimension)
+}
+
+func TestNewStore_WithOptions(t *testing.T) {
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint,
+		WithCollection("test_collection"),
+		WithDimension(768),
+	)
+	require.NoError(t, err)
+	defer store.Close()
+
+	assert.Equal(t, "test_collection", store.collection)
+	assert.Equal(t, 768, store.dimension)
 }
 
 func TestStore_Add(t *testing.T) {
-	// Create a mock store (we'll use a real Store struct but with mock dependencies)
-	store := &Store{
-		dimension: 1536,
-	}
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
 
 	// Test with empty chunks
-	err := store.Add(context.Background(), []core.Chunk{}, [][]float32{})
+	err = store.Add(ctx, []core.Chunk{}, [][]float32{})
 	require.NoError(t, err)
 
 	// Test with mismatched lengths
-	err = store.Add(context.Background(), []core.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
+	err = store.Add(ctx, []core.Chunk{{ID: "1", Content: "test"}}, [][]float32{})
+	require.NoError(t, err)
+
+	// Test with valid data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world", Metadata: map[string]string{"lang": "en"}},
+		{ID: "2", Content: "你好世界", Metadata: map[string]string{"lang": "zh"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	err = store.Add(ctx, chunks, embeddings)
 	require.NoError(t, err)
 }
 
 func TestStore_Search(t *testing.T) {
-	// Test with default options - this will fail because client is nil
-	// We'll skip this test since it requires a real Milvus client
-	t.Skip("Skipping Milvus search test - requires real client")
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world"},
+		{ID: "2", Content: "goodbye world"},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.9, 0.8, 0.7, 0.6},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Search
+	query := []float32{0.1, 0.2, 0.3, 0.4}
+	results, err := store.Search(ctx, query, vectorstore.SearchOptions{TopK: 5})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 1)
+}
+
+func TestStore_SearchStructured(t *testing.T) {
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data with metadata
+	chunks := []core.Chunk{
+		{ID: "1", Content: "hello world", Metadata: map[string]string{"category": "greeting"}},
+		{ID: "2", Content: "goodbye world", Metadata: map[string]string{"category": "farewell"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.9, 0.8, 0.7, 0.6},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Search with filter
+	query := &vectorstore.StructuredQuery{
+		Query: "hello",
+		Filters: []vectorstore.FilterCondition{
+			{Field: "category", Operator: vectorstore.FilterOpEq, Value: "greeting"},
+		},
+		TopK: 5,
+	}
+	results, err := store.SearchStructured(ctx, query, []float32{0.1, 0.2, 0.3, 0.4})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 0)
+}
+
+func TestStore_GetByMetadata(t *testing.T) {
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Add test data
+	chunks := []core.Chunk{
+		{ID: "1", Content: "document 1", Metadata: map[string]string{"author": "alice"}},
+		{ID: "2", Content: "document 2", Metadata: map[string]string{"author": "bob"}},
+	}
+	embeddings := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	// Get by metadata
+	results, err := store.GetByMetadata(ctx, map[string]string{"author": "alice"})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(results), 0)
 }
 
 func TestStore_Delete(t *testing.T) {
-	// Create a mock store
-	store := &Store{}
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	require.NoError(t, err)
+	defer store.Close()
 
 	// Test with empty IDs
-	err := store.Delete(context.Background(), []string{})
+	err = store.Delete(ctx, []string{})
+	require.NoError(t, err)
+
+	// Add and delete
+	chunks := []core.Chunk{{ID: "1", Content: "test"}}
+	embeddings := [][]float32{{0.1, 0.2, 0.3, 0.4}}
+	err = store.Add(ctx, chunks, embeddings)
+	require.NoError(t, err)
+
+	err = store.Delete(ctx, []string{"1"})
 	require.NoError(t, err)
 }
 
 func TestStore_Close(t *testing.T) {
-	// Create a mock store
-	store := &Store{}
+	endpoint, cleanup := setupMilvusContainer(t)
+	defer cleanup()
 
-	// Test close
-	err := store.Close()
+	ctx := context.Background()
+	store, err := NewStore(ctx, endpoint)
+	require.NoError(t, err)
+
+	err = store.Close()
 	require.NoError(t, err)
 }
 
