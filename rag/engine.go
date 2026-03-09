@@ -3,6 +3,9 @@ package rag
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
@@ -14,6 +17,7 @@ import (
 	"github.com/DotNetAge/gorag/rag/query"
 	"github.com/DotNetAge/gorag/rag/retrieval"
 	"github.com/DotNetAge/gorag/vectorstore"
+	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 )
 
@@ -553,5 +557,150 @@ func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType st
 		Path: filePath,
 	}
 	return e.Index(ctx, source)
+}
+
+// StartWatch starts watching a directory for changes and automatically indexes files
+//
+// Parameters:
+// - targetIndexDir: Directory to watch for changes
+//
+// Returns:
+// - error: Error if watching fails
+//
+// This method will:
+// 1. First perform an initial indexing of the directory
+// 2. Then start watching for file changes
+// 3. Automatically reindex files when they change
+// 4. Use asynchronous indexing to avoid blocking
+func (e *Engine) StartWatch(targetIndexDir string) error {
+	ctx := context.Background()
+	
+	// First perform initial indexing of the directory
+	e.logger.Info(ctx, "Starting initial indexing of directory", map[string]interface{}{
+		"directory": targetIndexDir,
+	})
+	
+	if err := e.IndexDirectory(ctx, targetIndexDir); err != nil {
+		e.logger.Error(ctx, "Failed to perform initial indexing", err, map[string]interface{}{
+			"directory": targetIndexDir,
+		})
+		return fmt.Errorf("failed to perform initial indexing: %w", err)
+	}
+	
+	e.logger.Info(ctx, "Initial indexing completed", map[string]interface{}{
+		"directory": targetIndexDir,
+	})
+	
+	// Create a new watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		e.logger.Error(ctx, "Failed to create watcher", err, nil)
+		return fmt.Errorf("failed to create watcher: %w", err)
+	}
+	defer watcher.Close()
+	
+	// Add the directory and all subdirectories to the watcher
+	if err := e.addDirToWatcher(watcher, targetIndexDir); err != nil {
+		e.logger.Error(ctx, "Failed to add directory to watcher", err, map[string]interface{}{
+			"directory": targetIndexDir,
+		})
+		return fmt.Errorf("failed to add directory to watcher: %w", err)
+	}
+	
+	e.logger.Info(ctx, "Starting to watch directory for changes", map[string]interface{}{
+		"directory": targetIndexDir,
+	})
+	
+	// Start watching for events
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
+			
+			// Only process regular files
+			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0 {
+				// Check if it's a file (not a directory)
+				if !strings.HasSuffix(event.Name, "/") {
+					// Get file extension
+					ext := strings.ToLower(filepath.Ext(event.Name))
+					
+					// Check if we have a parser for this file type
+					if _, ok := e.parsers[ext]; ok {
+						// Use asynchronous indexing to avoid blocking
+						source := Source{
+							Type: ext,
+							Path: event.Name,
+						}
+						
+						if err := e.AsyncIndex(ctx, source); err != nil {
+							e.logger.Error(ctx, "Failed to asynchronously index file", err, map[string]interface{}{
+							"file": event.Name,
+						})
+						}
+						e.logger.Info(ctx, "File change detected, indexing asynchronously", map[string]interface{}{
+							"file": event.Name,
+							"operation": event.Op,
+						})
+					}
+				}
+				
+				// If a directory was created, add it to the watcher
+			if event.Op&fsnotify.Create != 0 {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					if err := e.addDirToWatcher(watcher, event.Name); err != nil {
+						e.logger.Error(ctx, "Failed to add new directory to watcher", err, map[string]interface{}{
+							"directory": event.Name,
+						})
+					}
+				}
+			}
+			}
+			
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+			e.logger.Error(ctx, "Watcher error", err, nil)
+		}
+	}
+}
+
+// addDirToWatcher adds a directory and all its subdirectories to the watcher
+func (e *Engine) addDirToWatcher(watcher *fsnotify.Watcher, dir string) error {
+	// Add the directory itself
+	if err := watcher.Add(dir); err != nil {
+		return err
+	}
+	
+	// Add all subdirectories
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return watcher.Add(path)
+		}
+		return nil
+	})
+}
+
+// StartWatchAsync starts watching a directory for changes asynchronously
+//
+// Parameters:
+// - targetIndexDir: Directory to watch for changes
+//
+// Returns:
+// - error: Error if starting the watch fails
+func (e *Engine) StartWatchAsync(targetIndexDir string) error {
+	go func() {
+		if err := e.StartWatch(targetIndexDir); err != nil {
+			e.logger.Error(context.Background(), "Watch failed", err, map[string]interface{}{
+				"directory": targetIndexDir,
+			})
+		}
+	}()
+	return nil
 }
 

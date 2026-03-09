@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,17 +111,39 @@ func (r *Reranker) parseScores(response string, expectedCount int) []float32 {
 		scores[i] = 0.5
 	}
 	
-	// Try to extract comma-separated scores
-	// Example: "0.9, 0.7, 0.3, 0.1"
-	
 	// Clean response
 	response = strings.TrimSpace(response)
 	response = strings.Trim(response, "\n")
 	
-	// Split by comma
+	// Try multiple parsing strategies
+	
+	// Strategy 1: Comma-separated scores (e.g., "0.9, 0.7, 0.3, 0.1")
+	if parsed := r.parseCommaSeparated(response, expectedCount); len(parsed) > 0 {
+		return parsed
+	}
+	
+	// Strategy 2: Numbered list (e.g., "1. 0.9\n2. 0.7\n3. 0.3\n4. 0.1")
+	if parsed := r.parseNumberedList(response, expectedCount); len(parsed) > 0 {
+		return parsed
+	}
+	
+	// Strategy 3: Extract all numbers from response
+	if parsed := r.parseAllNumbers(response, expectedCount); len(parsed) > 0 {
+		return parsed
+	}
+	
+	return scores
+}
+
+// parseCommaSeparated parses comma-separated scores
+func (r *Reranker) parseCommaSeparated(response string, expectedCount int) []float32 {
+	scores := make([]float32, expectedCount)
+	for i := range scores {
+		scores[i] = 0.5
+	}
+	
 	scoreStrs := strings.Split(response, ",")
 	
-	// Parse each score
 	for i, scoreStr := range scoreStrs {
 		if i >= expectedCount {
 			break
@@ -128,6 +151,79 @@ func (r *Reranker) parseScores(response string, expectedCount int) []float32 {
 		
 		scoreStr = strings.TrimSpace(scoreStr)
 		score, err := strconv.ParseFloat(scoreStr, 32)
+		if err == nil {
+			// Clamp score between 0 and 1
+			if score < 0 {
+				score = 0
+			} else if score > 1 {
+				score = 1
+			}
+			scores[i] = float32(score)
+		}
+	}
+	
+	return scores
+}
+
+// parseNumberedList parses scores from a numbered list
+func (r *Reranker) parseNumberedList(response string, expectedCount int) []float32 {
+	scores := make([]float32, expectedCount)
+	for i := range scores {
+		scores[i] = 0.5
+	}
+	
+	lines := strings.Split(response, "\n")
+	
+	for i, line := range lines {
+		if i >= expectedCount {
+			break
+		}
+		
+		// Extract number from line (e.g., "1. 0.9" -> "0.9")
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		
+		// Remove number prefix
+		parts := strings.SplitN(line, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		
+		scoreStr := strings.TrimSpace(parts[1])
+		score, err := strconv.ParseFloat(scoreStr, 32)
+		if err == nil {
+			// Clamp score between 0 and 1
+			if score < 0 {
+				score = 0
+			} else if score > 1 {
+				score = 1
+			}
+			scores[i] = float32(score)
+		}
+	}
+	
+	return scores
+}
+
+// parseAllNumbers extracts all numbers from response
+func (r *Reranker) parseAllNumbers(response string, expectedCount int) []float32 {
+	scores := make([]float32, expectedCount)
+	for i := range scores {
+		scores[i] = 0.5
+	}
+	
+	// Use regex to find all floating point numbers
+	re := regexp.MustCompile(`\b\d+\.\d+\b`)
+	matches := re.FindAllString(response, -1)
+	
+	for i, match := range matches {
+		if i >= expectedCount {
+			break
+		}
+		
+		score, err := strconv.ParseFloat(match, 32)
 		if err == nil {
 			// Clamp score between 0 and 1
 			if score < 0 {
