@@ -254,9 +254,9 @@ func TestParser_DisableMasking(t *testing.T) {
 }
 
 // Helper type
-// type testError struct {
-// 	msg string
-// }
+type testError struct {
+	msg string
+}
 
 func (e *testError) Error() string {
 	return e.msg

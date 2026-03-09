@@ -155,73 +155,6 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	return s.parseGraphQLResult(result)
 }
 
-func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
-	nearVector := s.client.GraphQL().NearVectorArgBuilder().
-		WithVector(embedding)
-
-	fields := []graphql.Field{
-		{Name: "_additional", Fields: []graphql.Field{
-			{Name: "id"},
-			{Name: "certainty"},
-		}},
-		{Name: "content"},
-		{Name: "chunk_id"},
-	}
-
-	getBuilder := s.client.GraphQL().Get().
-		WithClassName(s.collection).
-		WithNearVector(nearVector).
-		WithLimit(query.TopK).
-		WithFields(fields...)
-
-	if len(query.Filters) > 0 {
-		where := s.buildWhereFilter(query.Filters)
-		getBuilder = getBuilder.WithWhere(where)
-	}
-
-	result, err := getBuilder.Do(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.parseGraphQLResult(result)
-}
-
-func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
-	fields := []graphql.Field{
-		{Name: "_additional", Fields: []graphql.Field{
-			{Name: "id"},
-		}},
-		{Name: "content"},
-		{Name: "chunk_id"},
-	}
-
-	getBuilder := s.client.GraphQL().Get().
-		WithClassName(s.collection).
-		WithLimit(100).
-		WithFields(fields...)
-
-	if len(metadata) > 0 {
-		where := s.buildWhereFilterFromMetadata(metadata)
-		getBuilder = getBuilder.WithWhere(where)
-	}
-
-	result, err := getBuilder.Do(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	results, err := s.parseGraphQLResult(result)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range results {
-		results[i].Score = 1.0
-	}
-	return results, nil
-}
-
 func (s *Store) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -284,59 +217,6 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 
 func (s *Store) Close() error {
 	return nil
-}
-
-func (s *Store) buildWhereFilter(filterConditions []vectorstore.FilterCondition) *filters.WhereBuilder {
-	if len(filterConditions) == 0 {
-		return nil
-	}
-
-	if len(filterConditions) == 1 {
-		f := filterConditions[0]
-		return filters.Where().
-			WithPath([]string{f.Field}).
-			WithOperator(filters.Equal).
-			WithValueString(fmt.Sprintf("%v", f.Value))
-	}
-
-	operands := make([]*filters.WhereBuilder, len(filterConditions))
-	for i, f := range filterConditions {
-		operands[i] = filters.Where().
-			WithPath([]string{f.Field}).
-			WithOperator(filters.Equal).
-			WithValueString(fmt.Sprintf("%v", f.Value))
-	}
-
-	return filters.Where().
-		WithOperator(filters.And).
-		WithOperands(operands)
-}
-
-func (s *Store) buildWhereFilterFromMetadata(metadata map[string]string) *filters.WhereBuilder {
-	if len(metadata) == 0 {
-		return nil
-	}
-
-	if len(metadata) == 1 {
-		for k, v := range metadata {
-			return filters.Where().
-				WithPath([]string{k}).
-				WithOperator(filters.Equal).
-				WithValueString(v)
-		}
-	}
-
-	operands := make([]*filters.WhereBuilder, 0, len(metadata))
-	for k, v := range metadata {
-		operands = append(operands, filters.Where().
-			WithPath([]string{k}).
-			WithOperator(filters.Equal).
-			WithValueString(v))
-	}
-
-	return filters.Where().
-		WithOperator(filters.And).
-		WithOperands(operands)
 }
 
 func (s *Store) parseGraphQLResult(result *models.GraphQLResponse) ([]core.Result, error) {

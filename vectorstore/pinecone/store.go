@@ -125,57 +125,6 @@ func (s *Store) Search(ctx context.Context, query []float32, opts vectorstore.Se
 	return s.parseMatches(resp.Matches), nil
 }
 
-func (s *Store) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
-	topK := query.TopK
-	if topK <= 0 {
-		topK = 5
-	}
-
-	filter, err := s.buildFilter(query.Filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build filter: %w", err)
-	}
-
-	resp, err := s.index.QueryByVectorValues(ctx, &pinecone.QueryByVectorValuesRequest{
-		Vector:          embedding,
-		TopK:            uint32(topK),
-		IncludeMetadata: true,
-		IncludeValues:   false,
-		MetadataFilter:  filter,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return s.parseMatches(resp.Matches), nil
-}
-
-func (s *Store) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
-	filter, err := s.buildMetadataFilter(metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build filter: %w", err)
-	}
-
-	dummyVector := make([]float32, s.dimension)
-
-	resp, err := s.index.QueryByVectorValues(ctx, &pinecone.QueryByVectorValuesRequest{
-		Vector:          dummyVector,
-		TopK:            100,
-		IncludeMetadata: true,
-		IncludeValues:   false,
-		MetadataFilter:  filter,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results := s.parseMatches(resp.Matches)
-	for i := range results {
-		results[i].Score = 1.0
-	}
-	return results, nil
-}
-
 func (s *Store) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -194,36 +143,6 @@ func (s *Store) buildMetadata(chunk core.Chunk) (*pinecone.Metadata, error) {
 	}
 	for k, v := range chunk.Metadata {
 		fields[k] = v
-	}
-
-	return structpb.NewStruct(fields)
-}
-
-func (s *Store) buildFilter(filters []vectorstore.FilterCondition) (*pinecone.MetadataFilter, error) {
-	if len(filters) == 0 {
-		return nil, nil
-	}
-
-	fields := make(map[string]interface{})
-	for _, f := range filters {
-		fields[f.Field] = map[string]interface{}{
-			"$eq": f.Value,
-		}
-	}
-
-	return structpb.NewStruct(fields)
-}
-
-func (s *Store) buildMetadataFilter(metadata map[string]string) (*pinecone.MetadataFilter, error) {
-	if len(metadata) == 0 {
-		return nil, nil
-	}
-
-	fields := make(map[string]interface{})
-	for k, v := range metadata {
-		fields[k] = map[string]interface{}{
-			"$eq": v,
-		}
 	}
 
 	return structpb.NewStruct(fields)

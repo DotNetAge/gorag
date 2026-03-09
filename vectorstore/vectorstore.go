@@ -14,18 +14,18 @@ import (
 //
 // Example implementation:
 //
-//     type MemoryStore struct {
-//         vectors []Vector
-//         mutex   sync.RWMutex
-//     }
+//	type MemoryStore struct {
+//	    vectors []Vector
+//	    mutex   sync.RWMutex
+//	}
 //
-//     func (s *MemoryStore) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
-//         // Store chunks and embeddings in memory
-//     }
+//	func (s *MemoryStore) Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error {
+//	    // Store chunks and embeddings in memory
+//	}
 //
-//     func (s *MemoryStore) Search(ctx context.Context, query []float32, opts SearchOptions) ([]core.Result, error) {
-//         // Search for similar embeddings
-//     }
+//	func (s *MemoryStore) Search(ctx context.Context, query []float32, opts SearchOptions) ([]core.Result, error) {
+//	    // Search for similar embeddings
+//	}
 type Store interface {
 	// Add adds chunks and their embeddings to the vector store
 	//
@@ -37,7 +37,7 @@ type Store interface {
 	// Returns:
 	// - error: Error if storage fails
 	Add(ctx context.Context, chunks []core.Chunk, embeddings [][]float32) error
-	
+
 	// Search searches for similar vectors to the query embedding
 	//
 	// Parameters:
@@ -49,19 +49,7 @@ type Store interface {
 	// - []core.Result: Slice of search results
 	// - error: Error if search fails
 	Search(ctx context.Context, query []float32, opts SearchOptions) ([]core.Result, error)
-	
-	// SearchStructured performs a structured search with filters
-	//
-	// Parameters:
-	// - ctx: Context for cancellation and timeout
-	// - query: Structured query with filters
-	// - embedding: Query embedding
-	//
-	// Returns:
-	// - []core.Result: Slice of search results
-	// - error: Error if search fails
-	SearchStructured(ctx context.Context, query *StructuredQuery, embedding []float32) ([]core.Result, error)
-	
+
 	// Delete removes vectors by their IDs
 	//
 	// Parameters:
@@ -71,17 +59,6 @@ type Store interface {
 	// Returns:
 	// - error: Error if deletion fails
 	Delete(ctx context.Context, ids []string) error
-	
-	// GetByMetadata retrieves vectors by metadata
-	//
-	// Parameters:
-	// - ctx: Context for cancellation and timeout
-	// - metadata: Metadata filter
-	//
-	// Returns:
-	// - []core.Result: Slice of matching results
-	// - error: Error if retrieval fails
-	GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error)
 }
 
 // SearchOptions configures search behavior
@@ -90,69 +67,16 @@ type Store interface {
 //
 // Example:
 //
-//     opts := SearchOptions{
-//         TopK:     5,
-//         MinScore: 0.7,
-//         Filter: map[string]interface{}{
-//             "source": "technical-docs",
-//         },
-//     }
+//	opts := SearchOptions{
+//	    TopK:     5,
+//	    MinScore: 0.7,
+//	    Filter: map[string]interface{}{
+//	        "source": "technical-docs",
+//	    },
+//	}
 type SearchOptions struct {
 	TopK     int                    // Number of top results to return
 	Filter   map[string]interface{} // Metadata filters
 	MinScore float32                // Minimum similarity score
 	Metadata map[string]string      // Additional metadata for search
-}
-
-// FilterOperator defines filter operators for structured queries
-type FilterOperator string
-
-const (
-	FilterOpEq      FilterOperator = "eq"      // Equal
-	FilterOpNeq     FilterOperator = "neq"     // Not equal
-	FilterOpGt      FilterOperator = "gt"      // Greater than
-	FilterOpGte     FilterOperator = "gte"     // Greater than or equal
-	FilterOpLt      FilterOperator = "lt"      // Less than
-	FilterOpLte     FilterOperator = "lte"     // Less than or equal
-	FilterOpIn      FilterOperator = "in"      // In array
-	FilterOpNin     FilterOperator = "nin"     // Not in array
-	FilterOpContains FilterOperator = "contains" // Contains substring
-)
-
-// FilterCondition represents a single filter condition
-//
-// Example:
-//
-//     condition := FilterCondition{
-//         Field:    "source",
-//         Operator: FilterOpEq,
-//         Value:    "technical-docs",
-//     }
-type FilterCondition struct {
-	Field    string          // Field to filter on
-	Operator FilterOperator  // Operator to use
-	Value    interface{}     // Value to compare against
-}
-
-// StructuredQuery represents a structured search query
-//
-// Example:
-//
-//     query := &StructuredQuery{
-//         Query: "Go programming language",
-//         Filters: []FilterCondition{
-//             {
-//                 Field:    "category",
-//                 Operator: FilterOpEq,
-//                 Value:    "programming",
-//             },
-//         },
-//         TopK:     5,
-//         MinScore: 0.7,
-//     }
-type StructuredQuery struct {
-	Query    string              // Natural language query
-	Filters  []FilterCondition   // Filter conditions
-	TopK     int                 // Number of top results
-	MinScore float32             // Minimum similarity score
 }

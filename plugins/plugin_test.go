@@ -310,13 +310,7 @@ func (m *mockStoreImpl) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (m *mockStoreImpl) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
-	return []core.Result{}, nil
-}
 
-func (m *mockStoreImpl) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
-	return []core.Result{}, nil
-}
 
 // mockEmbedderImpl is a mock embedding provider implementation
 type mockEmbedderImpl struct{}

@@ -100,33 +100,7 @@ func (m *mockStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (m *mockStore) SearchStructured(ctx context.Context, query *vectorstore.StructuredQuery, embedding []float32) ([]core.Result, error) {
-	return []core.Result{
-		{
-			Chunk: core.Chunk{
-				ID:      "doc1",
-				Content: "相关文档内容",
-				Metadata: map[string]string{
-					"source": "test",
-				},
-			},
-			Score: 0.9,
-		},
-	}, nil
-}
 
-func (m *mockStore) GetByMetadata(ctx context.Context, metadata map[string]string) ([]core.Result, error) {
-	return []core.Result{
-		{
-			Chunk: core.Chunk{
-				ID:       "doc1",
-				Content:  "相关文档内容",
-				Metadata: metadata,
-			},
-			Score: 1.0,
-		},
-	}, nil
-}
 
 type mockLLM struct {
 	completeFunc func(ctx context.Context, prompt string) (string, error)

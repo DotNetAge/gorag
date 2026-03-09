@@ -120,67 +120,6 @@ func TestStore_Search(t *testing.T) {
 	assert.GreaterOrEqual(t, len(results), 1)
 }
 
-func TestStore_SearchStructured(t *testing.T) {
-	endpoint, cleanup := setupQdrantContainer(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	store, err := NewStore(ctx, endpoint, WithDimension(4))
-	require.NoError(t, err)
-	defer store.Close()
-
-	// Add test data with metadata
-	chunks := []core.Chunk{
-		{ID: "1", Content: "hello world", Metadata: map[string]string{"category": "greeting"}},
-		{ID: "2", Content: "goodbye world", Metadata: map[string]string{"category": "farewell"}},
-	}
-	embeddings := [][]float32{
-		{0.1, 0.2, 0.3, 0.4},
-		{0.9, 0.8, 0.7, 0.6},
-	}
-	err = store.Add(ctx, chunks, embeddings)
-	require.NoError(t, err)
-
-	// Search with filter
-	query := &vectorstore.StructuredQuery{
-		Query: "hello",
-		Filters: []vectorstore.FilterCondition{
-			{Field: "category", Operator: vectorstore.FilterOpEq, Value: "greeting"},
-		},
-		TopK: 5,
-	}
-	results, err := store.SearchStructured(ctx, query, []float32{0.1, 0.2, 0.3, 0.4})
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(results), 0)
-}
-
-func TestStore_GetByMetadata(t *testing.T) {
-	endpoint, cleanup := setupQdrantContainer(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	store, err := NewStore(ctx, endpoint, WithDimension(4))
-	require.NoError(t, err)
-	defer store.Close()
-
-	// Add test data
-	chunks := []core.Chunk{
-		{ID: "1", Content: "document 1", Metadata: map[string]string{"author": "alice"}},
-		{ID: "2", Content: "document 2", Metadata: map[string]string{"author": "bob"}},
-	}
-	embeddings := [][]float32{
-		{0.1, 0.2, 0.3, 0.4},
-		{0.5, 0.6, 0.7, 0.8},
-	}
-	err = store.Add(ctx, chunks, embeddings)
-	require.NoError(t, err)
-
-	// Get by metadata
-	results, err := store.GetByMetadata(ctx, map[string]string{"author": "alice"})
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(results), 0)
-}
-
 func TestStore_Delete(t *testing.T) {
 	endpoint, cleanup := setupQdrantContainer(t)
 	defer cleanup()

@@ -243,9 +243,9 @@ Test content.
 }
 
 // Helper types
-// type testError struct {
-// 	msg string
-// }
+type testError struct {
+	msg string
+}
 
 func (e *testError) Error() string {
 	return e.msg
