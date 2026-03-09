@@ -1,7 +1,11 @@
 package html
 
 import (
+	"bytes"
 	"context"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -87,5 +91,49 @@ func TestParser_extractText(t *testing.T) {
 	for _, chunk := range chunks {
 		assert.NotContains(t, chunk.Content, "script")
 		assert.NotContains(t, chunk.Content, "style")
+	}
+}
+
+func TestParser_Parse_FromDataDirectory(t *testing.T) {
+	// Skip test if .data directory doesn't exist
+	dataDir := ".data"
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		t.Skip(".data directory not found, skipping test")
+	}
+
+	p := NewParser()
+	ctx := context.Background()
+
+	// Read all files in .data directory
+	files, err := ioutil.ReadDir(dataDir)
+	require.NoError(t, err, "Failed to read .data directory")
+	require.NotEmpty(t, files, "No files found in .data directory")
+
+	// Test each file
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(dataDir, file.Name())
+		t.Run(file.Name(), func(t *testing.T) {
+			// Read file content
+			content, err := ioutil.ReadFile(filePath)
+			require.NoError(t, err, "Failed to read test file: %s", filePath)
+
+			// Create reader from file content
+			reader := bytes.NewReader(content)
+
+			// Parse the file
+			chunks, err := p.Parse(ctx, reader)
+			require.NoError(t, err, "Failed to parse file: %s", filePath)
+
+			// Verify chunks
+			for i, chunk := range chunks {
+				assert.NotEmpty(t, chunk.ID, "Chunk %d should have an ID", i)
+				assert.NotEmpty(t, chunk.Metadata, "Chunk %d should have metadata", i)
+				assert.Equal(t, "html", chunk.Metadata["type"], "Chunk %d should have type 'html'", i)
+			}
+		})
 	}
 }
