@@ -141,3 +141,17 @@ func WithAgenticRAG(agentic *retrieval.AgenticRAG) Option {
 		e.agenticRAG = agentic
 	}
 }
+
+// WithPluginDirectory sets the plugin directory for the engine
+func WithPluginDirectory(directory string) Option {
+	return func(e *Engine) {
+		e.pluginOptions.PluginDirectory = directory
+	}
+}
+
+// WithPluginConfig sets the plugin configuration for the engine
+func WithPluginConfig(config map[string]interface{}) Option {
+	return func(e *Engine) {
+		e.pluginOptions.PluginConfig = config
+	}
+}

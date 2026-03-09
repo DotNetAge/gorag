@@ -310,7 +310,9 @@ func (m *mockStoreImpl) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-
+func (m *mockStoreImpl) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	return []core.Chunk{}, nil
+}
 
 // mockEmbedderImpl is a mock embedding provider implementation
 type mockEmbedderImpl struct{}

@@ -100,7 +100,9 @@ func (m *mockStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-
+func (m *mockStore) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	return []core.Chunk{}, nil
+}
 
 type mockLLM struct {
 	completeFunc func(ctx context.Context, prompt string) (string, error)

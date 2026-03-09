@@ -103,6 +103,20 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
+// SearchByMetadata searches for chunks with matching metadata
+func (s *Store) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []core.Chunk
+	for _, chunk := range s.documents {
+		if s.matchesMetadata(chunk.Metadata, metadata) {
+			result = append(result, chunk)
+		}
+	}
+	return result, nil
+}
+
 // computeNorm calculates the L2 norm of a vector
 func computeNorm(v []float32) float32 {
 	var sum float32

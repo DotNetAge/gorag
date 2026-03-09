@@ -90,12 +90,19 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 				}
 				// Process remaining content
 				if buffer.Len() > 0 {
+					// 获取文件路径
+					filePath := ""
+					if path, ok := ctx.Value("file_path").(string); ok {
+						filePath = path
+					}
+					
 					chunk := core.Chunk{
 						ID:      uuid.New().String(),
 						Content: strings.TrimSpace(buffer.String()),
 						Metadata: map[string]string{
-							"type":     "html",
-							"position": fmt.Sprintf("%d", position),
+							"type":      "html",
+							"position":  fmt.Sprintf("%d", position),
+							"file_path": filePath,
 						},
 					}
 
@@ -137,13 +144,20 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 						chunkText = chunkText[:p.chunkSize]
 					}
 
+					// 获取文件路径
+					filePath := ""
+					if path, ok := ctx.Value("file_path").(string); ok {
+						filePath = path
+					}
+					
 					// Create chunk
 					chunk := core.Chunk{
 						ID:      uuid.New().String(),
 						Content: strings.TrimSpace(chunkText),
 						Metadata: map[string]string{
-							"type":     "html",
-							"position": fmt.Sprintf("%d", position),
+							"type":      "html",
+							"position":  fmt.Sprintf("%d", position),
+							"file_path": filePath,
 						},
 					}
 

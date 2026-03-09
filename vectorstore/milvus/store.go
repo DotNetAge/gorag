@@ -219,6 +219,98 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// SearchByMetadata searches for chunks with matching metadata
+func (s *Store) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	if len(metadata) == 0 {
+		return []core.Chunk{}, nil
+	}
+
+	// Build expression for metadata search
+	expr := ""
+	for key, value := range metadata {
+		if expr != "" {
+			expr += " and "
+		}
+		// In Milvus, we need to search within the JSON metadata field
+		expr += fmt.Sprintf("contains(metadata, '%s:%s')", key, value)
+	}
+
+	// Search with empty vector (just metadata filter)
+	// We use a dummy vector since Milvus requires a vector for search
+	dummyVector := make([]float32, s.dimension)
+	sp, err := entity.NewIndexIvfFlatSearchParam(2)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := s.client.Search(ctx, s.collection, []string{}, expr, []string{"id", "content", "metadata"},
+		[]entity.Vector{entity.FloatVector(dummyVector)}, "vector",
+		entity.L2, 1000, sp) // Use large limit to get all matching chunks
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse results
+	var chunks []core.Chunk
+	for _, result := range results {
+		contentCol, ok := result.Fields.GetColumn("content").(*entity.ColumnVarChar)
+		if !ok || contentCol == nil {
+			continue
+		}
+
+		idCol, ok := result.Fields.GetColumn("id").(*entity.ColumnInt64)
+		if !ok || idCol == nil {
+			continue
+		}
+
+		metadataCol, ok := result.Fields.GetColumn("metadata").(*entity.ColumnVarChar)
+		if !ok || metadataCol == nil {
+			continue
+		}
+
+		for i := 0; i < result.ResultCount; i++ {
+			content, err := contentCol.GetAsString(i)
+			if err != nil {
+				continue
+			}
+
+			id, err := idCol.GetAsInt64(i)
+			if err != nil {
+				continue
+			}
+
+			metadataJSON, err := metadataCol.GetAsString(i)
+			if err != nil {
+				continue
+			}
+
+			var chunkMetadata map[string]string
+			if err := json.Unmarshal([]byte(metadataJSON), &chunkMetadata); err != nil {
+				chunkMetadata = make(map[string]string)
+			}
+
+			// Verify all metadata matches
+			match := true
+			for key, value := range metadata {
+				if chunkValue, exists := chunkMetadata[key]; !exists || chunkValue != value {
+					match = false
+					break
+				}
+			}
+
+			if match {
+				chunks = append(chunks, core.Chunk{
+					ID:       fmt.Sprintf("%d", id),
+					Content:  content,
+					Metadata: chunkMetadata,
+				})
+			}
+		}
+	}
+
+	return chunks, nil
+}
+
 func (s *Store) parseResults(results []client.SearchResult) []core.Result {
 	var vectorResults []core.Result
 	for _, result := range results {

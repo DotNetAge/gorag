@@ -67,13 +67,20 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 				// Create chunk with overlap
 				chunkText := string(buffer[:p.chunkSize])
 
+				// 获取文件路径
+				filePath := ""
+				if path, ok := ctx.Value("file_path").(string); ok {
+					filePath = path
+				}
+				
 				// Create chunk
 				chunk := core.Chunk{
 					ID:      uuid.New().String(),
 					Content: strings.TrimSpace(chunkText),
 					Metadata: map[string]string{
-						"type":     "yaml",
-						"position": fmt.Sprintf("%d", position),
+						"type":      "yaml",
+						"position":  fmt.Sprintf("%d", position),
+						"file_path": filePath,
 					},
 				}
 
@@ -102,12 +109,19 @@ func (p *Parser) ParseWithCallback(ctx context.Context, r io.Reader, callback fu
 
 	// Process remaining content
 	if len(buffer) > 0 {
+		// 获取文件路径
+		filePath := ""
+		if path, ok := ctx.Value("file_path").(string); ok {
+			filePath = path
+		}
+		
 		chunk := core.Chunk{
 			ID:      uuid.New().String(),
 			Content: strings.TrimSpace(string(buffer)),
 			Metadata: map[string]string{
-				"type":     "yaml",
-				"position": fmt.Sprintf("%d", position),
+				"type":      "yaml",
+				"position":  fmt.Sprintf("%d", position),
+				"file_path": filePath,
 			},
 		}
 

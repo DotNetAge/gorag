@@ -293,6 +293,12 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 		// Use default parser if no specific parser is found
 		p = i.defaultParser
 	}
+	
+	// 传递文件路径到解析器
+	if source.Path != "" {
+		ctx = context.WithValue(ctx, "file_path", source.Path)
+	}
+	
 	chunks, err := p.Parse(ctx, reader)
 	if err != nil {
 		if i.metrics != nil {
@@ -507,19 +513,37 @@ func (i *Indexer) AsyncBatchIndex(ctx context.Context, sources []Source) error {
 
 // IndexDirectory indexes all files in a directory recursively with concurrent workers
 func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) error {
+	startTime := time.Now()
+	fileCount := 0
+	successCount := 0
+	errorCount := 0
+
 	// Create a wait group for concurrency
 	var wg sync.WaitGroup
 	// Create a channel to receive files
 	fileChan := make(chan string, i.config.FileChannelBuffer)
 	// Create a channel to receive errors
 	errChan := make(chan error, i.config.ErrorChannelBuffer)
+	// Create a channel to receive indexing results
+	resultChan := make(chan bool, i.config.FileChannelBuffer)
 
 	// Start worker goroutines
 	workerCount := i.config.WorkerCount
+	if i.logger != nil {
+		i.logger.Info(ctx, "Starting directory indexing", map[string]interface{}{
+			"directory":    directoryPath,
+			"worker_count": workerCount,
+			"buffer_size":  i.config.FileChannelBuffer,
+		})
+	}
+
 	for workerID := 0; workerID < workerCount; workerID++ {
 		wg.Add(1)
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
+			if i.logger != nil {
+				i.logger.Debug(ctx, "Worker started", map[string]interface{}{"worker_id": workerID})
+			}
 			for filePath := range fileChan {
 				// Get file extension and convert to lowercase
 				ext := strings.ToLower(filepath.Ext(filePath))
@@ -531,11 +555,31 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 				}
 
 				// Index the file using the appropriate parser
+				fileStartTime := time.Now()
 				if err := i.Index(ctx, source); err != nil {
+					errorCount++
 					errChan <- fmt.Errorf("failed to index file %s: %w", filePath, err)
+					resultChan <- false
+					if i.logger != nil {
+						i.logger.Error(ctx, "File indexing failed", err, map[string]interface{}{
+							"file_path": filePath,
+							"worker_id": workerID,
+							"duration":  time.Since(fileStartTime).Seconds(),
+						})
+					}
+				} else {
+					successCount++
+					resultChan <- true
+					if i.logger != nil {
+						i.logger.Debug(ctx, "File indexing succeeded", map[string]interface{}{
+							"file_path": filePath,
+							"worker_id": workerID,
+							"duration":  time.Since(fileStartTime).Seconds(),
+						})
+					}
 				}
 			}
-		}()
+		}(workerID)
 	}
 
 	// Walk directory and send files to workers
@@ -549,6 +593,7 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 				// Check if we have a parser for this file extension
 				ext := strings.ToLower(filepath.Ext(path))
 				if _, ok := i.parsers[ext]; ok {
+					fileCount++
 					select {
 					case fileChan <- path:
 					case <-ctx.Done():
@@ -562,10 +607,11 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 		}
 	}()
 
-	// Wait for all workers to finish and close error channel
+	// Wait for all workers to finish and close channels
 	go func() {
 		wg.Wait()
 		close(errChan)
+		close(resultChan)
 	}()
 
 	// Collect all errors
@@ -574,10 +620,41 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 		indexErrors = append(indexErrors, err)
 	}
 
+	// Collect results
+	for range resultChan {
+		// Just consume the channel
+	}
+
+	// Record metrics
+	if i.metrics != nil {
+		duration := time.Since(startTime)
+		i.metrics.RecordIndexLatency(ctx, duration)
+		i.metrics.RecordIndexedDocuments(ctx, successCount)
+		if errorCount > 0 {
+			for j := 0; j < errorCount; j++ {
+				i.metrics.RecordErrorCount(ctx, "indexing")
+			}
+		}
+	}
+
+	// Log summary
+	if i.logger != nil {
+		i.logger.Info(ctx, "Directory indexing completed", map[string]interface{}{
+			"directory":    directoryPath,
+			"total_files":  fileCount,
+			"success":      successCount,
+			"errors":       errorCount,
+			"duration":     time.Since(startTime).Seconds(),
+			"success_rate": float64(successCount) / float64(fileCount) * 100,
+		})
+	}
+
 	// Return aggregated errors if any
 	if len(indexErrors) > 0 {
 		return errors.NewError(errors.ErrorTypeStorage, fmt.Sprintf("failed to index %d files in directory %s", len(indexErrors), directoryPath)).
 			WithContext("failed_count", fmt.Sprintf("%d", len(indexErrors))).
+			WithContext("total_count", fmt.Sprintf("%d", fileCount)).
+			WithContext("success_count", fmt.Sprintf("%d", successCount)).
 			WithContext("directory", directoryPath).
 			WithSuggestion("Check the individual file errors for details").
 			WithSuggestion("Ensure all files are in supported formats")

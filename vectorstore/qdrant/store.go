@@ -190,6 +190,80 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// SearchByMetadata searches for chunks with matching metadata
+func (s *Store) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	if len(metadata) == 0 {
+		return []core.Chunk{}, nil
+	}
+
+	// Build filter conditions
+	conditions := make([]*qdrant.Condition, 0, len(metadata))
+	for key, value := range metadata {
+		conditions = append(conditions, qdrant.NewMatchKeyword(key, value))
+	}
+
+	// Create filter
+	filter := &qdrant.Filter{
+		Must: conditions,
+	}
+
+	// Search with filter
+	limit := uint64(1000) // Use large limit to get all matching chunks
+	queryRequest := &qdrant.QueryPoints{
+		CollectionName: s.collection,
+		Query:          qdrant.NewQuery(make([]float32, s.dimension)...), // Use dummy vector
+		Limit:          &limit,
+		WithPayload:    qdrant.NewWithPayload(true),
+		Filter:         filter,
+	}
+
+	response, err := s.client.Query(ctx, queryRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse results
+	var chunks []core.Chunk
+	for _, hit := range response {
+		var content string
+		if hit.Payload != nil {
+			if c, ok := hit.Payload["content"]; ok {
+				if strV, ok := c.GetKind().(*qdrant.Value_StringValue); ok {
+					content = strV.StringValue
+				}
+			}
+		}
+
+		chunkMetadata := make(map[string]string)
+		if hit.Payload != nil {
+			for k, v := range hit.Payload {
+				if k != "content" && k != "id" {
+					if strV, ok := v.GetKind().(*qdrant.Value_StringValue); ok {
+						chunkMetadata[k] = strV.StringValue
+					}
+				}
+			}
+		}
+
+		id := ""
+		if hit.Payload != nil {
+			if idVal, ok := hit.Payload["id"]; ok {
+				if strV, ok := idVal.GetKind().(*qdrant.Value_StringValue); ok {
+					id = strV.StringValue
+				}
+			}
+		}
+
+		chunks = append(chunks, core.Chunk{
+			ID:       id,
+			Content:  content,
+			Metadata: chunkMetadata,
+		})
+	}
+
+	return chunks, nil
+}
+
 func (s *Store) parseResults(response []*qdrant.ScoredPoint) []core.Result {
 	var results []core.Result
 	for _, hit := range response {

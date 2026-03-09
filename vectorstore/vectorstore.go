@@ -59,6 +59,17 @@ type Store interface {
 	// Returns:
 	// - error: Error if deletion fails
 	Delete(ctx context.Context, ids []string) error
+
+	// SearchByMetadata searches for chunks with matching metadata
+	//
+	// Parameters:
+	// - ctx: Context for cancellation and timeout
+	// - metadata: Metadata key-value pairs to match
+	//
+	// Returns:
+	// - []core.Chunk: Slice of matching chunks
+	// - error: Error if search fails
+	SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error)
 }
 
 // SearchOptions configures search behavior

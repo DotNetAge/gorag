@@ -219,6 +219,98 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// SearchByMetadata searches for chunks with matching metadata
+func (s *Store) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	if len(metadata) == 0 {
+		return []core.Chunk{}, nil
+	}
+
+	// Build where filter with multiple conditions
+	where := filters.Where()
+	first := true
+	for key, value := range metadata {
+		filter := filters.Where().
+			WithPath([]string{key}).
+			WithOperator(filters.Equal).
+			WithValueString(value)
+
+		if first {
+			where = filter
+			first = false
+		} else {
+			// For multiple conditions, we need to use a different approach
+			// Weaviate Go client doesn't have And method, so we need to build a complex filter
+			where = filters.Where().
+				WithOperator(filters.And).
+				WithOperands([]*filters.WhereBuilder{where, filter})
+		}
+	}
+
+	// Define fields to retrieve
+	fields := []graphql.Field{
+		{Name: "content"},
+		{Name: "chunk_id"},
+	}
+
+	// Add metadata fields to retrieval
+	for key := range metadata {
+		fields = append(fields, graphql.Field{Name: key})
+	}
+
+	// Execute GraphQL query
+	result, err := s.client.GraphQL().Get().
+		WithClassName(s.collection).
+		WithWhere(where).
+		WithLimit(1000). // Use large limit to get all matching chunks
+		WithFields(fields...).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse results
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("graphql error: %v", result.Errors)
+	}
+
+	data := result.Data["Get"].(map[string]interface{})
+	objects, ok := data[s.collection].([]interface{})
+	if !ok {
+		return []core.Chunk{}, nil
+	}
+
+	var chunks []core.Chunk
+	for _, obj := range objects {
+		object := obj.(map[string]interface{})
+
+		content := ""
+		if c, ok := object["content"].(string); ok {
+			content = c
+		}
+
+		id := ""
+		if idVal, ok := object["chunk_id"].(string); ok {
+			id = idVal
+		}
+
+		// Extract metadata
+		chunkMetadata := make(map[string]string)
+		for key := range metadata {
+			if val, ok := object[key].(string); ok {
+				chunkMetadata[key] = val
+			}
+		}
+
+		chunks = append(chunks, core.Chunk{
+			ID:       id,
+			Content:  content,
+			Metadata: chunkMetadata,
+		})
+	}
+
+	return chunks, nil
+}
+
 func (s *Store) parseGraphQLResult(result *models.GraphQLResponse) ([]core.Result, error) {
 	if len(result.Errors) > 0 {
 		return nil, fmt.Errorf("graphql error: %v", result.Errors)

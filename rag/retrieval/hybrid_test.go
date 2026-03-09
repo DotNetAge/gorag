@@ -34,7 +34,9 @@ func (m *mockVectorStore) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-
+func (m *mockVectorStore) SearchByMetadata(ctx context.Context, metadata map[string]string) ([]core.Chunk, error) {
+	return []core.Chunk{}, nil
+}
 
 func TestHybridRetriever_Search(t *testing.T) {
 	vectorResults := []core.Result{

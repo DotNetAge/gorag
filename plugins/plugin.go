@@ -3,6 +3,8 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"plugin"
 	"sync"
 
@@ -305,4 +307,55 @@ func (r *Registry) List() []Plugin {
 	}
 
 	return result
+}
+
+// LoadPluginsFromDirectory loads all plugins from a directory
+//
+// Parameters:
+// - directory: Directory to load plugins from
+//
+// Returns:
+// - int: Number of successfully loaded plugins
+// - int: Number of failed plugins
+// - error: Error if directory access fails
+func (r *Registry) LoadPluginsFromDirectory(directory string) (int, int, error) {
+	// Check if directory exists
+	if _, err := os.Stat(directory); os.IsNotExist(err) {
+		return 0, 0, fmt.Errorf("plugin directory does not exist: %s", directory)
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Walk through the directory
+	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Only load .so files
+		if filepath.Ext(path) == ".so" {
+			// Try to load the plugin
+			if err := r.Load(path); err != nil {
+				errorCount++
+				fmt.Printf("Failed to load plugin %s: %v\n", path, err)
+			} else {
+				successCount++
+				fmt.Printf("Successfully loaded plugin %s\n", path)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return successCount, errorCount, fmt.Errorf("failed to walk plugin directory: %w", err)
+	}
+
+	return successCount, errorCount, nil
 }

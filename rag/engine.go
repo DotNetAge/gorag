@@ -9,6 +9,7 @@ import (
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/parser/text"
+	"github.com/DotNetAge/gorag/plugins"
 	"github.com/DotNetAge/gorag/rag/indexing"
 	"github.com/DotNetAge/gorag/rag/query"
 	"github.com/DotNetAge/gorag/rag/retrieval"
@@ -66,10 +67,21 @@ type Engine struct {
 	metrics             observability.Metrics
 	logger              observability.Logger
 	tracer              observability.Tracer
+	pluginOptions       PluginOptions
 
 	// Internal handlers
 	indexer *indexing.Indexer
 	querier *query.QueryHandler
+}
+
+// PluginOptions holds plugin-related configuration
+//
+// This struct defines options for plugin loading and management.
+type PluginOptions struct {
+	// PluginDirectory is the directory to load plugins from
+	PluginDirectory string
+	// PluginConfig is the configuration for plugins
+	PluginConfig map[string]interface{}
 }
 
 // New creates a new RAG engine with the provided options
@@ -99,6 +111,7 @@ type Engine struct {
 // - WithLogger: Custom logger
 // - WithMetrics: Custom metrics collector
 // - WithTracer: Custom tracer
+// - WithPluginDirectory: Directory to load plugins from
 //
 // Returns:
 // - *Engine: Newly created RAG engine
@@ -109,26 +122,27 @@ type Engine struct {
 //	// Create embedding provider
 //	embedderInstance, err := embedder.New(embedder.Config{APIKey: apiKey})
 //	if err != nil {
-//	    log.Fatal(err)
+//		log.Fatal(err)
 //	}
 //
 //	// Create LLM client
 //	llmInstance, err := llm.New(llm.Config{APIKey: apiKey})
 //	if err != nil {
-//	    log.Fatal(err)
+//		log.Fatal(err)
 //	}
 //
 //	// Create RAG engine
 //	engine, err := rag.New(
-//	    rag.WithVectorStore(memory.NewStore()),
-//	    rag.WithEmbedder(embedderInstance),
-//	    rag.WithLLM(llmInstance),
+//		rag.WithVectorStore(memory.NewStore()),
+//		rag.WithEmbedder(embedderInstance),
+//		rag.WithLLM(llmInstance),
+//		rag.WithPluginDirectory("./plugins"),
 //	)
 //	if err != nil {
-//	    log.Fatal(err)
+//		log.Fatal(err)
 //	}
 //
-//	// Engine is ready with all 9 built-in parsers loaded
+//	// Engine is ready with all 9 built-in parsers loaded and plugins from directory
 func New(opts ...Option) (*Engine, error) {
 	// Create engine with empty parser map
 	engine := &Engine{
@@ -161,6 +175,70 @@ func New(opts ...Option) (*Engine, error) {
 	// Set default tracer if not provided (using no-op tracer for now)
 	if engine.tracer == nil {
 		engine.tracer = observability.NewNoopTracer()
+	}
+
+	// Load plugins from directory if specified
+	if engine.pluginOptions.PluginDirectory != "" {
+		registry := plugins.NewRegistry()
+		successCount, errorCount, err := registry.LoadPluginsFromDirectory(engine.pluginOptions.PluginDirectory)
+		if err != nil {
+			// Log error but don't fail the engine creation
+			engine.logger.Error(context.Background(), "Failed to load plugins from directory", err, map[string]interface{}{
+				"directory": engine.pluginOptions.PluginDirectory,
+			})
+		} else {
+			// Log plugin loading results
+			engine.logger.Info(context.Background(), "Plugin loading completed", map[string]interface{}{
+				"directory":     engine.pluginOptions.PluginDirectory,
+				"success_count": successCount,
+				"error_count":   errorCount,
+			})
+
+			// Register plugins
+			for _, plugin := range registry.List() {
+				// Initialize plugin with config
+				if err := plugin.Init(engine.pluginOptions.PluginConfig); err != nil {
+					engine.logger.Error(context.Background(), "Failed to initialize plugin", err, map[string]interface{}{
+						"plugin_name": plugin.Name(),
+						"plugin_type": plugin.Type(),
+					})
+					continue
+				}
+
+				// Handle different plugin types
+				switch p := plugin.(type) {
+				case plugins.ParserPlugin:
+					// Add parser plugins
+					for _, format := range p.Parser().SupportedFormats() {
+						engine.parsers[format] = p.Parser()
+					}
+					engine.logger.Info(context.Background(), "Parser plugin loaded", map[string]interface{}{
+						"plugin_name": plugin.Name(),
+						"formats":     p.Parser().SupportedFormats(),
+					})
+				case plugins.VectorStorePlugin:
+					// Vector store plugins are handled differently
+					engine.logger.Info(context.Background(), "Vector store plugin loaded", map[string]interface{}{
+						"plugin_name": plugin.Name(),
+					})
+				case plugins.EmbedderPlugin:
+					// Embedder plugins are handled differently
+					engine.logger.Info(context.Background(), "Embedder plugin loaded", map[string]interface{}{
+						"plugin_name": plugin.Name(),
+					})
+				case plugins.LLMPlugin:
+					// LLM plugins are handled differently
+					engine.logger.Info(context.Background(), "LLM plugin loaded", map[string]interface{}{
+						"plugin_name": plugin.Name(),
+					})
+				default:
+					engine.logger.Info(context.Background(), "Unknown plugin type loaded", map[string]interface{}{
+						"plugin_name": plugin.Name(),
+						"plugin_type": plugin.Type(),
+					})
+				}
+			}
+		}
 	}
 
 	// Validate required components
@@ -445,5 +523,35 @@ func (e *Engine) RecordSystemMetrics(ctx context.Context, cpuUsage float64, memo
 	if e.metrics != nil {
 		e.metrics.RecordSystemMetrics(ctx, cpuUsage, memoryUsage)
 	}
+}
+
+// ReindexFile reindexes a file by first deleting existing chunks and then reindexing
+func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType string) error {
+	// Search for chunks with the file path in metadata
+	metadata := map[string]string{
+		"file_path": filePath,
+	}
+	chunks, err := e.store.SearchByMetadata(ctx, metadata)
+	if err != nil {
+		return fmt.Errorf("failed to search chunks by metadata: %w", err)
+	}
+
+	// Delete existing chunks
+	if len(chunks) > 0 {
+		ids := make([]string, len(chunks))
+		for i, chunk := range chunks {
+			ids[i] = chunk.ID
+		}
+		if err := e.store.Delete(ctx, ids); err != nil {
+			return fmt.Errorf("failed to delete existing chunks: %w", err)
+		}
+	}
+
+	// Reindex the file
+	source := Source{
+		Type: sourceType,
+		Path: filePath,
+	}
+	return e.Index(ctx, source)
 }
 
