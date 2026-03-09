@@ -37,6 +37,12 @@
 - **🔄 Async Directory Indexing** - Background processing for large document collections
 - **🔍 Multi-hop RAG** - Handle complex questions requiring information from multiple documents
 - **🤖 Agentic RAG** - Autonomous retrieval with intelligent decision-making
+- **🔄 Connection Pooling** - Vector store connection pool with connection reuse and rate limiting
+- **🧠 Query Caching** - LRU-based memory cache with TTL expiration
+- **⏰ Lazy Loading** - Delayed loading and memory management for large documents with auto-unloading
+- **⚡ Batch Processing Optimization** - Concurrent embedding generation with rate limiting and exponential backoff retry
+- **🔒 Circuit Breaker** - Prevent cascading failures with closed, open, and half-open states
+- **📉 Graceful Degradation** - Multi-level degradation strategy that automatically adjusts service levels based on error counts and latency
 
 ## 🏆 Why GoRAG? - Competitive Advantages
 
@@ -177,32 +183,32 @@ These results validate that GoRAG is designed for production use cases with subs
 #### Document Parsers (16 types) - 🆕 v1.0.0 Complete!
 
 **Lightweight Parsers (Pure Go, Streaming Support)**
-| Parser | File Type | Update Date | Coverage | Tests |
-|--------|-----------|-------------|----------|-------|
-| **Text** | `.txt`, `.md` | 2024-03-19 | - | ✅ |
-| **Markdown** | `.md` | 2024-03-19 | 87.5% | 8/8 ✅ |
-| **Config** | `.toml`, `.ini`, `.properties`, `.env`, `.yaml` | 2024-03-19 | 65.6% | 9/9 ✅ |
-| **CSV/TSV** | `.csv`, `.tsv` | 2024-03-19 | 91.1% | 12/12 ✅ |
-| **Go Code** | `.go` | 2024-03-19 | 78.2% | 8/8 ✅ |
-| **JSON** | `.json` | 2024-03-19 | 73.1% | 10/10 ✅ |
-| **YAML** | `.yaml`, `.yml` | 2024-03-19 | 91.9% | 8/8 ✅ |
-| **HTML** | `.html`, `.htm` | 2024-03-19 | - | 6/6 ✅ |
-| **XML** | `.xml` | 2024-03-19 | 91.1% | 9/9 ✅ |
-| **Log** | `.log` (Nginx/Apache/Syslog) | 2024-03-19 | 53.3% | 10/10 ✅ |
-| **Python** | `.py` | 2024-03-19 | 89.7% | 10/10 ✅ |
-| **JavaScript** | `.js`, `.jsx`, `.mjs` | 2024-03-19 | 76.2% | 10/10 ✅ |
-| **Email** | `.eml` | 2024-03-19 | 93.9% ⭐ | 11/11 ✅ |
-| **DB Schema** | `.sql` | 2024-03-19 | 84.9% | 11/11 ✅ |
-| **Java** | `.java` | 2024-03-19 | 70.7% | 11/11 ✅ |
-| **TypeScript** | `.ts`, `.tsx` | 2024-03-19 | 75.6% | 11/11 ✅ |
+| Parser         | File Type                                       | Update Date | Coverage | Tests   |
+| -------------- | ----------------------------------------------- | ----------- | -------- | ------- |
+| **Text**       | `.txt`, `.md`                                   | 2024-03-19  | -        | ✅       |
+| **Markdown**   | `.md`                                           | 2024-03-19  | 87.5%    | 8/8 ✅   |
+| **Config**     | `.toml`, `.ini`, `.properties`, `.env`, `.yaml` | 2024-03-19  | 65.6%    | 9/9 ✅   |
+| **CSV/TSV**    | `.csv`, `.tsv`                                  | 2024-03-19  | 91.1%    | 12/12 ✅ |
+| **Go Code**    | `.go`                                           | 2024-03-19  | 78.2%    | 8/8 ✅   |
+| **JSON**       | `.json`                                         | 2024-03-19  | 73.1%    | 10/10 ✅ |
+| **YAML**       | `.yaml`, `.yml`                                 | 2024-03-19  | 91.9%    | 8/8 ✅   |
+| **HTML**       | `.html`, `.htm`                                 | 2024-03-19  | -        | 6/6 ✅   |
+| **XML**        | `.xml`                                          | 2024-03-19  | 91.1%    | 9/9 ✅   |
+| **Log**        | `.log` (Nginx/Apache/Syslog)                    | 2024-03-19  | 53.3%    | 10/10 ✅ |
+| **Python**     | `.py`                                           | 2024-03-19  | 89.7%    | 10/10 ✅ |
+| **JavaScript** | `.js`, `.jsx`, `.mjs`                           | 2024-03-19  | 76.2%    | 10/10 ✅ |
+| **Email**      | `.eml`                                          | 2024-03-19  | 93.9% ⭐  | 11/11 ✅ |
+| **DB Schema**  | `.sql`                                          | 2024-03-19  | 84.9%    | 11/11 ✅ |
+| **Java**       | `.java`                                         | 2024-03-19  | 70.7%    | 11/11 ✅ |
+| **TypeScript** | `.ts`, `.tsx`                                   | 2024-03-19  | 75.6%    | 11/11 ✅ |
 
 **Heavyweight Parsers (CGO Dependencies)**
-| Parser | File Type | Status |
-|--------|-----------|--------|
-| **PDF** | `.pdf` | ✅ Available |
-| **DOCX** | `.docx` | ✅ Available |
-| **Excel** | `.xlsx`, `.xls` | ✅ Available |
-| **PPT** | `.pptx`, `.ppt` | ✅ Available |
+| Parser    | File Type                                 | Status      |
+| --------- | ----------------------------------------- | ----------- |
+| **PDF**   | `.pdf`                                    | ✅ Available |
+| **DOCX**  | `.docx`                                   | ✅ Available |
+| **Excel** | `.xlsx`, `.xls`                           | ✅ Available |
+| **PPT**   | `.pptx`, `.ppt`                           | ✅ Available |
 | **Image** | `.jpg`, `.png`, `.gif`, `.bmp` (with OCR) | ✅ Available |
 
 > **Note**: All lightweight parsers support streaming processing for GB-level files with O(1) memory efficiency.
@@ -211,11 +217,11 @@ These results validate that GoRAG is designed for production use cases with subs
 
 **Audio, Video, and Webpage parsers are available as independent plugins**:
 
-| Plugin | Formats | Features | Tests | Repo |
-|--------|---------|----------|-------|------|
-| **gorag-audio** | MP3, WAV, OGG, FLAC, M4A | Speech-to-text, Metadata | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-audio) |
-| **gorag-video** | MP4, AVI, MKV, MOV, FLV, WebM | Audio extraction, Frames, OCR | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-video) |
-| **gorag-webpage** | HTTP/HTTPS URLs, HTML | Metadata, Links, JSON-LD, Screenshots | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-webpage) |
+| Plugin            | Formats                       | Features                              | Tests   | Repo                                                                             |
+| ----------------- | ----------------------------- | ------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| **gorag-audio**   | MP3, WAV, OGG, FLAC, M4A      | Speech-to-text, Metadata              | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-audio)     |
+| **gorag-video**   | MP4, AVI, MKV, MOV, FLV, WebM | Audio extraction, Frames, OCR         | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-video)     |
+| **gorag-webpage** | HTTP/HTTPS URLs, HTML         | Metadata, Links, JSON-LD, Screenshots | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-webpage) |
 
 **Installation**:
 ```bash
@@ -539,12 +545,15 @@ go get github.com/DotNetAge/gorag
 ## Modules
 
 - **parser** - Document parsers (9 types: Text, PDF, DOCX, HTML, JSON, YAML, Excel, PPT, Image)
-- **embedding** - Embedding providers (OpenAI, Ollama)
+- **embedding** - Embedding providers (OpenAI, Ollama, Cohere, Voyage)
 - **llm** - LLM clients (OpenAI, Anthropic, Azure OpenAI, Ollama, Compatible API)
 - **vectorstore** - Vector storage backends (Memory, Milvus, Qdrant, Pinecone, Weaviate)
 - **rag** - RAG engine and orchestration
 - **plugins** - Plugin system for extending functionality
 - **config** - Configuration management system
+- **lazyloader** - Lazy loading implementation for large documents
+- **circuitbreaker** - Circuit breaker pattern implementation
+- **degradation** - Graceful degradation strategy implementation
 
 ## CLI Tool
 
@@ -717,11 +726,11 @@ This ensures that GoRAG works correctly with actual vector databases in producti
 - [ ] Add error handling for edge cases
 - [ ] Improve code documentation
 
-### Planned (v0.7.0 - Performance & Reliability)
-- [ ] Optimize embedding batch processing
-- [ ] Add connection pooling for vector stores
-- [ ] Implement query result caching
-- [ ] Add retry logic and circuit breaker pattern
+### Completed (v0.7.0 - Performance & Reliability)
+- [x] Optimize embedding batch processing
+- [x] Add connection pooling for vector stores
+- [x] Implement query result caching
+- [x] Add retry logic and circuit breaker pattern
 
 ### Planned (v0.8.0 - Documentation & Examples)
 - [ ] Add architecture decision records (ADRs)
