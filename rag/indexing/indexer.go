@@ -12,6 +12,7 @@ import (
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/errors"
+	"github.com/DotNetAge/gorag/lazyloader"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -53,6 +54,7 @@ type Indexer struct {
 	indexingDocuments  int
 	monitoredDocuments int
 	mu                 sync.RWMutex
+	lazyLoader         *lazyloader.LazyDocumentManager
 }
 
 // Embedder defines the interface for embedding providers
@@ -103,6 +105,7 @@ func NewIndexer(
 		logger:        logger,
 		tracer:        tracer,
 		config:        DefaultIndexerConfig(),
+		lazyLoader:    lazyloader.NewLazyDocumentManager(100 * 1024 * 1024), // 100MB limit
 	}
 }
 
@@ -229,15 +232,16 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 			return err
 		}
 	} else if source.Path != "" {
-		// Read file from path
-		file, err := os.Open(source.Path)
+		// Use lazy loading for large files
+		doc := i.lazyLoader.AddDocument(source.Path)
+		content, err := doc.LoadWithContext(ctx)
 		if err != nil {
-			err = fmt.Errorf("failed to open file at path %s: %w", source.Path, err)
+			err = fmt.Errorf("failed to load file at path %s: %w", source.Path, err)
 			if i.metrics != nil {
 				i.metrics.RecordErrorCount(ctx, "invalid_input")
 			}
 			if i.logger != nil {
-				i.logger.Error(ctx, "Failed to open file", err, map[string]interface{}{"path": source.Path})
+				i.logger.Error(ctx, "Failed to load file", err, map[string]interface{}{"path": source.Path})
 			}
 			if i.tracer != nil {
 				if span, ok := i.tracer.Extract(ctx); ok {
@@ -256,8 +260,9 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 
 			return err
 		}
-		defer file.Close()
-		reader = file
+		reader = strings.NewReader(string(content))
+		// Unload the document to free memory
+		defer doc.Unload()
 	}
 
 	if reader == nil {

@@ -9,19 +9,19 @@ import (
 	"time"
 )
 
-// MemoryCache implements an in-memory cache for query results
+// MemoryCache implements the Cache interface for query results
 type MemoryCache struct {
-	data      map[string]*cacheEntry
-	mu        sync.RWMutex
+	data       map[string]*cacheEntry
+	mu         sync.RWMutex
 	defaultTTL time.Duration
-	maxSize   int
+	maxSize    int
 }
 
 // cacheEntry represents a cached entry
 type cacheEntry struct {
-	value      *Response
-	expiresAt  time.Time
-	accessedAt time.Time
+	value       *Response
+	expiresAt   time.Time
+	accessedAt  time.Time
 	accessCount int
 }
 
@@ -44,6 +44,7 @@ func NewMemoryCacheWithSize(defaultTTL time.Duration, maxSize int) *MemoryCache 
 }
 
 // Get retrieves a value from the cache
+// Implements the Cache interface
 func (c *MemoryCache) Get(ctx context.Context, key string) (*Response, bool) {
 	c.mu.RLock()
 	entry, exists := c.data[key]
@@ -110,14 +111,14 @@ func (c *MemoryCache) evictLRU() {
 }
 
 // Delete removes a value from the cache
-func (c *MemoryCache) Delete(key string) {
+func (c *MemoryCache) Delete(ctx context.Context, key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.data, key)
 }
 
 // Clear clears all entries from the cache
-func (c *MemoryCache) Clear() {
+func (c *MemoryCache) Clear(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.data = make(map[string]*cacheEntry)

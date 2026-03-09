@@ -16,7 +16,6 @@ type PooledStore struct {
 	idleConns   int
 	idleTimeout time.Duration
 	connChan    chan struct{}
-	idleTimer   *time.Timer
 	mu          sync.RWMutex
 	activeCount int
 }
