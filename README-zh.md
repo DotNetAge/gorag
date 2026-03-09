@@ -217,26 +217,26 @@ Document 1: Go is a programming language designed for simplicity and efficiency.
 
 **音频、视频和网页解析器作为独立插件提供**：
 
-| 插件              | 格式                          | 功能                        | 测试    | 仓库                                                                             |
-| ----------------- | ----------------------------- | --------------------------- | ------- | -------------------------------------------------------------------------------- |
-| **gorag-audio**   | MP3, WAV, OGG, FLAC, M4A      | 语音识别、元数据提取        | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-audio)     |
-| **gorag-video**   | MP4, AVI, MKV, MOV, FLV, WebM | 音频提取、帧提取、OCR       | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-video)     |
-| **gorag-webpage** | HTTP/HTTPS URLs, HTML         | 元数据、链接、JSON-LD、截图 | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-webpage) |
+| 插件              | 格式                          | 功能                        | 测试    | 仓库                                                                                     |
+| ----------------- | ----------------------------- | --------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| **gorag-audio**   | MP3, WAV, OGG, FLAC, M4A      | 语音识别、元数据提取        | 14/14 ✅ | [github.com/DotNetAge/gorag-audio](https://github.com/DotNetAge/gorag-plugins-audio)     |
+| **gorag-video**   | MP4, AVI, MKV, MOV, FLV, WebM | 音频提取、帧提取、OCR       | 18/18 ✅ | [github.com/DotNetAge/gorag-video](https://github.com/DotNetAge/gorag-plugins-video)     |
+| **gorag-webpage** | HTTP/HTTPS URLs, HTML         | 元数据、链接、JSON-LD、截图 | 17/17 ✅ | [github.com/DotNetAge/gorag-webpage](https://github.com/DotNetAge/gorag-plugins-webpage) |
 
 **安装**:
 ```bash
-go get github.com/DotNetAge/gorag-audio
-go get github.com/DotNetAge/gorag-video
-go get github.com/DotNetAge/gorag-webpage
+go get github.com/DotNetAge/gorag-plugins-audio
+go get github.com/DotNetAge/gorag-plugins-video
+go get github.com/DotNetAge/gorag-plugins-webpage
 ```
 
 **使用**:
 ```go
 import (
     "github.com/DotNetAge/gorag"
-    "github.com/DotNetAge/gorag-audio"
-    "github.com/DotNetAge/gorag-video"
-    "github.com/DotNetAge/gorag-webpage"
+    "github.com/DotNetAge/gorag-plugins-audio"
+    "github.com/DotNetAge/gorag-plugins-video"
+    "github.com/DotNetAge/gorag-plugins-webpage"
 )
 
 engine := gorag.NewEngine()
