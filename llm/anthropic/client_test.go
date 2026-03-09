@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DotNetAge/gorag/internal/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -409,7 +410,7 @@ func TestIsRetryableError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isRetryableError(tt.err)
+			result := retry.IsRetryableError(tt.err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

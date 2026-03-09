@@ -50,7 +50,16 @@ func (r *Reranker) Rerank(ctx context.Context, query string, results []core.Resu
 	// Get rerank scores from LLM
 	scores, err := r.getRelevanceScores(ctx, prompt, len(results))
 	if err != nil {
-		return results, err
+		// If reranking fails, return original results sorted by original scores
+		// This provides graceful degradation
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].Score > results[j].Score
+		})
+		if len(results) > r.topK {
+			results = results[:r.topK]
+		}
+		// Return without error for backward compatibility
+		return results, nil
 	}
 
 	// Assign scores to results
@@ -97,59 +106,52 @@ func (r *Reranker) getRelevanceScores(ctx context.Context, prompt string, count 
 	}
 
 	// Parse scores from response
-	scores := r.parseScores(response, count)
+	scores, err := r.parseScores(response, count)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse rerank scores: %w", err)
+	}
 
 	return scores, nil
 }
 
 // parseScores parses relevance scores from LLM response
-func (r *Reranker) parseScores(response string, expectedCount int) []float32 {
-	scores := make([]float32, expectedCount)
-	
-	// Default scores if parsing fails
-	for i := range scores {
-		scores[i] = 0.5
-	}
-	
+func (r *Reranker) parseScores(response string, expectedCount int) ([]float32, error) {
 	// Clean response
 	response = strings.TrimSpace(response)
 	response = strings.Trim(response, "\n")
-	
+
 	// Try multiple parsing strategies
-	
+
 	// Strategy 1: Comma-separated scores (e.g., "0.9, 0.7, 0.3, 0.1")
-	if parsed := r.parseCommaSeparated(response, expectedCount); len(parsed) > 0 {
-		return parsed
+	if parsed, ok := r.parseCommaSeparated(response, expectedCount); ok {
+		return parsed, nil
 	}
-	
+
 	// Strategy 2: Numbered list (e.g., "1. 0.9\n2. 0.7\n3. 0.3\n4. 0.1")
-	if parsed := r.parseNumberedList(response, expectedCount); len(parsed) > 0 {
-		return parsed
+	if parsed, ok := r.parseNumberedList(response, expectedCount); ok {
+		return parsed, nil
 	}
-	
+
 	// Strategy 3: Extract all numbers from response
-	if parsed := r.parseAllNumbers(response, expectedCount); len(parsed) > 0 {
-		return parsed
+	if parsed, ok := r.parseAllNumbers(response, expectedCount); ok {
+		return parsed, nil
 	}
-	
-	return scores
+
+	return nil, fmt.Errorf("failed to parse scores from LLM response: %s", response)
 }
 
 // parseCommaSeparated parses comma-separated scores
-func (r *Reranker) parseCommaSeparated(response string, expectedCount int) []float32 {
-	scores := make([]float32, expectedCount)
-	for i := range scores {
-		scores[i] = 0.5
-	}
-	
+func (r *Reranker) parseCommaSeparated(response string, expectedCount int) ([]float32, bool) {
 	scoreStrs := strings.Split(response, ",")
-	
-	for i, scoreStr := range scoreStrs {
-		if i >= expectedCount {
-			break
-		}
-		
-		scoreStr = strings.TrimSpace(scoreStr)
+	if len(scoreStrs) < expectedCount {
+		return nil, false
+	}
+
+	scores := make([]float32, expectedCount)
+	successCount := 0
+
+	for i := 0; i < expectedCount; i++ {
+		scoreStr := strings.TrimSpace(scoreStrs[i])
 		score, err := strconv.ParseFloat(scoreStr, 32)
 		if err == nil {
 			// Clamp score between 0 and 1
@@ -159,38 +161,41 @@ func (r *Reranker) parseCommaSeparated(response string, expectedCount int) []flo
 				score = 1
 			}
 			scores[i] = float32(score)
+			successCount++
 		}
 	}
-	
-	return scores
+
+	// Require at least 50% successful parses
+	if successCount < expectedCount/2 {
+		return nil, false
+	}
+
+	return scores, true
 }
 
 // parseNumberedList parses scores from a numbered list
-func (r *Reranker) parseNumberedList(response string, expectedCount int) []float32 {
-	scores := make([]float32, expectedCount)
-	for i := range scores {
-		scores[i] = 0.5
-	}
-	
+func (r *Reranker) parseNumberedList(response string, expectedCount int) ([]float32, bool) {
 	lines := strings.Split(response, "\n")
-	
-	for i, line := range lines {
-		if i >= expectedCount {
+	scores := make([]float32, expectedCount)
+	successCount := 0
+	scoreIndex := 0
+
+	for _, line := range lines {
+		if scoreIndex >= expectedCount {
 			break
 		}
-		
-		// Extract number from line (e.g., "1. 0.9" -> "0.9")
+
 		line = strings.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
-		
-		// Remove number prefix
+
+		// Remove number prefix (e.g., "1. 0.9" -> "0.9")
 		parts := strings.SplitN(line, ".", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		
+
 		scoreStr := strings.TrimSpace(parts[1])
 		score, err := strconv.ParseFloat(scoreStr, 32)
 		if err == nil {
@@ -200,30 +205,35 @@ func (r *Reranker) parseNumberedList(response string, expectedCount int) []float
 			} else if score > 1 {
 				score = 1
 			}
-			scores[i] = float32(score)
+			scores[scoreIndex] = float32(score)
+			successCount++
 		}
+		scoreIndex++
 	}
-	
-	return scores
+
+	// Require at least 50% successful parses
+	if successCount < expectedCount/2 {
+		return nil, false
+	}
+
+	return scores, true
 }
 
 // parseAllNumbers extracts all numbers from response
-func (r *Reranker) parseAllNumbers(response string, expectedCount int) []float32 {
-	scores := make([]float32, expectedCount)
-	for i := range scores {
-		scores[i] = 0.5
-	}
-	
+func (r *Reranker) parseAllNumbers(response string, expectedCount int) ([]float32, bool) {
 	// Use regex to find all floating point numbers
 	re := regexp.MustCompile(`\b\d+\.\d+\b`)
 	matches := re.FindAllString(response, -1)
-	
-	for i, match := range matches {
-		if i >= expectedCount {
-			break
-		}
-		
-		score, err := strconv.ParseFloat(match, 32)
+
+	if len(matches) < expectedCount {
+		return nil, false
+	}
+
+	scores := make([]float32, expectedCount)
+	successCount := 0
+
+	for i := 0; i < expectedCount; i++ {
+		score, err := strconv.ParseFloat(matches[i], 32)
 		if err == nil {
 			// Clamp score between 0 and 1
 			if score < 0 {
@@ -232,10 +242,16 @@ func (r *Reranker) parseAllNumbers(response string, expectedCount int) []float32
 				score = 1
 			}
 			scores[i] = float32(score)
+			successCount++
 		}
 	}
-	
-	return scores
+
+	// Require at least 50% successful parses
+	if successCount < expectedCount/2 {
+		return nil, false
+	}
+
+	return scores, true
 }
 
 const defaultRerankPrompt = `

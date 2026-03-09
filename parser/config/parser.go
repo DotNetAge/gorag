@@ -47,7 +47,7 @@ func NewParser() *Parser {
 		chunkSize:    500,
 		chunkOverlap: 50,
 		maskSecrets:  true,
-		expandEnv:    true,
+		expandEnv:    false, // Default to false for security - users must explicitly enable
 		autoDetect:   true,
 	}
 }

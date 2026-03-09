@@ -578,8 +578,11 @@ func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType st
 // 3. Automatically reindex files when they change
 // 4. Use asynchronous indexing to avoid blocking
 func (e *Engine) StartWatch(targetIndexDir string) error {
-	ctx := context.Background()
+	return e.StartWatchWithContext(context.Background(), targetIndexDir)
+}
 
+// StartWatchWithContext watches a directory for changes with context cancellation support
+func (e *Engine) StartWatchWithContext(ctx context.Context, targetIndexDir string) error {
 	// First perform initial indexing of the directory
 	e.logger.Info(ctx, "Starting initial indexing of directory", map[string]interface{}{
 		"directory": targetIndexDir,
@@ -619,6 +622,12 @@ func (e *Engine) StartWatch(targetIndexDir string) error {
 	// Start watching for events
 	for {
 		select {
+		case <-ctx.Done():
+			e.logger.Info(ctx, "Stopping directory watch", map[string]interface{}{
+				"directory": targetIndexDir,
+			})
+			return ctx.Err()
+
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
@@ -696,19 +705,22 @@ func (e *Engine) addDirToWatcher(watcher *fsnotify.Watcher, dir string) error {
 }
 
 // StartWatchAsync starts watching a directory for changes asynchronously
+// Returns a cancel function to stop watching.
 //
 // Parameters:
 // - targetIndexDir: Directory to watch for changes
 //
 // Returns:
+// - context.CancelFunc: Call this to stop watching
 // - error: Error if starting the watch fails
-func (e *Engine) StartWatchAsync(targetIndexDir string) error {
+func (e *Engine) StartWatchAsync(targetIndexDir string) (context.CancelFunc, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		if err := e.StartWatch(targetIndexDir); err != nil {
-			e.logger.Error(context.Background(), "Watch failed", err, map[string]interface{}{
+		if err := e.StartWatchWithContext(ctx, targetIndexDir); err != nil && err != context.Canceled {
+			e.logger.Error(ctx, "Watch failed", err, map[string]interface{}{
 				"directory": targetIndexDir,
 			})
 		}
 	}()
-	return nil
+	return cancel, nil
 }

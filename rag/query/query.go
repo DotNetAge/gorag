@@ -887,6 +887,18 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 				continue
 			}
 
+			// Detect error messages from LLM stream
+			if strings.HasPrefix(chunk, "ERROR: ") {
+				select {
+				case ch <- StreamResponse{
+					Error: fmt.Errorf("LLM stream error: %s", strings.TrimPrefix(chunk, "ERROR: ")),
+					Done:  true,
+				}:
+				case <-ctx.Done():
+				}
+				return
+			}
+
 			resp := StreamResponse{
 				Chunk: chunk,
 				Done:  false,

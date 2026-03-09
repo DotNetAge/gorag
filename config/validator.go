@@ -57,11 +57,11 @@ func (v *Validator) Error() *errors.GoRAGError {
 
 	var messages []string
 	for _, err := range v.errors {
-		messages = append(messages, err.Error())
+		messages = append(messages, fmt.Sprintf("  • %s", err.Error()))
 	}
 
-	return errors.ErrConfiguration(fmt.Sprintf("Configuration validation failed:\n  - %s",
-		strings.Join(messages, "\n  - ")))
+	return errors.ErrConfiguration(fmt.Sprintf("Configuration validation failed:\n%s",
+		strings.Join(messages, "\n")))
 }
 
 // Validate validates the entire configuration

@@ -15,6 +15,7 @@ type ContextCompressor struct {
 	similarityThreshold float32
 	maxContextSize     int
 	summaryPrompt      string
+	minRelevanceScore  float32
 }
 
 // NewContextCompressor creates a new context compressor
@@ -24,6 +25,7 @@ func NewContextCompressor(llm llm.Client) *ContextCompressor {
 		similarityThreshold: 0.8,
 		maxContextSize:     4000,
 		summaryPrompt:      defaultSummaryPrompt,
+		minRelevanceScore:  0.3,
 	}
 }
 
@@ -45,6 +47,12 @@ func (c *ContextCompressor) WithSummaryPrompt(prompt string) *ContextCompressor 
 	return c
 }
 
+// WithMinRelevanceScore sets the minimum relevance score for filtering
+func (c *ContextCompressor) WithMinRelevanceScore(score float32) *ContextCompressor {
+	c.minRelevanceScore = score
+	return c
+}
+
 // Compress compresses and optimizes context
 func (c *ContextCompressor) Compress(ctx context.Context, query string, results []core.Result) ([]core.Result, error) {
 	if c == nil || len(results) == 0 {
@@ -61,7 +69,7 @@ func (c *ContextCompressor) Compress(ctx context.Context, query string, results 
 	reordered := c.reorderByRelevance(deDuplicated)
 
 	// Step 4: Truncate to fit context window
-	truncated := c.truncateToContextSize(reordered, query)
+	truncated := c.truncateToContextSize(ctx, reordered, query)
 
 	return truncated, nil
 }
@@ -70,8 +78,7 @@ func (c *ContextCompressor) Compress(ctx context.Context, query string, results 
 func (c *ContextCompressor) filterByRelevance(results []core.Result) []core.Result {
 	var filtered []core.Result
 	for _, result := range results {
-		// Filter out results with very low relevance
-		if result.Score > 0.3 {
+		if result.Score > c.minRelevanceScore {
 			filtered = append(filtered, result)
 		}
 	}
@@ -126,7 +133,7 @@ func (c *ContextCompressor) reorderByRelevance(results []core.Result) []core.Res
 }
 
 // truncateToContextSize truncates results to fit the context window
-func (c *ContextCompressor) truncateToContextSize(results []core.Result, query string) []core.Result {
+func (c *ContextCompressor) truncateToContextSize(ctx context.Context, results []core.Result, query string) []core.Result {
 	var selected []core.Result
 	totalSize := len(query)
 
@@ -137,7 +144,7 @@ func (c *ContextCompressor) truncateToContextSize(results []core.Result, query s
 			totalSize += contentSize
 		} else {
 			// Try to summarize the remaining content
-			summarized := c.summarizeContent(result.Content, query)
+			summarized := c.summarizeContent(ctx, result.Content, query)
 			if totalSize+len(summarized)+100 <= c.maxContextSize {
 				// Create a new result with the summary
 				summarizedResult := result
@@ -153,12 +160,12 @@ func (c *ContextCompressor) truncateToContextSize(results []core.Result, query s
 }
 
 // summarizeContent summarizes content to fit in context
-func (c *ContextCompressor) summarizeContent(content, query string) string {
+func (c *ContextCompressor) summarizeContent(ctx context.Context, content, query string) string {
 	prompt := strings.Replace(c.summaryPrompt, "{content}", content, 1)
 	prompt = strings.Replace(prompt, "{query}", query, 1)
 
-	// Get summary from LLM
-	summary, err := c.llm.Complete(context.Background(), prompt)
+	// Get summary from LLM using the caller's context
+	summary, err := c.llm.Complete(ctx, prompt)
 	if err != nil {
 		// Fallback to truncation if summarization fails
 		maxLength := 300

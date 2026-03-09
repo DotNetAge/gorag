@@ -18,6 +18,8 @@ type PooledStore struct {
 	connChan    chan struct{}
 	mu          sync.RWMutex
 	activeCount int
+	closed      bool
+	wg          sync.WaitGroup
 }
 
 // PoolOptions configures the connection pool
@@ -59,10 +61,18 @@ func NewPooledStore(store Store, opts PoolOptions) *PooledStore {
 
 // acquire acquires a connection from the pool
 func (p *PooledStore) acquire(ctx context.Context) error {
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return fmt.Errorf("pool is closed")
+	}
+	p.mu.RUnlock()
+
 	select {
 	case p.connChan <- struct{}{}:
 		p.mu.Lock()
 		p.activeCount++
+		p.wg.Add(1)
 		p.mu.Unlock()
 		return nil
 	case <-ctx.Done():
@@ -75,6 +85,7 @@ func (p *PooledStore) release() {
 	<-p.connChan
 	p.mu.Lock()
 	p.activeCount--
+	p.wg.Done()
 	p.mu.Unlock()
 }
 
@@ -114,8 +125,20 @@ func (p *PooledStore) SearchByMetadata(ctx context.Context, metadata map[string]
 	return p.store.SearchByMetadata(ctx, metadata)
 }
 
-// Close closes the pooled store
+// Close closes the pooled store and waits for all active operations to complete
 func (p *PooledStore) Close() error {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
+	p.mu.Unlock()
+
+	// Wait for all active operations to complete
+	p.wg.Wait()
+
+	// Now safe to close the channel
 	close(p.connChan)
 	return nil
 }

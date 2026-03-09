@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/DotNetAge/gorag/internal/retry"
 )
 
 // BatchProcessor handles batch processing of embeddings with optimization
@@ -14,6 +16,7 @@ type BatchProcessor struct {
 	batchSize     int
 	maxWorkers    int
 	rateLimiter   <-chan time.Time
+	ticker        *time.Ticker
 	retryConfig   RetryConfig
 }
 
@@ -65,12 +68,23 @@ func NewBatchProcessor(provider Provider, opts BatchOptions) *BatchProcessor {
 		opts.RateLimit = 100 * time.Millisecond
 	}
 
-	return &BatchProcessor{
+	ticker := time.NewTicker(opts.RateLimit)
+	bp := &BatchProcessor{
 		provider:    provider,
 		batchSize:   opts.BatchSize,
 		maxWorkers:  opts.MaxWorkers,
-		rateLimiter: time.Tick(opts.RateLimit),
+		ticker:      ticker,
+		rateLimiter: ticker.C,
 		retryConfig: opts.RetryConfig,
+	}
+
+	return bp
+}
+
+// Close stops the rate limiter ticker and releases resources
+func (bp *BatchProcessor) Close() {
+	if bp.ticker != nil {
+		bp.ticker.Stop()
 	}
 }
 
@@ -174,37 +188,12 @@ func (bp *BatchProcessor) processBatchWithRetry(ctx context.Context, texts []str
 		}
 
 		lastErr = err
-		if !isRetryableError(err) {
+		if !retry.IsRetryableError(err) {
 			break
 		}
 	}
 
 	return nil, fmt.Errorf("failed after %d retries: %w", bp.retryConfig.MaxRetries, lastErr)
-}
-
-// isRetryableError checks if an error is retryable
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for specific retryable errors
-	errStr := err.Error()
-	retryableErrors := []string{
-		"rate limit",
-		"timeout",
-		"temporary",
-		"connection refused",
-		"service unavailable",
-	}
-
-	for _, retryable := range retryableErrors {
-		if contains(errStr, retryable) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // contains checks if a string contains a substring (case-insensitive)

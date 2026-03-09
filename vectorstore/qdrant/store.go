@@ -187,6 +187,9 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 }
 
 func (s *Store) Close() error {
+	// Qdrant go-client doesn't expose a Close method
+	// but we should at least nil out the client reference
+	s.client = nil
 	return nil
 }
 

@@ -73,15 +73,21 @@ func (m *MultiHopRAG) WithQueryPrompt(prompt string) *MultiHopRAG {
 
 // Search performs multi-hop retrieval
 func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]core.Result, error) {
+	return m.SearchWithHops(ctx, query, topK, m.maxHops)
+}
+
+// SearchWithHops performs multi-hop retrieval with specified max hops
+func (m *MultiHopRAG) SearchWithHops(ctx context.Context, query string, topK int, maxHops int) ([]core.Result, error) {
 	var allResults []core.Result
 	currentQuery := query
 	hopCount := 0
 
-	for hopCount < m.maxHops {
+	for hopCount < maxHops {
 		// Get embedding for current query
 		embeddings, err := m.embedder.Embed(ctx, []string{currentQuery})
 		if err != nil {
-			break
+			// Return collected results with error for debugging
+			return m.deduplicateAndSort(allResults, topK), fmt.Errorf("embedding failed at hop %d: %w", hopCount, err)
 		}
 
 		// Search vector store
@@ -90,7 +96,7 @@ func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]cor
 		}
 		results, err := m.vectorStore.Search(ctx, embeddings[0], searchOpts)
 		if err != nil {
-			break
+			return m.deduplicateAndSort(allResults, topK), fmt.Errorf("search failed at hop %d: %w", hopCount, err)
 		}
 
 		// Add results to the collection
@@ -99,7 +105,7 @@ func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]cor
 		// Analyze results to determine if we need more information
 		analysis, err := m.analyzeResults(ctx, currentQuery, results)
 		if err != nil {
-			break
+			return m.deduplicateAndSort(allResults, topK), fmt.Errorf("analysis failed at hop %d: %w", hopCount, err)
 		}
 
 		// Check if we need more hops
@@ -109,7 +115,10 @@ func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]cor
 
 		// Generate follow-up query
 		followUpQuery, err := m.generateFollowUpQuery(ctx, currentQuery, analysis.MissingInformation)
-		if err != nil || followUpQuery == "" {
+		if err != nil {
+			return m.deduplicateAndSort(allResults, topK), fmt.Errorf("follow-up query generation failed at hop %d: %w", hopCount, err)
+		}
+		if followUpQuery == "" {
 			break
 		}
 
@@ -124,13 +133,14 @@ func (m *MultiHopRAG) Search(ctx context.Context, query string, topK int) ([]cor
 
 // Query performs a multi-hop RAG query
 func (m *MultiHopRAG) Query(ctx context.Context, question string, maxHops int, promptTemplate string) (*Response, error) {
-	// Set max hops if provided
+	// Use local variable for hops
+	hops := m.maxHops
 	if maxHops > 0 {
-		m.maxHops = maxHops
+		hops = maxHops
 	}
 
-	// Perform multi-hop search
-	results, err := m.Search(ctx, question, 5) // Default topK: 5
+	// Perform multi-hop search with specified hops
+	results, err := m.SearchWithHops(ctx, question, 5, hops)
 	if err != nil {
 		return nil, err
 	}

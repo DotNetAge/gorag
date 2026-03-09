@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ type Conversation struct {
 	Messages  []Message
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	mu        sync.RWMutex
 }
 
 // NewConversation creates a new conversation
@@ -37,6 +39,9 @@ func NewConversation() *Conversation {
 
 // AddMessage adds a message to the conversation
 func (c *Conversation) AddMessage(role, content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	message := Message{
 		ID:        uuid.New().String(),
 		Role:      role,
@@ -49,10 +54,18 @@ func (c *Conversation) AddMessage(role, content string) {
 
 // GetRecentMessages gets the most recent messages
 func (c *Conversation) GetRecentMessages(max int) []Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	if len(c.Messages) <= max {
-		return c.Messages
+		// Return a copy to avoid race conditions
+		result := make([]Message, len(c.Messages))
+		copy(result, c.Messages)
+		return result
 	}
-	return c.Messages[len(c.Messages)-max:]
+	result := make([]Message, max)
+	copy(result, c.Messages[len(c.Messages)-max:])
+	return result
 }
 
 // GetContext returns the conversation context as a string
@@ -74,6 +87,7 @@ func (c *Conversation) GetContext(maxMessages int) string {
 // ConversationManager manages multiple conversations
 type ConversationManager struct {
 	conversations map[string]*Conversation
+	mu            sync.RWMutex
 }
 
 // NewConversationManager creates a new conversation manager
@@ -86,28 +100,39 @@ func NewConversationManager() *ConversationManager {
 // CreateConversation creates a new conversation
 func (cm *ConversationManager) CreateConversation() *Conversation {
 	conv := NewConversation()
+	cm.mu.Lock()
 	cm.conversations[conv.ID] = conv
+	cm.mu.Unlock()
 	return conv
 }
 
 // GetConversation gets a conversation by ID
 func (cm *ConversationManager) GetConversation(id string) *Conversation {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 	return cm.conversations[id]
 }
 
 // UpdateConversation updates a conversation
 func (cm *ConversationManager) UpdateConversation(conv *Conversation) {
+	cm.mu.Lock()
 	cm.conversations[conv.ID] = conv
+	cm.mu.Unlock()
 }
 
 // DeleteConversation deletes a conversation
 func (cm *ConversationManager) DeleteConversation(id string) {
+	cm.mu.Lock()
 	delete(cm.conversations, id)
+	cm.mu.Unlock()
 }
 
 // ListConversations lists all conversations
 func (cm *ConversationManager) ListConversations() []*Conversation {
-	var conversations []*Conversation
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	conversations := make([]*Conversation, 0, len(cm.conversations))
 	for _, conv := range cm.conversations {
 		conversations = append(conversations, conv)
 	}

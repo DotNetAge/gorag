@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/DotNetAge/gorag/internal/retry"
 )
 
 type Config struct {
@@ -141,7 +142,7 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 		}
 
 		lastErr = err
-		if !isRetryableError(err) {
+		if !retry.IsRetryableError(err) {
 			break
 		}
 	}
@@ -205,6 +206,12 @@ func (c *Client) CompleteStream(ctx context.Context, prompt string) (<-chan stri
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			line := scanner.Text()
 			if line == "" {
 				continue
@@ -212,20 +219,33 @@ func (c *Client) CompleteStream(ctx context.Context, prompt string) (<-chan stri
 
 			var chunk StreamChunk
 			if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-				ch <- "ERROR: " + err.Error()
+				select {
+				case ch <- "ERROR: " + err.Error():
+				case <-ctx.Done():
+				}
 				return
 			}
 
 			if chunk.Delta != nil && chunk.Delta.Content != "" {
-				ch <- chunk.Delta.Content
+				select {
+				case ch <- chunk.Delta.Content:
+				case <-ctx.Done():
+					return
+				}
 			} else if chunk.Message != nil && chunk.Message.Content != "" {
-				ch <- chunk.Message.Content
+				select {
+				case ch <- chunk.Message.Content:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 
 		if err := scanner.Err(); err != nil {
-			ch <- "ERROR: " + err.Error()
-			return
+			select {
+			case ch <- "ERROR: " + err.Error():
+			case <-ctx.Done():
+			}
 		}
 	}()
 
@@ -330,17 +350,4 @@ func (c *Client) doComplete(ctx context.Context, prompt string, stream bool) (*C
 	}
 
 	return response, nil
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "deadline exceeded") ||
-		strings.Contains(errStr, "server error") ||
-		strings.Contains(errStr, "connection")
 }

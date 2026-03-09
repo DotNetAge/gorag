@@ -277,6 +277,10 @@ func (r *Registry) Load(path string) error {
 		return fmt.Errorf("failed to open plugin: %w", err)
 	}
 
+	if p == nil {
+		return fmt.Errorf("plugin.Open returned nil plugin")
+	}
+
 	// Get the plugin constructor
 	symbol, err := p.Lookup("NewPlugin")
 	if err != nil {
@@ -290,10 +294,13 @@ func (r *Registry) Load(path string) error {
 	}
 
 	// Create the plugin
-	plugin := constructor()
+	pluginInstance := constructor()
+	if pluginInstance == nil {
+		return fmt.Errorf("NewPlugin returned nil plugin")
+	}
 
 	// Register the plugin
-	return r.Register(plugin)
+	return r.Register(pluginInstance)
 }
 
 // List returns all registered plugins

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/DotNetAge/gorag/internal/retry"
 )
 
 type Config struct {
@@ -142,7 +144,7 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 		}
 
 		lastErr = err
-		if !isRetryableError(err) {
+		if !retry.IsRetryableError(err) {
 			break
 		}
 	}
@@ -205,15 +207,41 @@ func (c *Client) CompleteStream(ctx context.Context, prompt string) (<-chan stri
 		defer close(ch)
 		defer resp.Body.Close()
 
-		chunks, err := readStream(resp.Body)
-		if err != nil {
-			ch <- "ERROR: " + err.Error()
-			return
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+
+			chunk, err := parseStreamChunk(line)
+			if err != nil {
+				select {
+				case ch <- "ERROR: " + err.Error():
+				case <-ctx.Done():
+				}
+				return
+			}
+
+			if chunk != nil && len(chunk.Choices) > 0 && chunk.Choices[0].Delta != nil {
+				select {
+				case ch <- chunk.Choices[0].Delta.Content:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 
-		for _, chunk := range chunks {
-			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta != nil {
-				ch <- chunk.Choices[0].Delta.Content
+		if err := scanner.Err(); err != nil {
+			select {
+			case ch <- "ERROR: " + err.Error():
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -328,17 +356,4 @@ func parseStreamChunk(line string) (*StreamChunk, error) {
 	}
 
 	return &chunk, nil
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "deadline exceeded") ||
-		strings.Contains(errStr, "server error") ||
-		strings.Contains(errStr, "connection")
 }

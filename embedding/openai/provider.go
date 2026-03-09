@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/DotNetAge/gorag/internal/retry"
 )
 
 var (
@@ -148,7 +149,7 @@ func (p *Provider) embedBatch(ctx context.Context, texts []string) ([][]float32,
 		}
 
 		lastErr = err
-		if !isRetryableError(err) {
+		if !retry.IsRetryableError(err) {
 			break
 		}
 	}
@@ -212,16 +213,4 @@ func (p *Provider) doEmbed(ctx context.Context, texts []string) ([][]float32, er
 
 func (p *Provider) Dimension() int {
 	return p.dimension
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "server error") ||
-		strings.Contains(errStr, "connection")
 }

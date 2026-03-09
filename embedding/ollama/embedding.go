@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/DotNetAge/gorag/internal/retry"
 )
 
 type Config struct {
@@ -88,7 +91,7 @@ func (p *Provider) Embed(ctx context.Context, texts []string) ([][]float32, erro
 		}
 
 		lastErr = err
-		if !isRetryableError(err) {
+		if !retry.IsRetryableError(err) {
 			break
 		}
 	}
@@ -103,79 +106,147 @@ func (p *Provider) Dimension() int {
 func (p *Provider) doEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// For Ollama, we need to handle each text individually
 	// because the Ollama API doesn't support batch embedding
+	// Use a semaphore to limit concurrent requests
+	maxConcurrent := 5
+	sem := make(chan struct{}, maxConcurrent)
+	var mu sync.Mutex
 	var allEmbeddings [][]float32
+	var firstErr error
 
-	for _, text := range texts {
-		reqBody := EmbeddingRequest{
-			Model: p.config.Model,
-			Input: text,
-		}
+	var wg sync.WaitGroup
+	for i, text := range texts {
+		wg.Add(1)
+		go func(index int, txt string) {
+			defer wg.Done()
 
-		jsonData, err := json.Marshal(reqBody)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-
-		url := fmt.Sprintf("%s/api/embed", p.config.BaseURL)
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := p.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to send request: %w", err)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			var errResp ErrorResponse
-			if err := json.Unmarshal(body, &errResp); err == nil {
-				return nil, fmt.Errorf("error: %s", errResp.Error)
+			// Acquire semaphore
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = ctx.Err()
+				}
+				mu.Unlock()
+				return
 			}
 
-			return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-		}
+			reqBody := EmbeddingRequest{
+				Model: p.config.Model,
+				Input: txt,
+			}
 
-		// Check if response is empty
-		if len(body) == 0 {
-			return nil, fmt.Errorf("empty response body")
-		}
+			jsonData, err := json.Marshal(reqBody)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to marshal request: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
 
-		var respData EmbeddingResponse
-		if err := json.Unmarshal(body, &respData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w, response: %s", err, string(body))
-		}
+			url := fmt.Sprintf("%s/api/embed", p.config.BaseURL)
+			req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to create request: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
 
-		// Check if embeddings array is empty
-		if len(respData.Embeddings) == 0 {
-			return nil, fmt.Errorf("no embeddings returned in response: %s", string(body))
-		}
+			req.Header.Set("Content-Type", "application/json")
 
-		allEmbeddings = append(allEmbeddings, respData.Embeddings...)
+			resp, err := p.httpClient.Do(req)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to send request: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to read response: %w", err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				var errResp ErrorResponse
+				if err := json.Unmarshal(body, &errResp); err == nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("error: %s", errResp.Error)
+					}
+					mu.Unlock()
+					return
+				}
+
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+				}
+				mu.Unlock()
+				return
+			}
+
+			// Check if response is empty
+			if len(body) == 0 {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("empty response body")
+				}
+				mu.Unlock()
+				return
+			}
+
+			var respData EmbeddingResponse
+			if err := json.Unmarshal(body, &respData); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to unmarshal response: %w, response: %s", err, string(body))
+				}
+				mu.Unlock()
+				return
+			}
+
+			// Check if embeddings array is empty
+			if len(respData.Embeddings) == 0 {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("no embeddings returned in response: %s", string(body))
+				}
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			// Ensure allEmbeddings has enough capacity
+			for len(allEmbeddings) <= index {
+				allEmbeddings = append(allEmbeddings, nil)
+			}
+			allEmbeddings[index] = respData.Embeddings[0]
+			mu.Unlock()
+		}(i, text)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
 	}
 
 	return allEmbeddings, nil
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	return contains(errStr, "rate limit") ||
-		contains(errStr, "timeout") ||
-		contains(errStr, "deadline exceeded") ||
-		contains(errStr, "server error") ||
-		contains(errStr, "connection")
 }
 
 func contains(s, substr string) bool {

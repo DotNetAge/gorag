@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DotNetAge/gorag/core"
@@ -496,10 +497,15 @@ func (i *Indexer) BatchIndex(ctx context.Context, sources []Source) error {
 
 // AsyncIndex adds documents to the RAG engine asynchronously
 func (i *Indexer) AsyncIndex(ctx context.Context, source Source) error {
+	// Use a detached context so background work survives request cancellation
+	bgCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := i.Index(ctx, source); err != nil {
-			// Log error (in a real implementation, you would use a logger)
-			fmt.Printf("Error indexing document: %v\n", err)
+		if err := i.Index(bgCtx, source); err != nil {
+			if i.logger != nil {
+				i.logger.Error(bgCtx, "Async indexing failed", err, map[string]interface{}{
+					"source_path": source.Path,
+				})
+			}
 		}
 	}()
 
@@ -508,10 +514,14 @@ func (i *Indexer) AsyncIndex(ctx context.Context, source Source) error {
 
 // AsyncBatchIndex adds multiple documents to the RAG engine asynchronously
 func (i *Indexer) AsyncBatchIndex(ctx context.Context, sources []Source) error {
+	bgCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := i.BatchIndex(ctx, sources); err != nil {
-			// Log error (in a real implementation, you would use a logger)
-			fmt.Printf("Error batch indexing documents: %v\n", err)
+		if err := i.BatchIndex(bgCtx, sources); err != nil {
+			if i.logger != nil {
+				i.logger.Error(bgCtx, "Async batch indexing failed", err, map[string]interface{}{
+					"source_count": len(sources),
+				})
+			}
 		}
 	}()
 
@@ -521,16 +531,14 @@ func (i *Indexer) AsyncBatchIndex(ctx context.Context, sources []Source) error {
 // IndexDirectory indexes all files in a directory recursively with concurrent workers
 func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) error {
 	startTime := time.Now()
-	fileCount := 0
-	successCount := 0
-	errorCount := 0
+	var fileCount, successCount, errorCount int64 // Use int64 for atomic operations
 
 	// Create a wait group for concurrency
 	var wg sync.WaitGroup
 	// Create a channel to receive files
 	fileChan := make(chan string, i.config.FileChannelBuffer)
-	// Create a channel to receive errors
-	errChan := make(chan error, i.config.ErrorChannelBuffer)
+	// Create a channel to receive errors (unbuffered to avoid deadlock)
+	errChan := make(chan error)
 	// Create a channel to receive indexing results
 	resultChan := make(chan bool, i.config.FileChannelBuffer)
 
@@ -564,8 +572,12 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 				// Index the file using the appropriate parser
 				fileStartTime := time.Now()
 				if err := i.Index(ctx, source); err != nil {
-					errorCount++
-					errChan <- fmt.Errorf("failed to index file %s: %w", filePath, err)
+					atomic.AddInt64(&errorCount, 1)
+					select {
+					case errChan <- fmt.Errorf("failed to index file %s: %w", filePath, err):
+					case <-ctx.Done():
+						return
+					}
 					resultChan <- false
 					if i.logger != nil {
 						i.logger.Error(ctx, "File indexing failed", err, map[string]interface{}{
@@ -575,7 +587,7 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 						})
 					}
 				} else {
-					successCount++
+					atomic.AddInt64(&successCount, 1)
 					resultChan <- true
 					if i.logger != nil {
 						i.logger.Debug(ctx, "File indexing succeeded", map[string]interface{}{
@@ -604,7 +616,7 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 				i.mu.RUnlock()
 
 				if ok {
-					fileCount++
+					atomic.AddInt64(&fileCount, 1)
 					select {
 					case fileChan <- path:
 					case <-ctx.Done():
@@ -614,49 +626,67 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 			}
 			return nil
 		}); err != nil {
-			errChan <- fmt.Errorf("failed to walk directory: %w", err)
+			select {
+			case errChan <- fmt.Errorf("failed to walk directory: %w", err):
+			case <-ctx.Done():
+			}
 		}
 	}()
 
-	// Wait for all workers to finish and close channels
+	// Collect errors and results concurrently
+	var indexErrors []error
+	errorCollectorDone := make(chan struct{})
+	go func() {
+		defer close(errorCollectorDone)
+		for err := range errChan {
+			indexErrors = append(indexErrors, err)
+		}
+	}()
+
+	// Wait for all workers to finish
 	go func() {
 		wg.Wait()
 		close(errChan)
 		close(resultChan)
 	}()
 
-	// Collect all errors
-	var indexErrors []error
-	for err := range errChan {
-		indexErrors = append(indexErrors, err)
-	}
-
-	// Collect results
+	// Consume results
 	for range resultChan {
 		// Just consume the channel
 	}
+
+	// Wait for error collector to finish
+	<-errorCollectorDone
 
 	// Record metrics
 	if i.metrics != nil {
 		duration := time.Since(startTime)
 		i.metrics.RecordIndexLatency(ctx, duration)
-		i.metrics.RecordIndexedDocuments(ctx, successCount)
-		if errorCount > 0 {
-			for j := 0; j < errorCount; j++ {
-				i.metrics.RecordErrorCount(ctx, "indexing")
-			}
+		i.metrics.RecordIndexedDocuments(ctx, int(atomic.LoadInt64(&successCount)))
+		errCount := int(atomic.LoadInt64(&errorCount))
+		for j := 0; j < errCount; j++ {
+			i.metrics.RecordErrorCount(ctx, "indexing")
 		}
 	}
 
+	// Load final counts
+	finalFileCount := atomic.LoadInt64(&fileCount)
+	finalSuccessCount := atomic.LoadInt64(&successCount)
+	finalErrorCount := atomic.LoadInt64(&errorCount)
+
 	// Log summary
 	if i.logger != nil {
+		successRate := 0.0
+		if finalFileCount > 0 {
+			successRate = float64(finalSuccessCount) / float64(finalFileCount) * 100
+		}
 		i.logger.Info(ctx, "Directory indexing completed", map[string]interface{}{
 			"directory":    directoryPath,
-			"total_files":  fileCount,
-			"success":      successCount,
-			"errors":       errorCount,
+			"total_files":  finalFileCount,
+			"success":      finalSuccessCount,
+			"errors":       finalErrorCount,
 			"duration":     time.Since(startTime).Seconds(),
-			"success_rate": float64(successCount) / float64(fileCount) * 100,
+			"success_rate": successRate,
 		})
 	}
 
@@ -664,8 +694,8 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 	if len(indexErrors) > 0 {
 		return errors.NewError(errors.ErrorTypeStorage, fmt.Sprintf("failed to index %d files in directory %s", len(indexErrors), directoryPath)).
 			WithContext("failed_count", fmt.Sprintf("%d", len(indexErrors))).
-			WithContext("total_count", fmt.Sprintf("%d", fileCount)).
-			WithContext("success_count", fmt.Sprintf("%d", successCount)).
+			WithContext("total_count", fmt.Sprintf("%d", finalFileCount)).
+			WithContext("success_count", fmt.Sprintf("%d", finalSuccessCount)).
 			WithContext("directory", directoryPath).
 			WithSuggestion("Check the individual file errors for details").
 			WithSuggestion("Ensure all files are in supported formats")
@@ -676,10 +706,11 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 
 // AsyncIndexDirectory indexes all files in a directory recursively asynchronously
 func (i *Indexer) AsyncIndexDirectory(ctx context.Context, directoryPath string) error {
+	bgCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := i.IndexDirectory(ctx, directoryPath); err != nil {
+		if err := i.IndexDirectory(bgCtx, directoryPath); err != nil {
 			if i.logger != nil {
-				i.logger.Error(ctx, "Async directory indexing failed", err, map[string]interface{}{
+				i.logger.Error(bgCtx, "Async directory indexing failed", err, map[string]interface{}{
 					"directory": directoryPath,
 				})
 			}

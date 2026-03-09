@@ -82,11 +82,13 @@ func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int)
 	// Perform search for each query
 	allResults := make(map[string]core.Result)
 	ranks := make(map[string][]int)
+	var searchErrors []error
 
 	for _, query := range queries {
 		// Get embedding for query
 		embeddings, err := rf.embedder.Embed(ctx, []string{query})
 		if err != nil {
+			searchErrors = append(searchErrors, fmt.Errorf("embedding failed for query %q: %w", query, err))
 			continue
 		}
 
@@ -96,6 +98,7 @@ func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int)
 		}
 		results, err := rf.vectorStore.Search(ctx, embeddings[0], searchOpts)
 		if err != nil {
+			searchErrors = append(searchErrors, fmt.Errorf("search failed for query %q: %w", query, err))
 			continue
 		}
 
@@ -115,6 +118,11 @@ func (rf *RAGFusion) Search(ctx context.Context, originalQuery string, topK int)
 			}
 			ranks[result.ID] = append(ranks[result.ID], rank+1) // Rank starts at 1
 		}
+	}
+
+	// If all queries failed, return error
+	if len(allResults) == 0 && len(searchErrors) > 0 {
+		return nil, fmt.Errorf("all RAG fusion queries failed: %v", searchErrors)
 	}
 
 	// Fuse results using reciprocal rank fusion
