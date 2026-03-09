@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/DotNetAge/gorag/embedding"
 	"github.com/DotNetAge/gorag/llm"
@@ -72,6 +73,8 @@ type Engine struct {
 	logger              observability.Logger
 	tracer              observability.Tracer
 	pluginOptions       PluginOptions
+
+	mu sync.RWMutex
 
 	// Internal handlers
 	indexer *indexing.Indexer
@@ -343,15 +346,17 @@ func (e *Engine) initHandlers() {
 	)
 }
 
-
-
 // AddParser adds a parser for a specific format
 func (e *Engine) AddParser(format string, p parser.Parser) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.parsers[format] = p
 }
 
 // SetDefaultParser sets the default parser for unknown formats
 func (e *Engine) SetDefaultParser(p parser.Parser) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.defaultParser = p
 }
 
@@ -537,7 +542,7 @@ func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType st
 	}
 	chunks, err := e.store.SearchByMetadata(ctx, metadata)
 	if err != nil {
-		return fmt.Errorf("failed to search chunks by metadata: %w", err)
+		return fmt.Errorf("failed to search chunks by metadata %v for file %s: %w", metadata, filePath, err)
 	}
 
 	// Delete existing chunks
@@ -547,7 +552,7 @@ func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType st
 			ids[i] = chunk.ID
 		}
 		if err := e.store.Delete(ctx, ids); err != nil {
-			return fmt.Errorf("failed to delete existing chunks: %w", err)
+			return fmt.Errorf("failed to delete %d existing chunks for file %s: %w", len(ids), filePath, err)
 		}
 	}
 
@@ -574,23 +579,23 @@ func (e *Engine) ReindexFile(ctx context.Context, filePath string, sourceType st
 // 4. Use asynchronous indexing to avoid blocking
 func (e *Engine) StartWatch(targetIndexDir string) error {
 	ctx := context.Background()
-	
+
 	// First perform initial indexing of the directory
 	e.logger.Info(ctx, "Starting initial indexing of directory", map[string]interface{}{
 		"directory": targetIndexDir,
 	})
-	
+
 	if err := e.IndexDirectory(ctx, targetIndexDir); err != nil {
 		e.logger.Error(ctx, "Failed to perform initial indexing", err, map[string]interface{}{
 			"directory": targetIndexDir,
 		})
 		return fmt.Errorf("failed to perform initial indexing: %w", err)
 	}
-	
+
 	e.logger.Info(ctx, "Initial indexing completed", map[string]interface{}{
 		"directory": targetIndexDir,
 	})
-	
+
 	// Create a new watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -598,7 +603,7 @@ func (e *Engine) StartWatch(targetIndexDir string) error {
 		return fmt.Errorf("failed to create watcher: %w", err)
 	}
 	defer watcher.Close()
-	
+
 	// Add the directory and all subdirectories to the watcher
 	if err := e.addDirToWatcher(watcher, targetIndexDir); err != nil {
 		e.logger.Error(ctx, "Failed to add directory to watcher", err, map[string]interface{}{
@@ -606,11 +611,11 @@ func (e *Engine) StartWatch(targetIndexDir string) error {
 		})
 		return fmt.Errorf("failed to add directory to watcher: %w", err)
 	}
-	
+
 	e.logger.Info(ctx, "Starting to watch directory for changes", map[string]interface{}{
 		"directory": targetIndexDir,
 	})
-	
+
 	// Start watching for events
 	for {
 		select {
@@ -618,46 +623,50 @@ func (e *Engine) StartWatch(targetIndexDir string) error {
 			if !ok {
 				return nil
 			}
-			
+
 			// Only process regular files
 			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0 {
 				// Check if it's a file (not a directory)
 				if !strings.HasSuffix(event.Name, "/") {
 					// Get file extension
 					ext := strings.ToLower(filepath.Ext(event.Name))
-					
+
 					// Check if we have a parser for this file type
-					if _, ok := e.parsers[ext]; ok {
+					e.mu.RLock()
+					_, ok := e.parsers[ext]
+					e.mu.RUnlock()
+
+					if ok {
 						// Use asynchronous indexing to avoid blocking
 						source := Source{
 							Type: ext,
 							Path: event.Name,
 						}
-						
+
 						if err := e.AsyncIndex(ctx, source); err != nil {
 							e.logger.Error(ctx, "Failed to asynchronously index file", err, map[string]interface{}{
-							"file": event.Name,
-						})
+								"file": event.Name,
+							})
 						}
 						e.logger.Info(ctx, "File change detected, indexing asynchronously", map[string]interface{}{
-							"file": event.Name,
+							"file":      event.Name,
 							"operation": event.Op,
 						})
 					}
 				}
-				
+
 				// If a directory was created, add it to the watcher
-			if event.Op&fsnotify.Create != 0 {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if err := e.addDirToWatcher(watcher, event.Name); err != nil {
-						e.logger.Error(ctx, "Failed to add new directory to watcher", err, map[string]interface{}{
-							"directory": event.Name,
-						})
+				if event.Op&fsnotify.Create != 0 {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						if err := e.addDirToWatcher(watcher, event.Name); err != nil {
+							e.logger.Error(ctx, "Failed to add new directory to watcher", err, map[string]interface{}{
+								"directory": event.Name,
+							})
+						}
 					}
 				}
 			}
-			}
-			
+
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
@@ -673,7 +682,7 @@ func (e *Engine) addDirToWatcher(watcher *fsnotify.Watcher, dir string) error {
 	if err := watcher.Add(dir); err != nil {
 		return err
 	}
-	
+
 	// Add all subdirectories
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -703,4 +712,3 @@ func (e *Engine) StartWatchAsync(targetIndexDir string) error {
 	}()
 	return nil
 }
-

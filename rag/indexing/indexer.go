@@ -52,7 +52,7 @@ type Indexer struct {
 	indexedDocuments   int
 	indexingDocuments  int
 	monitoredDocuments int
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 }
 
 // Embedder defines the interface for embedding providers
@@ -232,7 +232,7 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 		// Read file from path
 		file, err := os.Open(source.Path)
 		if err != nil {
-			err := fmt.Errorf("failed to open file: %w", err)
+			err = fmt.Errorf("failed to open file at path %s: %w", source.Path, err)
 			if i.metrics != nil {
 				i.metrics.RecordErrorCount(ctx, "invalid_input")
 			}
@@ -288,17 +288,19 @@ func (i *Indexer) Index(ctx context.Context, source Source) error {
 
 	parseStartTime := time.Now()
 	// Get the appropriate parser for the source type
+	i.mu.RLock()
 	p, ok := i.parsers[source.Type]
 	if !ok {
 		// Use default parser if no specific parser is found
 		p = i.defaultParser
 	}
-	
+	i.mu.RUnlock()
+
 	// 传递文件路径到解析器
 	if source.Path != "" {
 		ctx = context.WithValue(ctx, "file_path", source.Path)
 	}
-	
+
 	chunks, err := p.Parse(ctx, reader)
 	if err != nil {
 		if i.metrics != nil {
@@ -592,7 +594,11 @@ func (i *Indexer) IndexDirectory(ctx context.Context, directoryPath string) erro
 			if !info.IsDir() {
 				// Check if we have a parser for this file extension
 				ext := strings.ToLower(filepath.Ext(path))
-				if _, ok := i.parsers[ext]; ok {
+				i.mu.RLock()
+				_, ok := i.parsers[ext]
+				i.mu.RUnlock()
+
+				if ok {
 					fileCount++
 					select {
 					case fileChan <- path:

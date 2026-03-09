@@ -13,7 +13,7 @@
 
 ## Version 0.2.0
 
-### Parsers (9 types)
+### Parsers
 - [x] Text parser
 - [x] PDF parser
 - [x] DOCX parser
@@ -23,19 +23,33 @@
 - [x] Excel parser
 - [x] PPT parser
 - [x] Image parser
+- [x] Config parser
+- [x] CSV parser
+- [x] DB schema parser
+- [x] Email parser
+- [x] Go code parser
+- [x] Java code parser
+- [x] JS code parser
+- [x] Log parser
+- [x] Markdown parser
+- [x] Python code parser
+- [x] TypeScript code parser
+- [x] XML parser
 
-### Vector Stores (5 backends)
+### Vector Stores
 - [x] Memory store
 - [x] Pinecone integration
 - [x] Weaviate integration
 - [x] Milvus integration
 - [x] Qdrant integration
 
-### Embedding Providers (2 providers)
+### Embedding Providers
 - [x] OpenAI embeddings
 - [x] Ollama local embeddings
+- [x] Cohere embeddings
+- [x] Voyage embeddings
 
-### LLM Clients (5 clients)
+### LLM Clients
 - [x] OpenAI client
 - [x] Anthropic client
 - [x] Azure OpenAI client
@@ -53,11 +67,11 @@
 - [x] Hybrid retrieval (keyword + semantic)
 - [x] Reranking
 - [x] Query routing
-- [x] Multi-modal support (images)
+- [ ] Multi-modal support (images)
 
 ### Performance
 - [x] Batch processing
-- [x] Connection pooling
+- [ ] Connection pooling
 - [x] Async indexing
 
 ### Observability
@@ -74,13 +88,13 @@
 ### CLI Tool
 - [x] Index command
 - [x] Query command
-- [x] Export/Import
+- [ ] Export/Import
 - [x] Custom prompt template support
 
 ## Version 0.5.0
 
 ### Testing & Quality
-- [x] Full test coverage (85%+)
+- [ ] Full test coverage (85%+)
 - [x] Integration tests with Testcontainers
 - [x] Performance benchmarks
 
@@ -96,20 +110,20 @@
 - [ ] Add tests for config package (current: 0%)
 - [ ] Add tests for Azure OpenAI client (current: 0%)
 - [ ] Improve test coverage for Excel parser (current: 13.5%)
-- [ ] Improve test coverage for Milvus store (current: 18.8%)
-- [ ] Improve test coverage for Qdrant store (current: 13.0%)
-- [ ] Improve test coverage for Weaviate store (current: 14.1%)
-- [ ] Improve test coverage for RAG engine (current: 40.6%)
+- [ ] Improve test coverage for Milvus store (current: 58.7%)
+- [ ] Improve test coverage for Qdrant store (current: 66.1%)
+- [ ] Improve test coverage for Weaviate store (current: 42.6%)
+- [ ] Improve test coverage for RAG engine (current: 56.8%)
 
 ### Code Quality
-- [ ] Implement proper LLM response parsing for reranker scores (TODO in reranker.go:104)
+- [x] Implement proper LLM response parsing for reranker scores
 - [ ] Add error handling for edge cases
 - [ ] Improve code documentation
 
 ### Bug Fixes
-- [ ] Fix any issues found during testing
-- [ ] Handle concurrent access safely
-- [ ] Improve error messages
+- [x] Fix any issues found during testing
+- [x] Handle concurrent access safely
+- [x] Improve error messages
 
 ## Version 0.7.0 (Performance & Reliability)
 
@@ -120,10 +134,10 @@
 - [ ] Add lazy loading for large documents
 
 ### Reliability
-- [ ] Add retry logic for API calls
+- [x] Add retry logic for API calls
 - [ ] Implement graceful degradation
 - [ ] Add circuit breaker pattern
-- [ ] Improve timeout handling
+- [x] Improve timeout handling
 
 ### Developer Experience
 - [ ] Add more code examples
@@ -135,21 +149,21 @@
 
 ### Documentation
 - [ ] Add architecture decision records (ADRs)
-- [ ] Create contribution guidelines
+- [x] Create contribution guidelines
 - [ ] Add performance tuning guide
 - [ ] Create FAQ section
 
 ### Examples
-- [ ] Add real-world use case examples
-- [ ] Create step-by-step tutorials
-- [ ] Add integration examples
-- [ ] Create best practices guide
+- [x] Add real-world use case examples
+- [x] Create step-by-step tutorials
+- [x] Add integration examples
+- [x] Create best practices guide
 
 ### Community
 - [ ] Set up issue templates
 - [ ] Create pull request template
 - [ ] Add code of conduct
-- [ ] Set up GitHub Actions for CI/CD
+- [x] Set up GitHub Actions for CI/CD
 
 ## Version 0.9.0 (Stability)
 
@@ -160,16 +174,9 @@
 - [ ] Document API changes
 
 ### Production Readiness
-- [ ] Add health check endpoints
-- [ ] Implement graceful shutdown
-- [ ] Add startup/shutdown hooks
-- [ ] Improve resource cleanup
+- [x] Add health check endpoints
+- [x] Implement graceful shutdown
 
-### Monitoring
-- [ ] Add comprehensive metrics
-- [ ] Create monitoring dashboards
-- [ ] Add alerting rules
-- [ ] Document monitoring setup
 
 ## Version 1.0.0 (Stable Release)
 
