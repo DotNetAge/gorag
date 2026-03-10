@@ -4,7 +4,6 @@
 [![License:MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen.svg)](https://github.com/DotNetAge/gorag)
 [![Go Version](https://img.shields.io/badge/go-1.22%2B-blue.svg)](https://golang.org)
-[![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
 [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
 [![Powered by gochat](https://img.shields.io/badge/Powered%20by-gochat-ff69b4.svg)](https://github.com/DotNetAge/gochat)
 [![Pure Go Vector](https://img.shields.io/badge/Vector%20Store-govector-success.svg)](https://github.com/DotNetAge/govector)
