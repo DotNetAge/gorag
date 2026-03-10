@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	embedOllama "github.com/DotNetAge/gorag/embedding/ollama"
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
+	llmOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
 )
@@ -89,7 +90,9 @@ func BenchmarkEngine_Index_SingleDocument(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -134,7 +137,9 @@ func BenchmarkEngine_Index_MultipleDocuments(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -187,7 +192,9 @@ func BenchmarkEngine_Query_SingleDocument(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -241,7 +248,9 @@ func BenchmarkEngine_Query_MultipleDocuments(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -294,7 +303,9 @@ func BenchmarkEngine_Index_LargeScale(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -341,7 +352,9 @@ func BenchmarkEngine_Query_LargeScale(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)

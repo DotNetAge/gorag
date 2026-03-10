@@ -5,9 +5,9 @@ import (
 	"io"
 	"testing"
 
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/vectorstore"
 	"github.com/stretchr/testify/assert"
@@ -65,10 +65,10 @@ func (m *mockEmbedderPlugin) Embedder() embedding.Provider {
 // mockLLMPlugin is a mock LLM plugin for testing
 type mockLLMPlugin struct {
 	mockPlugin
-	llmClient llm.Client
+	llmClient gochatcore.Client
 }
 
-func (m *mockLLMPlugin) LLM() llm.Client {
+func (m *mockLLMPlugin) LLM() gochatcore.Client {
 	return m.llmClient
 }
 
@@ -328,10 +328,10 @@ func (m *mockEmbedderImpl) Dimension() int {
 // mockLLMImpl is a mock LLM client implementation
 type mockLLMImpl struct{}
 
-func (m *mockLLMImpl) Complete(ctx context.Context, prompt string) (string, error) {
-	return "", nil
+func (m *mockLLMImpl) Chat(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Response, error) {
+	return &gochatcore.Response{Content: ""}, nil
 }
 
-func (m *mockLLMImpl) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
+func (m *mockLLMImpl) ChatStream(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Stream, error) {
 	return nil, nil
 }

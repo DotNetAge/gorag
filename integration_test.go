@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
+	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/rag"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
-	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,15 +31,15 @@ func (m *mockEmbedder) Dimension() int {
 // mockLLM is a simple mock LLM for testing
 type mockLLM struct{}
 
-func (m *mockLLM) Complete(ctx context.Context, prompt string) (string, error) {
-	return "This is a mock response based on the context", nil
+func (m *mockLLM) Chat(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Response, error) {
+	return &gochatcore.Response{Content: "This is a mock response based on the context"}, nil
 }
 
-func (m *mockLLM) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
-	ch := make(chan string, 1)
-	ch <- "This is a mock stream response"
+func (m *mockLLM) ChatStream(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Stream, error) {
+	ch := make(chan gochatcore.StreamEvent, 1)
+	ch <- gochatcore.StreamEvent{Type: gochatcore.EventContent, Content: "This is a mock stream response"}
 	close(ch)
-	return ch, nil
+	return gochatcore.NewStream(ch, nil), nil
 }
 
 func TestEndToEndFlow(t *testing.T) {

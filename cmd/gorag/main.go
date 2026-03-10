@@ -12,7 +12,8 @@ import (
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
 	embedder "github.com/DotNetAge/gorag/embedding/openai"
-	llm "github.com/DotNetAge/gorag/llm/openai"
+	llm "github.com/DotNetAge/gochat/pkg/client/openai"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 )
 
 var (
@@ -286,7 +287,12 @@ func createEngine() (*rag.Engine, error) {
 	}
 
 	// Create LLM client
-	llmInstance, err := llm.New(llm.Config{APIKey: apiKey})
+	llmInstance, err := llm.New(llm.Config{
+		Config: base.Config{
+			APIKey: apiKey,
+			Model: "gpt-4", // Provide a default model
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

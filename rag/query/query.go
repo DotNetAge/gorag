@@ -3,13 +3,14 @@ package query
 import (
 	"bytes"
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/errors"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/rag/retrieval"
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -110,7 +111,7 @@ type Tracer interface {
 type QueryHandler struct {
 	embedder        Embedder
 	store           vectorstore.Store
-	llm             llm.Client
+	llm             gochatcore.Client
 	retriever       *retrieval.HybridRetriever
 	reranker        *retrieval.Reranker
 	hydration       HyDE
@@ -128,7 +129,7 @@ type QueryHandler struct {
 func NewQueryHandler(
 	embedder Embedder,
 	store vectorstore.Store,
-	llm llm.Client,
+	llm gochatcore.Client,
 	retriever *retrieval.HybridRetriever,
 	reranker *retrieval.Reranker,
 	hydration HyDE,
@@ -663,7 +664,7 @@ func (q *QueryHandler) Query(ctx context.Context, question string, opts QueryOpt
 	prompt := buildPrompt(question, contexts, opts.PromptTemplate)
 
 	llmStartTime := time.Now()
-	answer, err := q.llm.Complete(ctx, prompt)
+	answer, err := llmutil.Complete(ctx, q.llm, prompt)
 	if err != nil {
 		if q.metrics != nil {
 			q.metrics.RecordErrorCount(ctx, "llm_completion")
@@ -865,7 +866,7 @@ func (q *QueryHandler) QueryStream(ctx context.Context, question string, opts Qu
 	prompt := buildPrompt(question, contexts, opts.PromptTemplate)
 
 	// Get streaming response from LLM
-	llmCh, err := q.llm.CompleteStream(ctx, prompt)
+	llmCh, err := llmutil.CompleteStream(ctx, q.llm, prompt)
 	if err != nil {
 		return nil, errors.ErrLLM("llm", err).
 			WithContext("question", question).

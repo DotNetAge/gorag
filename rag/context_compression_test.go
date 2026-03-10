@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
+	llmOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,9 @@ import (
 func TestContextCompressor_Compress(t *testing.T) {
 	// Create LLM client
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	require.NoError(t, err)
 
@@ -62,7 +65,9 @@ func TestContextCompressor_Compress(t *testing.T) {
 func TestContextCompressor_RemoveRedundancy(t *testing.T) {
 	// Create LLM client
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	require.NoError(t, err)
 

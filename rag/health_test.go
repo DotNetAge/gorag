@@ -2,6 +2,7 @@ package rag
 
 import (
 	"context"
+
 	"errors"
 	"testing"
 	"time"

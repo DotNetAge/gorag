@@ -164,7 +164,7 @@ func (v *Validator) validateLLM(cfg *LLMConfig) {
 // validateVectorStore validates vector store configuration
 func (v *Validator) validateVectorStore(cfg *VectorStoreConfig) {
 	// Validate type
-	validTypes := []string{"memory", "milvus", "qdrant", "weaviate", "pinecone"}
+	validTypes := []string{"memory", "milvus", "qdrant", "weaviate", "pinecone", "govector"}
 	if !contains(validTypes, cfg.Type) {
 		v.AddError("vectorstore.type",
 			fmt.Sprintf("must be one of: %s", strings.Join(validTypes, ", ")))
@@ -179,6 +179,8 @@ func (v *Validator) validateVectorStore(cfg *VectorStoreConfig) {
 	case "weaviate":
 		v.validateWeaviate(&cfg.Weaviate)
 	case "pinecone":
+	case "govector":
+		v.validateGoVector(&cfg.GoVector)
 		v.validatePinecone(&cfg.Pinecone)
 	}
 }
@@ -370,4 +372,16 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func (v *Validator) validateGoVector(cfg *GoVectorConfig) {
+	if cfg.DBPath == "" {
+		v.AddError("vectorstore.govector.dbPath", "is required")
+	}
+	if cfg.Dimension <= 0 {
+		v.AddError("vectorstore.govector.dimension", "must be greater than 0")
+	}
+	if cfg.Collection == "" {
+		v.AddError("vectorstore.govector.collection", "is required")
+	}
 }

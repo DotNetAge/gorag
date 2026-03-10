@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/parser/text"
@@ -59,7 +59,7 @@ type Engine struct {
 	defaultParser       parser.Parser
 	embedder            embedding.Provider
 	store               vectorstore.Store
-	llm                 llm.Client
+	llm                 gochatcore.Client
 	retriever           *retrieval.HybridRetriever
 	reranker            *retrieval.Reranker
 	hydration           *HyDE

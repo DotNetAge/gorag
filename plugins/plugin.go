@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
@@ -166,10 +166,10 @@ type EmbedderPlugin interface {
 //
 //     type MyLLMPlugin struct {
 //         MyPlugin
-//         llmClient llm.Client
+//         llmClient gochatcore.Client
 //     }
 //
-//     func (p *MyLLMPlugin) LLM() llm.Client {
+//     func (p *MyLLMPlugin) LLM() gochatcore.Client {
 //         return p.llmClient
 //     }
 type LLMPlugin interface {
@@ -178,8 +178,8 @@ type LLMPlugin interface {
 	// LLM returns the LLM client implementation
 	//
 	// Returns:
-	// - llm.Client: LLM client implementation
-	LLM() llm.Client
+	// - gochatcore.Client: LLM client implementation
+	LLM() gochatcore.Client
 }
 
 // Registry manages plugins

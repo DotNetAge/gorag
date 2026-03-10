@@ -3,7 +3,7 @@ package config
 import (
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/rag/retrieval"
@@ -16,7 +16,7 @@ type EngineConfig struct {
 	DefaultParser       parser.Parser              // Default parser for unknown file types
 	Embedder            embedding.Provider         // Embedding model provider
 	Store               vectorstore.Store          // Vector storage backend
-	LLM                 llm.Client                 // LLM client for generation
+	LLM                 gochatcore.Client                 // LLM client for generation
 	Retriever           *retrieval.HybridRetriever // Hybrid retrieval (vector + keyword)
 	Reranker            *retrieval.Reranker        // LLM-based reranker
 	Hydration           *HyDE                      // Hypothetical Document Embeddings
@@ -63,7 +63,7 @@ func WithEmbedder(e embedding.Provider) Option {
 }
 
 // WithLLM sets the LLM client
-func WithLLM(l llm.Client) Option {
+func WithLLM(l gochatcore.Client) Option {
 	return func(cfg *EngineConfig) {
 		cfg.LLM = l
 	}
@@ -227,11 +227,11 @@ type RouteResult struct {
 
 // HyDE represents Hypothetical Document Embeddings for query enhancement
 type HyDE struct {
-	llm llm.Client
+	llm gochatcore.Client
 }
 
 // NewHyDE creates a new HyDE instance
-func NewHyDE(llm llm.Client) *HyDE {
+func NewHyDE(llm gochatcore.Client) *HyDE {
 	return &HyDE{llm: llm}
 }
 
@@ -243,11 +243,11 @@ func (h *HyDE) EnhanceQuery(ctx interface{}, question string) (string, error) {
 
 // ContextCompressor represents context compression for optimizing context window usage
 type ContextCompressor struct {
-	llm llm.Client
+	llm gochatcore.Client
 }
 
 // NewContextCompressor creates a new context compressor
-func NewContextCompressor(llm llm.Client) *ContextCompressor {
+func NewContextCompressor(llm gochatcore.Client) *ContextCompressor {
 	return &ContextCompressor{llm: llm}
 }
 

@@ -56,6 +56,7 @@ type VectorStoreConfig struct {
 	Qdrant   QdrantConfig   `yaml:"qdrant"`
 	Weaviate WeaviateConfig `yaml:"weaviate"`
 	Pinecone PineconeConfig `yaml:"pinecone"`
+	GoVector GoVectorConfig `yaml:"govector"`
 }
 
 // LoggingConfig represents logging configuration
@@ -395,4 +396,12 @@ func (c *Config) ToMap() map[string]interface{} {
 // FromMap loads config from a map
 func (c *Config) FromMap(data map[string]interface{}) error {
 	return nil
+}
+
+// GoVectorConfig represents GoVector configuration
+type GoVectorConfig struct {
+	Collection string `yaml:"collection" default:"gorag"`
+	Dimension  int    `yaml:"dimension" default:"1536"`
+	DBPath     string `yaml:"dbPath" default:"gorag_vectors.db"`
+	UseHNSW    bool   `yaml:"useHNSW" default:"true"`
 }

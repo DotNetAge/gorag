@@ -2,6 +2,8 @@ package rag
 
 import (
 	"context"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
+
 	"errors"
 	"io"
 	"testing"
@@ -108,18 +110,20 @@ type mockLLM struct {
 	completeFunc func(ctx context.Context, prompt string) (string, error)
 }
 
-func (m *mockLLM) Complete(ctx context.Context, prompt string) (string, error) {
-	if m.completeFunc != nil {
-		return m.completeFunc(ctx, prompt)
+func (m *mockLLM) Chat(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Response, error) {
+	prompt := ""
+	if len(messages) > 0 {
+		prompt = messages[0].TextContent()
 	}
-	return "这是基于上下文的答案", nil
+	if m.completeFunc != nil {
+		ans, err := m.completeFunc(ctx, prompt)
+		return &gochatcore.Response{Content: ans}, err
+	}
+	return &gochatcore.Response{Content: "这是基于上下文的答案"}, nil
 }
 
-func (m *mockLLM) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
-	ch := make(chan string, 1)
-	ch <- "这是基于上下文的答案"
-	close(ch)
-	return ch, nil
+func (m *mockLLM) ChatStream(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Stream, error) {
+	return nil, nil
 }
 
 func TestNewEngine(t *testing.T) {

@@ -2,13 +2,14 @@ package retrieval
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
@@ -27,7 +28,7 @@ import (
 // 4. Repeat for Microsoft
 // 5. Combine all information to answer the original question
 type MultiHopRAG struct {
-	llm            llm.Client
+	llm            gochatcore.Client
 	embedder       embedding.Provider
 	vectorStore    vectorstore.Store
 	maxHops        int
@@ -37,7 +38,7 @@ type MultiHopRAG struct {
 
 // NewMultiHopRAG creates a new multi-hop RAG instance
 func NewMultiHopRAG(
-	llm llm.Client,
+	llm gochatcore.Client,
 	embedder embedding.Provider,
 	vectorStore vectorstore.Store,
 ) *MultiHopRAG {
@@ -155,7 +156,7 @@ func (m *MultiHopRAG) Query(ctx context.Context, question string, maxHops int, p
 	prompt := buildMultiHopPrompt(question, contexts, promptTemplate)
 
 	// Generate answer
-	answer, err := m.llm.Complete(ctx, prompt)
+	answer, err := llmutil.Complete(ctx, m.llm, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +218,7 @@ func (m *MultiHopRAG) analyzeResults(ctx context.Context, query string, results 
 	prompt = strings.Replace(prompt, "{documents}", documents, 1)
 
 	// Get analysis from LLM
-	response, err := m.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, m.llm, prompt)
 	if err != nil {
 		return &AnalysisResult{
 			NeedsMoreInformation: false,
@@ -237,7 +238,7 @@ func (m *MultiHopRAG) generateFollowUpQuery(ctx context.Context, originalQuery, 
 	prompt = strings.Replace(prompt, "{missing_information}", missingInfo, 1)
 
 	// Get follow-up query from LLM
-	response, err := m.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, m.llm, prompt)
 	if err != nil {
 		return "", err
 	}

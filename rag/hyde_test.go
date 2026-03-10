@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
+	llmOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,9 @@ import (
 func TestHyDE_EnhanceQuery(t *testing.T) {
 	// Create LLM client
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	require.NoError(t, err)
 
@@ -35,7 +38,9 @@ func TestHyDE_EnhanceQuery(t *testing.T) {
 func TestHyDE_CustomPrompt(t *testing.T) {
 	// Create LLM client
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	require.NoError(t, err)
 

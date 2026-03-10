@@ -2,13 +2,14 @@ package retrieval
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
@@ -31,7 +32,7 @@ import (
 // 5. Continue until it has comprehensive information
 // 6. Synthesize the information into a report
 type AgenticRAG struct {
-	llm           llm.Client
+	llm           gochatcore.Client
 	embedder      embedding.Provider
 	vectorStore   vectorstore.Store
 	maxIterations int
@@ -57,7 +58,7 @@ type AgentState struct {
 
 // NewAgenticRAG creates a new agentic RAG instance
 func NewAgenticRAG(
-	llm llm.Client,
+	llm gochatcore.Client,
 	embedder embedding.Provider,
 	vectorStore vectorstore.Store,
 ) *AgenticRAG {
@@ -145,7 +146,7 @@ func (a *AgenticRAG) Query(ctx context.Context, task string, instructions string
 	prompt := buildAgenticPrompt(task, contexts, instructions, promptTemplate)
 
 	// Generate answer
-	answer, err := a.llm.Complete(ctx, prompt)
+	answer, err := llmutil.Complete(ctx, a.llm, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +222,7 @@ func (a *AgenticRAG) analyzeTask(ctx context.Context, state *AgentState) (action
 	prompt = strings.Replace(prompt, "{reasoning_history}", reasoningHistory, 1)
 
 	// Get analysis from LLM
-	response, err := a.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, a.llm, prompt)
 	if err != nil {
 		return "finish", "", "Error analyzing task"
 	}

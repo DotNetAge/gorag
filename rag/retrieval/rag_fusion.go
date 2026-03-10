@@ -2,20 +2,21 @@ package retrieval
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/vectorstore"
 )
 
 // RAGFusion implements the RAG-Fusion retrieval strategy
 // https://arxiv.org/abs/2309.00812
 type RAGFusion struct {
-	llm          llm.Client
+	llm          gochatcore.Client
 	embedder     embedding.Provider
 	vectorStore  vectorstore.Store
 	keywordStore KeywordStore
@@ -26,7 +27,7 @@ type RAGFusion struct {
 
 // NewRAGFusion creates a new RAG-Fusion instance
 func NewRAGFusion(
-	llm llm.Client,
+	llm gochatcore.Client,
 	embedder embedding.Provider,
 	vectorStore vectorstore.Store,
 	keywordStore KeywordStore,
@@ -142,7 +143,7 @@ func (rf *RAGFusion) generateQueryVariations(ctx context.Context, originalQuery 
 	prompt = strings.Replace(prompt, "{num_queries}", fmt.Sprintf("%d", rf.numQueries), 1)
 
 	// Get query variations from LLM
-	response, err := rf.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, rf.llm, prompt)
 	if err != nil {
 		return nil, err
 	}

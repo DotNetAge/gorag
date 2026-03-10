@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	embedOllama "github.com/DotNetAge/gorag/embedding/ollama"
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
+	llmOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 	"github.com/DotNetAge/gorag/parser/html"
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
@@ -69,7 +70,9 @@ func BenchmarkEngine_Index_BibleScale_MixedFormats(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)
@@ -120,7 +123,9 @@ func BenchmarkEngine_Query_BibleScale_MixedFormats(b *testing.B) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create LLM client: %v", err)

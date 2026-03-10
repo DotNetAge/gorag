@@ -4,8 +4,9 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/circuitbreaker"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"github.com/DotNetAge/gorag/embedding"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser"
 	"github.com/DotNetAge/gorag/rag/retrieval"
@@ -55,7 +56,7 @@ func WithEmbedder(e embedding.Provider) Option {
 }
 
 // WithLLM sets the LLM client
-func WithLLM(l llm.Client) Option {
+func WithLLM(l gochatcore.Client) Option {
 	return func(e *Engine) {
 		e.llm = l
 	}
@@ -231,7 +232,7 @@ func WithCircuitBreaker(maxFailures int, timeout time.Duration, halfOpenMax int)
 				Timeout:     timeout,
 				HalfOpenMax: halfOpenMax,
 			})
-			e.llm = llm.NewCircuitBreakerClient(e.llm, breaker)
+			e.llm = llmutil.NewCircuitBreakerClient(e.llm, breaker)
 		}
 	}
 }

@@ -2,6 +2,8 @@ package retrieval
 
 import (
 	"context"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
+
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
@@ -13,11 +15,11 @@ type mockLLM struct {
 	response string
 }
 
-func (m *mockLLM) Complete(ctx context.Context, prompt string) (string, error) {
-	return m.response, nil
+func (m *mockLLM) Chat(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Response, error) {
+	return &gochatcore.Response{Content: m.response}, nil
 }
 
-func (m *mockLLM) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
+func (m *mockLLM) ChatStream(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Stream, error) {
 	return nil, nil
 }
 

@@ -2,21 +2,22 @@ package rag
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"strings"
 
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 )
 
 // HyDE (Hypothetical Document Embeddings) enhances query embeddings by generating a hypothetical document
 // https://arxiv.org/abs/2212.10496
 type HyDE struct {
-	llm        llm.Client
+	llm        gochatcore.Client
 	promptTemplate string
 }
 
 // NewHyDE creates a new HyDE instance
-func NewHyDE(llm llm.Client) *HyDE {
+func NewHyDE(llm gochatcore.Client) *HyDE {
 	return &HyDE{
 		llm:        llm,
 		promptTemplate: defaultHyDEPrompt,
@@ -52,7 +53,7 @@ func (h *HyDE) generateHypotheticalDocument(ctx context.Context, query string) (
 	prompt := strings.Replace(h.promptTemplate, "{query}", query, 1)
 
 	// Get response from LLM
-	response, err := h.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, h.llm, prompt)
 	if err != nil {
 		return "", err
 	}

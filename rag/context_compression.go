@@ -2,16 +2,17 @@ package rag
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"sort"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 )
 
 // ContextCompressor compresses and optimizes context for LLM input
 type ContextCompressor struct {
-	llm                llm.Client
+	llm                gochatcore.Client
 	similarityThreshold float32
 	maxContextSize     int
 	summaryPrompt      string
@@ -19,7 +20,7 @@ type ContextCompressor struct {
 }
 
 // NewContextCompressor creates a new context compressor
-func NewContextCompressor(llm llm.Client) *ContextCompressor {
+func NewContextCompressor(llm gochatcore.Client) *ContextCompressor {
 	return &ContextCompressor{
 		llm:                llm,
 		similarityThreshold: 0.8,
@@ -165,7 +166,7 @@ func (c *ContextCompressor) summarizeContent(ctx context.Context, content, query
 	prompt = strings.Replace(prompt, "{query}", query, 1)
 
 	// Get summary from LLM using the caller's context
-	summary, err := c.llm.Complete(ctx, prompt)
+	summary, err := llmutil.Complete(ctx, c.llm, prompt)
 	if err != nil {
 		// Fallback to truncation if summarization fails
 		maxLength := 300

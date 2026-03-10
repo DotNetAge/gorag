@@ -2,6 +2,7 @@ package rag
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"time"
 
 	"github.com/DotNetAge/gorag/vectorstore"
@@ -168,7 +169,7 @@ func (h *HealthChecker) checkLLM(ctx context.Context) ComponentHealth {
 	start := time.Now()
 
 	// Try a simple completion to verify connectivity
-	_, err := h.engine.llm.Complete(ctx, "ping")
+	_, err := llmutil.Complete(ctx, h.engine.llm, "ping")
 	health.Latency = time.Since(start)
 
 	if err != nil {

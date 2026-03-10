@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"github.com/DotNetAge/gorag/utils/llmutil"
 	"fmt"
 	"regexp"
 	"sort"
@@ -9,18 +10,18 @@ import (
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/llm"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
 )
 
 // Reranker implements result reranking using LLM
 type Reranker struct {
-	llm     llm.Client
+	llm     gochatcore.Client
 	topK    int
 	prompt  string
 }
 
 // NewReranker creates a new reranker
-func NewReranker(llm llm.Client, topK int) *Reranker {
+func NewReranker(llm gochatcore.Client, topK int) *Reranker {
 	if topK <= 0 {
 		topK = 3
 	}
@@ -100,7 +101,7 @@ func (r *Reranker) buildRerankPrompt(query string, results []core.Result) string
 // getRelevanceScores gets relevance scores from LLM
 func (r *Reranker) getRelevanceScores(ctx context.Context, prompt string, count int) ([]float32, error) {
 	// Get response from LLM
-	response, err := r.llm.Complete(ctx, prompt)
+	response, err := llmutil.Complete(ctx, r.llm, prompt)
 	if err != nil {
 		return nil, err
 	}

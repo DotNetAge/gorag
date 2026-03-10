@@ -409,7 +409,7 @@ import (
     "context"
     "fmt"
     
-    "github.com/DotNetAge/gorag/llm"
+    "github.com/DotNetAge/gochat/pkg/core"
     "github.com/DotNetAge/gorag/plugins"
 )
 

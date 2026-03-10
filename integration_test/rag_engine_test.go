@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	gochatbase "github.com/DotNetAge/gochat/pkg/client/base"
+	gochatOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
 	"github.com/DotNetAge/gorag/core"
 	embedOllama "github.com/DotNetAge/gorag/embedding/ollama"
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
 	"github.com/DotNetAge/gorag/observability"
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/rag"
@@ -26,9 +27,7 @@ func TestRAGEngine_CompleteFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	vectorStore := memory.NewStore()
-	llmClient, err := llmOllama.New(llmOllama.Config{
-		Model: "qwen3:0.6b",
-	})
+	llmClient, err := gochatOllama.New(gochatOllama.Config{Config: gochatbase.Config{Model: "qwen3:0.6b"}})
 	require.NoError(t, err)
 
 	retriever := retrieval.NewHybridRetriever(vectorStore, &mockKeywordStore{}, 0.5)

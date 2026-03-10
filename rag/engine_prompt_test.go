@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	embedOllama "github.com/DotNetAge/gorag/embedding/ollama"
-	llmOllama "github.com/DotNetAge/gorag/llm/ollama"
+	llmOllama "github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/pkg/client/base"
 	"github.com/DotNetAge/gorag/parser/text"
 	"github.com/DotNetAge/gorag/vectorstore/memory"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,9 @@ func TestEngine_Query_CustomPromptTemplate(t *testing.T) {
 
 	vectorStore := memory.NewStore()
 	llmClient, err := llmOllama.New(llmOllama.Config{
+		Config: base.Config{
 		Model: "qwen3:0.6b",
+	},
 	})
 	require.NoError(t, err)
 

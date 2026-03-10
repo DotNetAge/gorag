@@ -2,6 +2,8 @@ package rag
 
 import (
 	"context"
+	gochatcore "github.com/DotNetAge/gochat/pkg/core"
+
 	"testing"
 	"time"
 
@@ -30,17 +32,16 @@ func (m *MockEmbeddingProvider) Dimension() int {
 // MockLLMClient is a mock LLM client for testing
 type MockLLMClient struct{}
 
-func (m *MockLLMClient) Complete(ctx context.Context, prompt string) (string, error) {
-	return "Mock response to: " + prompt, nil
+func (m *MockLLMClient) Chat(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Response, error) {
+	prompt := ""
+	if len(messages) > 0 {
+		prompt = messages[0].TextContent()
+	}
+	return &gochatcore.Response{Content: "Mock response to: " + prompt}, nil
 }
 
-func (m *MockLLMClient) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
-	ch := make(chan string)
-	go func() {
-		defer close(ch)
-		ch <- "Mock stream response to: " + prompt
-	}()
-	return ch, nil
+func (m *MockLLMClient) ChatStream(ctx context.Context, messages []gochatcore.Message, opts ...gochatcore.Option) (*gochatcore.Stream, error) {
+	return nil, nil
 }
 
 func TestRAGEngineWithAllFeatures(t *testing.T) {
