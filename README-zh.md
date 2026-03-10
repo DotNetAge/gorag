@@ -25,7 +25,7 @@
 - **☁️ 纯粹云原生**: 编译产出单体二进制文件，无需庞大的运行时环境，完美适配 Docker 与 Kubernetes。
 - **📦 零外部依赖部署**: 内置原生纯 Go 向量数据库 `govector`，无需额外部署独立数据库服务即可完成本地开发与测试，同时无缝支持 Milvus、Qdrant 等企业级集群库。
 
-## ✨ 核心更新 (v1.0.0)
+## ✨ 核心更新 (v1.0.3)
 
 - **全面拥抱 gochat 统一模型 SDK**: 框架底层已完全升级为 [`gochat`](https://github.com/DotNetAge/gochat)。一次编写代码，即可任意切换 OpenAI、Anthropic、Ollama、Azure，以及各类国产大语言模型（Kimi、通义千问、智谱、深度求索、Minimax 等）。
 - **原生向量引擎融合**: 深度集成 [`govector`](https://github.com/DotNetAge/govector)，带来零依赖的纯 Go 嵌入式向量搜索体验。

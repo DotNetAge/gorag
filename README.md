@@ -25,7 +25,7 @@ Stop fighting with Python dependency hell and slow async loops. GoRAG brings the
 - **☁️ Cloud Native**: Compiles to a single binary. Perfect for Kubernetes deployments.
 - **📦 No External DB Required**: Ships with native pure-Go vector database `govector` for zero-setup local deployments, while supporting enterprise databases like Milvus, Qdrant, and Pinecone.
 
-## ✨ Latest Updates (v1.0.0)
+## ✨ Latest Updates (v1.0.3)
 
 - **Complete LLM SDK Migration**: Fully powered by the unified [`gochat`](https://github.com/DotNetAge/gochat) SDK. Write once, seamlessly switch between OpenAI, Anthropic, Ollama, Azure, and domestic Chinese LLMs.
 - **Native Vector Database Integration**: Integrated [`govector`](https://github.com/DotNetAge/govector) natively for a pure Go, zero-dependency embedded vector search experience.
