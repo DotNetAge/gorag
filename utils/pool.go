@@ -1,3 +1,34 @@
+// Package utils provides utility functions and components for GoRAG
+//
+// This package contains various utility components including:
+// - Connection pooling
+// - File generation utilities
+// - Other helper functions
+//
+// Example:
+//
+//     // Create a connection pool
+//     pool := utils.NewConnectionPool(utils.PoolOptions{
+//         CreateConn: func() (interface{}, error) {
+//             return createConnection()
+//         },
+//         ValidateConn: func(conn interface{}) bool {
+//             return validateConnection(conn)
+//         },
+//         CloseConn: func(conn interface{}) error {
+//             return closeConnection(conn)
+//         },
+//         MaxIdle: 10,
+//         MaxActive: 50,
+//         IdleTimeout: 30 * time.Minute,
+//     })
+//     
+//     // Get a connection
+//     conn, err := pool.Get(ctx)
+//     if err != nil {
+//         log.Fatal(err)
+//     }
+//     defer pool.Put(conn)
 package utils
 
 import (
@@ -223,10 +254,11 @@ func (p *ConnectionPool) cleanupIdleConnsOnce() {
 			}
 		default:
 			// No more idle connections
-			break
+			goto replaceChannel
 		}
 	}
 
+replaceChannel:
 	// Replace the idle connections channel with the temporary one
 	close(p.idleConns)
 	p.idleConns = tempConns

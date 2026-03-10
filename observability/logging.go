@@ -1,3 +1,25 @@
+// Package observability provides logging, metrics, and tracing functionality
+//
+// This package implements observability features for GoRAG, including:
+// - Structured logging (JSON format)
+// - Metrics collection
+// - Distributed tracing
+//
+// Example:
+//
+//     // Create a JSON logger
+//     logger := observability.NewJSONLogger()
+//     
+//     // Log info message
+//     logger.Info(ctx, "Document indexed", map[string]interface{}{
+//         "document": "example.pdf",
+//         "chunks": 42,
+//     })
+//     
+//     // Log error message
+//     logger.Error(ctx, "Failed to index document", err, map[string]interface{}{
+//         "document": "example.pdf",
+//     })
 package observability
 
 import (

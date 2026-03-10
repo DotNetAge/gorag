@@ -8,6 +8,23 @@ import (
 )
 
 // GenerateLargeTextFile generates a large text file with the specified size in MB
+//
+// This function generates a large text file by writing repetitive content until
+// it reaches the specified size.
+//
+// Parameters:
+// - filePath: Path to the output file
+// - sizeMB: Size of the file in megabytes
+//
+// Returns:
+// - error: Error if file generation fails
+//
+// Example:
+//
+//     err := utils.GenerateLargeTextFile("test.txt", 100) // Generate 100MB file
+//     if err != nil {
+//         log.Fatal(err)
+//     }
 func GenerateLargeTextFile(filePath string, sizeMB int) error {
 	f, err := os.Create(filePath)
 	if err != nil {
@@ -52,6 +69,23 @@ func GenerateLargeTextFile(filePath string, sizeMB int) error {
 }
 
 // GenerateLargeJSONFile generates a large JSON file with the specified size in MB
+//
+// This function generates a large JSON file by writing repetitive JSON objects until
+// it reaches the specified size.
+//
+// Parameters:
+// - filePath: Path to the output file
+// - sizeMB: Size of the file in megabytes
+//
+// Returns:
+// - error: Error if file generation fails
+//
+// Example:
+//
+//     err := utils.GenerateLargeJSONFile("test.json", 50) // Generate 50MB JSON file
+//     if err != nil {
+//         log.Fatal(err)
+//     }
 func GenerateLargeJSONFile(filePath string, sizeMB int) error {
 	f, err := os.Create(filePath)
 	if err != nil {
@@ -93,7 +127,7 @@ func GenerateLargeJSONFile(filePath string, sizeMB int) error {
 
 		written += objSize
 
-		// Print progress every 10%]
+		// Print progress every 10%
 		if written%int64(targetSize/10) == 0 {
 			fmt.Printf("Generated %.1f%% of %dMB JSON file\n", float64(written)/float64(targetSize)*100, sizeMB)
 		}
@@ -108,6 +142,23 @@ func GenerateLargeJSONFile(filePath string, sizeMB int) error {
 }
 
 // GenerateLargeHTMLFile generates a large HTML file with the specified size in MB
+//
+// This function generates a large HTML file by writing repetitive HTML sections until
+// it reaches the specified size.
+//
+// Parameters:
+// - filePath: Path to the output file
+// - sizeMB: Size of the file in megabytes
+//
+// Returns:
+// - error: Error if file generation fails
+//
+// Example:
+//
+//     err := utils.GenerateLargeHTMLFile("test.html", 25) // Generate 25MB HTML file
+//     if err != nil {
+//         log.Fatal(err)
+//     }
 func GenerateLargeHTMLFile(filePath string, sizeMB int) error {
 	f, err := os.Create(filePath)
 	if err != nil {
@@ -157,7 +208,7 @@ func GenerateLargeHTMLFile(filePath string, sizeMB int) error {
 
 		written += sectionSize
 
-		// Print progress every 10%]
+		// Print progress every 10%
 		if written%int64(targetSize/10) == 0 {
 			fmt.Printf("Generated %.1f%% of %dMB HTML file\n", float64(written)/float64(targetSize)*100, sizeMB)
 		}

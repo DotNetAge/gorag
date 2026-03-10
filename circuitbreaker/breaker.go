@@ -1,3 +1,26 @@
+// Package circuitbreaker implements the circuit breaker pattern
+//
+// This package provides a circuit breaker implementation to protect
+// services from overloading and to improve system resilience by
+// temporarily stopping requests to failing services.
+//
+// The circuit breaker has three states:
+// - Closed: All requests are allowed
+// - Open: No requests are allowed, returns an error immediately
+// - Half-Open: A limited number of requests are allowed to test if the service has recovered
+//
+// Example:
+//
+//     cb := circuitbreaker.New(circuitbreaker.DefaultConfig())
+//     
+//     err := cb.Execute(ctx, func() error {
+//         // Call external service
+//         return externalService.Call()
+//     })
+//     
+//     if err != nil {
+//         // Handle error (may be circuit breaker error)
+//     }
 package circuitbreaker
 
 import (
@@ -30,6 +53,17 @@ func (s State) String() string {
 }
 
 // Config configures the circuit breaker
+//
+// This struct defines the configuration parameters for the circuit breaker,
+// including failure threshold, timeout, and half-open state limits.
+//
+// Example:
+//
+//     config := Config{
+//         MaxFailures:  10,  // Open circuit after 10 failures
+//         Timeout:      1 * time.Minute, // Wait 1 minute before trying again
+//         HalfOpenMax:  5,   // Allow 5 requests in half-open state
+//     }
 type Config struct {
 	MaxFailures  int
 	Timeout      time.Duration
@@ -37,6 +71,11 @@ type Config struct {
 }
 
 // DefaultConfig returns a default configuration
+//
+// Returns a configuration with sensible defaults:
+// - MaxFailures: 5
+// - Timeout: 30 seconds
+// - HalfOpenMax: 3
 func DefaultConfig() Config {
 	return Config{
 		MaxFailures:  5,
@@ -46,6 +85,25 @@ func DefaultConfig() Config {
 }
 
 // CircuitBreaker implements the circuit breaker pattern
+//
+// The circuit breaker protects services from overloading by temporarily
+// stopping requests to failing services. It has three states:
+// - Closed: All requests are allowed
+// - Open: No requests are allowed, returns an error immediately
+// - Half-Open: A limited number of requests are allowed to test if the service has recovered
+//
+// Example:
+//
+//     cb := New(DefaultConfig())
+//     
+//     err := cb.Execute(ctx, func() error {
+//         // Call external service
+//         return externalService.Call()
+//     })
+//     
+//     if err != nil {
+//         // Handle error (may be circuit breaker error)
+//     }
 type CircuitBreaker struct {
 	config      Config
 	state       State
@@ -56,6 +114,12 @@ type CircuitBreaker struct {
 }
 
 // New creates a new circuit breaker
+//
+// Parameters:
+// - config: Configuration for the circuit breaker
+//
+// Returns:
+// - *CircuitBreaker: New circuit breaker instance
 func New(config Config) *CircuitBreaker {
 	return &CircuitBreaker{
 		config: config,
@@ -64,6 +128,18 @@ func New(config Config) *CircuitBreaker {
 }
 
 // Execute executes the given function with circuit breaker protection
+//
+// This method wraps the execution of a function with circuit breaker logic:
+// 1. Checks if execution is allowed based on the current state
+// 2. Executes the function
+// 3. Records the result and updates the circuit breaker state
+//
+// Parameters:
+// - ctx: Context for cancellation
+// - fn: Function to execute
+//
+// Returns:
+// - error: Error from the function or circuit breaker error
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 	if err := cb.canExecute(); err != nil {
 		return err
@@ -135,6 +211,9 @@ func (cb *CircuitBreaker) recordResult(err error) {
 }
 
 // State returns the current state
+//
+// Returns:
+// - State: Current circuit breaker state (Closed, Open, or HalfOpen)
 func (cb *CircuitBreaker) State() State {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
@@ -142,6 +221,9 @@ func (cb *CircuitBreaker) State() State {
 }
 
 // Reset resets the circuit breaker to closed state
+//
+// This method resets the circuit breaker to its initial closed state,
+// clearing all failure and success counters.
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
