@@ -1,11 +1,25 @@
 package observability
 
+
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+type GlobalStats struct {
+	Mu                 sync.RWMutex
+	IndexedDocuments   int
+	IndexingDocuments  int
+	MonitoredDocuments int
+	TotalQueries       int
+	TotalErrors        int
+}
+
+var CurrentStats = &GlobalStats{}
+
 
 // Metrics defines the interface for metrics collection
 //
@@ -221,6 +235,9 @@ func (m *PrometheusMetrics) RecordIndexLatency(ctx context.Context, duration tim
 // - status: Status of the query (e.g., "success", "error")
 func (m *PrometheusMetrics) RecordQueryCount(ctx context.Context, status string) {
 	m.queryCount.Inc()
+	CurrentStats.Mu.Lock()
+	CurrentStats.TotalQueries++
+	CurrentStats.Mu.Unlock()
 }
 
 // RecordIndexCount records the number of index operations
@@ -239,6 +256,9 @@ func (m *PrometheusMetrics) RecordIndexCount(ctx context.Context, status string)
 // - errorType: Type of error
 func (m *PrometheusMetrics) RecordErrorCount(ctx context.Context, errorType string) {
 	m.errorCount.Inc()
+	CurrentStats.Mu.Lock()
+	CurrentStats.TotalErrors++
+	CurrentStats.Mu.Unlock()
 }
 
 // RecordIndexedDocuments records the number of indexed documents
@@ -248,6 +268,9 @@ func (m *PrometheusMetrics) RecordErrorCount(ctx context.Context, errorType stri
 // - count: Number of indexed documents
 func (m *PrometheusMetrics) RecordIndexedDocuments(ctx context.Context, count int) {
 	m.indexedDocuments.Set(float64(count))
+	CurrentStats.Mu.Lock()
+	CurrentStats.IndexedDocuments = count
+	CurrentStats.Mu.Unlock()
 }
 
 // RecordIndexingDocuments records the number of documents being indexed
@@ -257,6 +280,9 @@ func (m *PrometheusMetrics) RecordIndexedDocuments(ctx context.Context, count in
 // - count: Number of documents being indexed
 func (m *PrometheusMetrics) RecordIndexingDocuments(ctx context.Context, count int) {
 	m.indexingDocuments.Set(float64(count))
+	CurrentStats.Mu.Lock()
+	CurrentStats.IndexingDocuments = count
+	CurrentStats.Mu.Unlock()
 }
 
 // RecordMonitoredDocuments records the number of monitored documents
@@ -266,6 +292,9 @@ func (m *PrometheusMetrics) RecordIndexingDocuments(ctx context.Context, count i
 // - count: Number of monitored documents
 func (m *PrometheusMetrics) RecordMonitoredDocuments(ctx context.Context, count int) {
 	m.monitoredDocuments.Set(float64(count))
+	CurrentStats.Mu.Lock()
+	CurrentStats.MonitoredDocuments = count
+	CurrentStats.Mu.Unlock()
 }
 
 // RecordSystemMetrics records system metrics (CPU, memory)
