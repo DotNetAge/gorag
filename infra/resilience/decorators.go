@@ -7,23 +7,28 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"golang.org/x/time/rate"
 )
 
 // RateLimiterStepWrapper wraps any pipeline Step with a Token Bucket rate limiter.
 type RateLimiterStepWrapper struct {
-	BaseStep pipeline.Step
+	BaseStep pipeline.Step[*entity.PipelineState]
 	limiter  *rate.Limiter
 }
 
-func WithRateLimiter(base pipeline.Step, limit rate.Limit, burst int) *RateLimiterStepWrapper {
+func WithRateLimiter(base pipeline.Step[*entity.PipelineState], limit rate.Limit, burst int) *RateLimiterStepWrapper {
 	return &RateLimiterStepWrapper{
 		BaseStep: base,
 		limiter:  rate.NewLimiter(limit, burst),
 	}
 }
 
-func (w *RateLimiterStepWrapper) Execute(ctx context.Context, state *pipeline.State) error {
+func (w *RateLimiterStepWrapper) Name() string {
+	return "RateLimiterStepWrapper"
+}
+
+func (w *RateLimiterStepWrapper) Execute(ctx context.Context, state *entity.PipelineState) error {
 	// Wait for a token before allowing the underlying step to execute
 	if err := w.limiter.Wait(ctx); err != nil {
 		return fmt.Errorf("rate limiter rejected request: %w", err)
@@ -40,14 +45,14 @@ type BreakerOptions struct {
 // CircuitBreakerStepWrapper wraps a generation/retrieval step to provide
 // fast failure and elegant fallback when the primary service degrades.
 type CircuitBreakerStepWrapper struct {
-	BaseStep      pipeline.Step
-	FallbackStep  pipeline.Step
+	BaseStep      pipeline.Step[*entity.PipelineState]
+	FallbackStep  pipeline.Step[*entity.PipelineState]
 	options       BreakerOptions
 	consecutiveErr int32
 	lastErrorTime time.Time
 }
 
-func WithCircuitBreakerAndFallback(base pipeline.Step, fallback pipeline.Step, opts BreakerOptions) *CircuitBreakerStepWrapper {
+func WithCircuitBreakerAndFallback(base pipeline.Step[*entity.PipelineState], fallback pipeline.Step[*entity.PipelineState], opts BreakerOptions) *CircuitBreakerStepWrapper {
 	if opts.ErrorThreshold <= 0 {
 		opts.ErrorThreshold = 3
 	}
@@ -58,7 +63,11 @@ func WithCircuitBreakerAndFallback(base pipeline.Step, fallback pipeline.Step, o
 	}
 }
 
-func (w *CircuitBreakerStepWrapper) Execute(ctx context.Context, state *pipeline.State) error {
+func (w *CircuitBreakerStepWrapper) Name() string {
+	return "CircuitBreakerStepWrapper"
+}
+
+func (w *CircuitBreakerStepWrapper) Execute(ctx context.Context, state *entity.PipelineState) error {
 	// Check if the circuit is "Open" (failing)
 	if atomic.LoadInt32(&w.consecutiveErr) >= int32(w.options.ErrorThreshold) {
 		// Check if timeout has expired to "Half-Open" and retry

@@ -1,3 +1,6 @@
+// Package graph provides graph-related utilities for RAG systems.
+// It includes components for extracting entities and relationships from text,
+// as well as searching knowledge graphs for relevant information.
 package graph
 
 import (
@@ -9,39 +12,59 @@ import (
 	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
 
-var _ retrieval.GraphLocalSearcher = (*LocalSearcherImpl)(nil)
-var _ retrieval.GraphGlobalSearcher = (*GlobalSearcherImpl)(nil)
+var _ retrieval.GraphLocalSearcher = (*LocalSearcher)(nil)
+var _ retrieval.GraphGlobalSearcher = (*GlobalSearcher)(nil)
 
-// LocalSearcherImpl performs N-Hop traversal from specific entities to gather relational context.
-type LocalSearcherImpl struct {
+// LocalSearcher performs N-Hop traversal from specific entities to gather relational context.
+// It helps retrieve relevant information by traversing the knowledge graph from given entities.
+type LocalSearcher struct {
+	// store is the graph store used for searching
 	store abstraction.GraphStore
 }
 
-func NewLocalSearcher(store abstraction.GraphStore) *LocalSearcherImpl {
-	return &LocalSearcherImpl{store: store}
+// NewLocalSearcher creates a new local searcher.
+//
+// Parameters:
+// - store: The graph store to use for searching
+//
+// Returns:
+// - A new LocalSearcher instance
+func NewLocalSearcher(store abstraction.GraphStore) *LocalSearcher {
+	return &LocalSearcher{store: store}
 }
 
-func (s *LocalSearcherImpl) Search(ctx context.Context, entities []string, maxHops int, topK int) (string, error) {
+// Search performs N-Hop traversal from specific entities to gather relational context.
+//
+// Parameters:
+// - ctx: The context for the operation
+// - entities: The entities to start the search from
+// - maxHops: The maximum number of hops to traverse
+// - topK: The maximum number of results to return
+//
+// Returns:
+// - A string representation of the search results
+// - An error if searching fails
+func (s *LocalSearcher) Search(ctx context.Context, entities []string, maxHops int, topK int) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("Graph Relationships Found:\n")
 
-	visitedEdges := make(map[string]bool)
+	visitedNodes := make(map[string]bool)
 
 	for _, entityID := range entities {
 		// Traverse N-Hops from the starting entity
-		edges, err := s.store.GetNeighbors(ctx, entityID, maxHops)
+		nodes, err := s.store.GetNeighbors(ctx, entityID, maxHops)
 		if err != nil {
 			continue // Skip failing entities to keep robustness
 		}
 
 		count := 0
-		for _, edge := range edges {
+		for _, node := range nodes {
 			if count >= topK {
 				break
 			}
-			if !visitedEdges[edge.ID] {
-				visitedEdges[edge.ID] = true
-				sb.WriteString(fmt.Sprintf("- [%s] --(%s)--> [%s]\n", edge.Source, edge.Type, edge.Target))
+			if !visitedNodes[node.ID] {
+				visitedNodes[node.ID] = true
+				sb.WriteString(fmt.Sprintf("- Node: %s (Type: %s)\n", node.ID, node.Type))
 				count++
 			}
 		}
@@ -50,17 +73,39 @@ func (s *LocalSearcherImpl) Search(ctx context.Context, entities []string, maxHo
 	return sb.String(), nil
 }
 
-// GlobalSearcherImpl performs Map-Reduce over Community Summaries for macro-level questions.
-type GlobalSearcherImpl struct {
+// GlobalSearcher performs Map-Reduce over Community Summaries for macro-level questions.
+// It helps answer broad questions by synthesizing information from multiple communities
+// in the knowledge graph.
+type GlobalSearcher struct {
+	// store is the graph store used for searching
 	store abstraction.GraphStore
-	llm   SimpleLLMClient
+	// llm is the LLM client used for synthesizing results
+	llm SimpleLLMClient
 }
 
-func NewGlobalSearcher(store abstraction.GraphStore, llm SimpleLLMClient) *GlobalSearcherImpl {
-	return &GlobalSearcherImpl{store: store, llm: llm}
+// NewGlobalSearcher creates a new global searcher.
+//
+// Parameters:
+// - store: The graph store to use for searching
+// - llm: The LLM client to use for synthesizing results
+//
+// Returns:
+// - A new GlobalSearcher instance
+func NewGlobalSearcher(store abstraction.GraphStore, llm SimpleLLMClient) *GlobalSearcher {
+	return &GlobalSearcher{store: store, llm: llm}
 }
 
-func (s *GlobalSearcherImpl) Search(ctx context.Context, query string, communityLevel int) (string, error) {
+// Search performs Map-Reduce over Community Summaries for macro-level questions.
+//
+// Parameters:
+// - ctx: The context for the operation
+// - query: The query to answer
+// - communityLevel: The level of community summaries to use
+//
+// Returns:
+// - A synthesized answer based on community summaries
+// - An error if searching fails
+func (s *GlobalSearcher) Search(ctx context.Context, query string, communityLevel int) (string, error) {
 	summaries, err := s.store.GetCommunitySummaries(ctx, communityLevel)
 	if err != nil {
 		return "", fmt.Errorf("failed to retrieve community summaries: %w", err)
@@ -76,7 +121,7 @@ func (s *GlobalSearcherImpl) Search(ctx context.Context, query string, community
 	// REDUCE Phase: Ask LLM to synthesize a global answer from the summaries
 	var contextBuilder strings.Builder
 	for i, summary := range summaries {
-		contextBuilder.WriteString(fmt.Sprintf("Community %d: %s\n", i+1, summary))
+		contextBuilder.WriteString(fmt.Sprintf("Community %d: %v\n", i+1, summary))
 	}
 
 	prompt := fmt.Sprintf(`You are a global data synthesizer.

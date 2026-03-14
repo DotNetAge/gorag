@@ -4,23 +4,24 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 )
 
 // ensure interface implementation
-var _ pipeline.Step = (*VectorSearchStep)(nil)
+var _ pipeline.Step[*entity.PipelineState] = (*VectorSearchStep)(nil)
 
 // VectorSearchStep retrieves relevant chunks from a VectorStore based on the Query.
 type VectorSearchStep struct {
-	embedder abstraction.EmbeddingModel
+	embedder embedding.Provider
 	store    abstraction.VectorStore
 	topK     int
 }
 
 // NewVectorSearchStep creates a new vector search step.
-func NewVectorSearchStep(embedder abstraction.EmbeddingModel, store abstraction.VectorStore, topK int) *VectorSearchStep {
+func NewVectorSearchStep(embedder embedding.Provider, store abstraction.VectorStore, topK int) *VectorSearchStep {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -31,23 +32,27 @@ func NewVectorSearchStep(embedder abstraction.EmbeddingModel, store abstraction.
 	}
 }
 
-func (s *VectorSearchStep) Execute(ctx context.Context, state *pipeline.State) error {
-	query, ok := state.Get("query").(*entity.Query)
-	if !ok {
-		return fmt.Errorf("VectorSearchStep: 'query' (*entity.Query) not found in state")
+func (s *VectorSearchStep) Name() string {
+	return "VectorSearchStep"
+}
+
+func (s *VectorSearchStep) Execute(ctx context.Context, state *entity.PipelineState) error {
+	if state.Query == nil {
+		return fmt.Errorf("VectorSearchStep: 'query' not found in state")
 	}
 
 	// 1. Embed the query
-	queryVector, err := s.embedder.EmbedQuery(ctx, query.Text)
+	embeddings, err := s.embedder.Embed(ctx, []string{state.Query.Text})
 	if err != nil {
 		return fmt.Errorf("VectorSearchStep failed to embed query: %w", err)
 	}
-
-	// 2. Extract potential filters from state (if FilterExtractorStep ran before this)
-	var filters map[string]any
-	if f, ok := state.Get("filters").(map[string]any); ok {
-		filters = f
+	if len(embeddings) == 0 {
+		return fmt.Errorf("VectorSearchStep failed to get query embedding")
 	}
+	queryVector := embeddings[0]
+
+	// 2. Use filters from state (if FilterExtractorStep ran before this)
+	filters := state.Filters
 
 	// 3. Search the vector database
 	vectors, _, err := s.store.Search(ctx, queryVector, s.topK, filters)
@@ -65,7 +70,7 @@ func (s *VectorSearchStep) Execute(ctx context.Context, state *pipeline.State) e
 	}
 
 	// 5. Store retrieved chunks in state
-	state.Set("retrieved_chunks", chunks)
+	state.RetrievedChunks = append(state.RetrievedChunks, chunks)
 
 	return nil
 }

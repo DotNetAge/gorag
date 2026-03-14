@@ -60,6 +60,18 @@ type GraphStore interface {
 	// Query executes a graph query and returns the results.
 	Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error)
 	
+	// GetNeighbors retrieves the neighbors of a node.
+	GetNeighbors(ctx context.Context, nodeID string, limit int) ([]*Node, error)
+	
+	// GetCommunitySummaries retrieves community summaries from the graph.
+	GetCommunitySummaries(ctx context.Context, limit int) ([]map[string]any, error)
+	
+	// UpsertNodes batch updates or inserts nodes.
+	UpsertNodes(ctx context.Context, nodes []*Node) error
+	
+	// UpsertEdges batch updates or inserts edges.
+	UpsertEdges(ctx context.Context, edges []*Edge) error
+	
 	// Close closes the graph store.
 	Close(ctx context.Context) error
 }

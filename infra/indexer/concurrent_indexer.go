@@ -113,12 +113,14 @@ func (idx *ConcurrentIndexer) IndexDirectory(ctx context.Context, dirPath string
 
 // runPipeline defines the 4-stage Concurrent Worker Pool (File -> Parse -> Chunk/Embed -> Store).
 func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan string) error {
-	g, gCtx := errgroup.WithContext(ctx)
+	// Use separate errgroups for different stages to avoid deadlock
+	parseGroup, parseCtx := errgroup.WithContext(ctx)
+	processGroup, processCtx := errgroup.WithContext(ctx)
 
 	// Stage 1: Parsing
 	docChan := make(chan *entity.Document, 50)
 	for i := 0; i < idx.parseWorkers; i++ {
-		g.Go(func() error {
+		parseGroup.Go(func() error {
 			for path := range fileChan {
 				f, err := os.Open(path)
 				if err != nil {
@@ -130,7 +132,7 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 				meta := map[string]any{"source": path, "filename": filepath.Base(path)}
 				
 				// Using the Next-Gen ParseStream interface for O(1) memory
-				docStream, err := idx.parser.ParseStream(gCtx, f, meta)
+				docStream, err := idx.parser.ParseStream(parseCtx, f, meta)
 				if err != nil {
 					f.Close()
 					return fmt.Errorf("failed to start parsing %s: %w", path, err)
@@ -138,9 +140,9 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 
 				for doc := range docStream {
 					select {
-					case <-gCtx.Done():
+					case <-parseCtx.Done():
 						f.Close()
-						return gCtx.Err()
+						return parseCtx.Err()
 					case docChan <- doc:
 					}
 				}
@@ -152,7 +154,7 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 
 	// Close docChan when all parse workers finish
 	go func() {
-		g.Wait() // Wait for parse stage (this is slightly unsafe without separate waitgroups, simplified for brevity)
+		_ = parseGroup.Wait() // Wait only for parse stage to complete
 		close(docChan)
 	}()
 
@@ -161,10 +163,10 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 	chunkChan := make(chan *entity.Vector, 200)
 	
 	for i := 0; i < idx.embedWorkers; i++ {
-		g.Go(func() error {
+		processGroup.Go(func() error {
 			for doc := range docChan {
 				// We use HierarchicalChunk as designed in Specs 02
-				parents, children, err := idx.chunker.HierarchicalChunk(gCtx, doc)
+				parents, children, err := idx.chunker.HierarchicalChunk(processCtx, doc)
 				if err != nil {
 					return err
 				}
@@ -173,35 +175,47 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 				if idx.graphStore != nil && idx.extractor != nil {
 					// We could send parents to a separate GraphWorker pool here.
 					for _, p := range parents {
-						nodes, edges, extErr := idx.extractor.Extract(gCtx, p)
+						nodes, edges, extErr := idx.extractor.Extract(processCtx, p)
 						if extErr == nil {
-							_ = idx.graphStore.UpsertNodes(gCtx, nodes)
-							_ = idx.graphStore.UpsertEdges(gCtx, edges)
+						// Convert []abstraction.Node to []*abstraction.Node
+						nodePtrs := make([]*abstraction.Node, len(nodes))
+						for i, node := range nodes {
+							nodePtrs[i] = &node
 						}
+						_ = idx.graphStore.UpsertNodes(processCtx, nodePtrs)
+						
+						// Convert []abstraction.Edge to []*abstraction.Edge
+						edgePtrs := make([]*abstraction.Edge, len(edges))
+						for i, edge := range edges {
+							edgePtrs[i] = &edge
+						}
+						_ = idx.graphStore.UpsertEdges(processCtx, edgePtrs)
+					}
 					}
 				}
 
 				// Process children for vector embeddings
-				var texts []string
-				for _, child := range children {
-					texts = append(texts, child.Content)
-				}
-
 				// Depending on gochat's embedding signature, this is a placeholder 
 				// for batch processing.
-				// embeddings, err := idx.embedder.EmbedDocuments(gCtx, texts)
-				// For now, let's assume we do it sequentially or via gochat's batcher
-				for _, child := range children {
-					emb, err := idx.embedder.EmbedQuery(child.Content)
-					if err != nil {
-						continue // skip failed embeddings
-					}
-					
-					vec := entity.NewVector(child.ID, emb, child.ID, child.Metadata)
-					select {
-					case <-gCtx.Done():
-						return gCtx.Err()
-					case chunkChan <- vec:
+				// Use batch embedding for better performance
+				texts := make([]string, len(children))
+				for i, child := range children {
+					texts[i] = child.Content
+				}
+				
+				embeddings, err := idx.embedder.Embed(processCtx, texts)
+				if err != nil {
+					continue // skip failed embeddings
+				}
+				
+				for i, child := range children {
+					if i < len(embeddings) {
+						vec := entity.NewVector(child.ID, embeddings[i], child.ID, child.Metadata)
+						select {
+						case <-processCtx.Done():
+							return processCtx.Err()
+						case chunkChan <- vec:
+						}
 					}
 				}
 			}
@@ -209,16 +223,22 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 		})
 	}
 
+	// Close chunkChan when all embed workers finish
+	go func() {
+		_ = processGroup.Wait() // Wait for embed stage to complete
+		close(chunkChan)
+	}()
+
 	// Stage 4: Storing to VectorStore
-	// In a real implementation, we'd wait for Stage 2/3 to finish before closing chunkChan
+	storeGroup, storeCtx := errgroup.WithContext(ctx)
 	
 	// Start Upsert Workers
 	for i := 0; i < idx.upsertWorkers; i++ {
-		g.Go(func() error {
+		storeGroup.Go(func() error {
 			// A simple batch collector could be implemented here (e.g., collect 100 before AddBatch)
 			// Using Add() for simplicity in this demo class.
 			for vec := range chunkChan {
-				err := idx.vectorStore.Add(gCtx, vec)
+				err := idx.vectorStore.Add(storeCtx, vec)
 				if err != nil {
 					// Dead Letter Queue could be implemented here
 					_ = err 
@@ -228,5 +248,12 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 		})
 	}
 
-	return g.Wait()
+	// Wait for all stages to complete
+	if err := parseGroup.Wait(); err != nil {
+		return err
+	}
+	if err := processGroup.Wait(); err != nil {
+		return err
+	}
+	return storeGroup.Wait()
 }

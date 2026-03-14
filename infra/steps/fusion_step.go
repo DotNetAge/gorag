@@ -5,11 +5,12 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
 
 // ensure interface implementation
-var _ pipeline.Step = (*RAGFusionStep)(nil)
+var _ pipeline.Step[*entity.PipelineState] = (*RAGFusionStep)(nil)
 
 // RAGFusionStep merges multiple chunk lists from state (e.g., from parallel searches)
 // using the Reciprocal Rank Fusion algorithm.
@@ -29,23 +30,27 @@ func NewRAGFusionStep(engine retrieval.FusionEngine, topK int) *RAGFusionStep {
 	}
 }
 
-func (s *RAGFusionStep) Execute(ctx context.Context, state *pipeline.State) error {
+func (s *RAGFusionStep) Name() string {
+	return "RAGFusionStep"
+}
+
+func (s *RAGFusionStep) Execute(ctx context.Context, state *entity.PipelineState) error {
 	// Usually, a parallel step before this would populate state with a slice of Chunk arrays.
-	// E.g., state.Set("parallel_results", [][]*entity.Chunk{ denseResults, sparseResults, graphResults })
-	
-	// For this demo, let's assume "parallel_results" exists in state.
-	// If it doesn't, we just skip fusion.
-	
-	// Type assertion is tricky with slice of slices in any, doing it safely:
-	rawResults := state.Get("parallel_results")
-	if rawResults == nil {
-		return nil // Nothing to fuse
+	// E.g., state.ParallelResults = [][]*entity.Chunk{ denseResults, sparseResults, graphResults }
+
+	// If there are no results to fuse, skip
+	if len(state.ParallelResults) == 0 {
+		return nil
 	}
 
-	// This assumes the parallel step actually put the correct type.
-	// You might need a more robust cast depending on how parallel steps are implemented.
-	// For compilation sake in this generic step:
-	// ... (Implementation detail depends on parallel step state layout)
-	
-	return fmt.Errorf("RAGFusionStep requires a specific state contract from ParallelSearch (not fully defined here)")
+	// Use the fusion engine to merge results using Reciprocal Rank Fusion
+	fusedChunks, err := s.fusionEngine.ReciprocalRankFusion(ctx, state.ParallelResults, s.topK)
+	if err != nil {
+		return fmt.Errorf("fusion failed: %w", err)
+	}
+
+	// Store the fused results back to the state
+	state.RetrievedChunks = [][]*entity.Chunk{fusedChunks}
+
+	return nil
 }

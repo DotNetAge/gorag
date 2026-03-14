@@ -5,34 +5,37 @@ import (
 	"fmt"
 	"strings"
 
+	chat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
-	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 )
 
 // ensure interface implementation
-var _ pipeline.Step = (*GenerationStep)(nil)
+var _ pipeline.Step[*entity.PipelineState] = (*GenerationStep)(nil)
 
 // GenerationStep takes the final query and retrieved chunks, builds a prompt, and generates the answer.
 type GenerationStep struct {
-	llm abstraction.LLMClient
+	llm chat.Client
 }
 
 // NewGenerationStep creates a standard generation step.
-func NewGenerationStep(llm abstraction.LLMClient) *GenerationStep {
+func NewGenerationStep(llm chat.Client) *GenerationStep {
 	return &GenerationStep{llm: llm}
 }
 
-func (s *GenerationStep) Execute(ctx context.Context, state *pipeline.State) error {
-	query, ok := state.Get("query").(*entity.Query)
-	if !ok {
-		return fmt.Errorf("GenerationStep: 'query' (*entity.Query) not found in state")
+func (s *GenerationStep) Name() string {
+	return "GenerationStep"
+}
+
+func (s *GenerationStep) Execute(ctx context.Context, state *entity.PipelineState) error {
+	if state.Query == nil {
+		return fmt.Errorf("GenerationStep: 'query' not found in state")
 	}
 
 	var contextBuilder strings.Builder
-	if chunks, ok := state.Get("retrieved_chunks").([]*entity.Chunk); ok {
-		for i, chunk := range chunks {
-			contextBuilder.WriteString(fmt.Sprintf("--- Document %d ---\n%s\n\n", i+1, chunk.Content))
+	for i, chunks := range state.RetrievedChunks {
+		for j, chunk := range chunks {
+			contextBuilder.WriteString(fmt.Sprintf("--- Document %d-%d --\n%s\n\n", i+1, j+1, chunk.Content))
 		}
 	}
 
@@ -46,17 +49,20 @@ If the documents do not contain the answer, say "I don't know based on the provi
 [User Question]
 %s
 
-Answer:`, contextBuilder.String(), query.Text)
+Answer:`, contextBuilder.String(), state.Query.Text)
 
 	// Update state with the final prompt being used
-	state.Set("generation_prompt", prompt)
+	state.GenerationPrompt = prompt
 
-	response, err := s.llm.Generate(ctx, prompt)
+	messages := []chat.Message{
+		chat.NewUserMessage(prompt),
+	}
+	response, err := s.llm.Chat(ctx, messages)
 	if err != nil {
 		return fmt.Errorf("GenerationStep failed: %w", err)
 	}
 
-	state.Set("answer", response)
+	state.Answer = response.Content
 
 	return nil
 }

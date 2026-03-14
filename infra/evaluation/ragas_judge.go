@@ -99,13 +99,16 @@ func buildContextText(chunks []*entity.Chunk) string {
 }
 
 func (j *RagasLLMJudge) parseEvalResponse(ctx context.Context, prompt string) (float32, string, error) {
-	result, err := j.judgeLLM.Generate(ctx, prompt)
+	messages := []chat.Message{
+		chat.NewUserMessage(prompt),
+	}
+	response, err := j.judgeLLM.Chat(ctx, messages)
 	if err != nil {
 		return 0, "", err
 	}
 
 	// Parse "Score: 0.8\nReason: The answer..."
-	lines := strings.Split(result, "\n")
+	lines := strings.Split(response.Content, "\n")
 	var score float32 = 0.0
 	var reason string = "Could not parse reason"
 

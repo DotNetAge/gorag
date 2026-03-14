@@ -1,3 +1,6 @@
+// Package graph provides graph-related utilities for RAG systems.
+// It includes components for extracting entities and relationships from text,
+// as well as searching knowledge graphs for relevant information.
 package graph
 
 import (
@@ -11,28 +14,59 @@ import (
 	"github.com/DotNetAge/gorag/pkg/usecase/dataprep"
 )
 
-// SimpleLLMClient represents the required LLM functions.
+// SimpleLLMClient represents the required LLM functions for graph extraction.
 type SimpleLLMClient interface {
+	// Generate generates text based on the given prompt
+	//
+	// Parameters:
+	// - ctx: The context for the operation
+	// - prompt: The prompt to generate text from
+	//
+	// Returns:
+	// - The generated text
+	// - An error if generation fails
 	Generate(ctx context.Context, prompt string) (string, error)
 }
 
-var _ dataprep.GraphExtractor = (*GraphExtractorImpl)(nil)
+var _ dataprep.GraphExtractor = (*GraphExtractor)(nil)
 
-// GraphExtractorImpl uses an LLM to extract Entities (Nodes) and Relationships (Edges) from text chunks.
-type GraphExtractorImpl struct {
+// GraphExtractor uses an LLM to extract Entities (Nodes) and Relationships (Edges) from text chunks.
+// It helps build knowledge graphs from unstructured text for better retrieval and reasoning.
+type GraphExtractor struct {
+	// llm is the LLM client used for extracting graph elements
 	llm SimpleLLMClient
 }
 
-func NewGraphExtractor(llm SimpleLLMClient) *GraphExtractorImpl {
-	return &GraphExtractorImpl{llm: llm}
+// NewGraphExtractor creates a new graph extractor.
+//
+// Parameters:
+// - llm: The LLM client to use for extraction
+//
+// Returns:
+// - A new GraphExtractor instance
+func NewGraphExtractor(llm SimpleLLMClient) *GraphExtractor {
+	return &GraphExtractor{llm: llm}
 }
 
+// extractResult represents the result of graph extraction.
 type extractResult struct {
+	// Nodes are the entities extracted from the text
 	Nodes []abstraction.Node `json:"nodes"`
+	// Edges are the relationships between entities
 	Edges []abstraction.Edge `json:"edges"`
 }
 
-func (e *GraphExtractorImpl) Extract(ctx context.Context, chunk *entity.Chunk) ([]abstraction.Node, []abstraction.Edge, error) {
+// Extract extracts entities and relationships from a text chunk.
+//
+// Parameters:
+// - ctx: The context for the operation
+// - chunk: The text chunk to extract from
+//
+// Returns:
+// - A slice of nodes (entities)
+// - A slice of edges (relationships)
+// - An error if extraction fails
+func (e *GraphExtractor) Extract(ctx context.Context, chunk *entity.Chunk) ([]abstraction.Node, []abstraction.Edge, error) {
 	prompt := fmt.Sprintf(`You are a top-tier knowledge graph extraction algorithm.
 Your task is to extract entities and their relationships from the given text.
 Return ONLY a valid JSON object with "nodes" and "edges" arrays.

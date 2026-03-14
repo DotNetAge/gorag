@@ -10,7 +10,7 @@ import (
 )
 
 // ensure interface implementation
-var _ pipeline.Step = (*QueryRewriteStep)(nil)
+var _ pipeline.Step[*entity.PipelineState] = (*QueryRewriteStep)(nil)
 
 // QueryRewriteStep is a pipeline step that rewrites the user's raw query
 // to make it more suitable for vector search.
@@ -23,25 +23,23 @@ func NewQueryRewriteStep(rewriter retrieval.QueryRewriter) *QueryRewriteStep {
 	return &QueryRewriteStep{rewriter: rewriter}
 }
 
-func (s *QueryRewriteStep) Execute(ctx context.Context, state *pipeline.State) error {
-	rawQuery, ok := state.Get("query").(*entity.Query)
-	if !ok {
-		// If query is just a string, convert it to entity.Query
-		if queryStr, ok := state.Get("query").(string); ok {
-			rawQuery = entity.NewQuery("", queryStr, nil)
-		} else {
-			return fmt.Errorf("QueryRewriteStep: 'query' not found in state or invalid type")
-		}
+func (s *QueryRewriteStep) Name() string {
+	return "QueryRewriteStep"
+}
+
+func (s *QueryRewriteStep) Execute(ctx context.Context, state *entity.PipelineState) error {
+	if state.Query == nil {
+		return fmt.Errorf("QueryRewriteStep: 'query' not found in state")
 	}
 
-	rewrittenQuery, err := s.rewriter.Rewrite(ctx, rawQuery)
+	rewrittenQuery, err := s.rewriter.Rewrite(ctx, state.Query)
 	if err != nil {
 		return fmt.Errorf("QueryRewriteStep failed to rewrite query: %w", err)
 	}
 
 	// Update the state with the rewritten query, but keep original for reference
-	state.Set("original_query", rawQuery)
-	state.Set("query", rewrittenQuery)
+	state.OriginalQuery = state.Query
+	state.Query = rewrittenQuery
 
 	return nil
 }
