@@ -4,19 +4,20 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 )
 
-// MockSimpleLLMClient is a mock implementation of SimpleLLMClient
-type MockSimpleLLMClient struct {
-	generateFn func(ctx context.Context, prompt string) (string, error)
+// MockLLMClient is a mock implementation of core.Client for testing
+type MockLLMClient struct {
+	chatFn func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error)
 }
 
-func (m *MockSimpleLLMClient) Generate(ctx context.Context, prompt string) (string, error) {
-	if m.generateFn != nil {
-		return m.generateFn(ctx, prompt)
+func (m *MockLLMClient) Chat(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+	if m.chatFn != nil {
+		return m.chatFn(ctx, messages, options...)
 	}
-	return `{
+	return &core.Response{Content: `{
 		"nodes": [
 			{
 				"id": "Alice",
@@ -38,12 +39,17 @@ func (m *MockSimpleLLMClient) Generate(ctx context.Context, prompt string) (stri
 				"properties": {}
 			}
 		]
-	}`, nil
+	}`}, nil
+}
+
+func (m *MockLLMClient) ChatStream(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Stream, error) {
+	// For this test, we don't need streaming support
+	return nil, nil
 }
 
 func TestGraphExtractor_Extract(t *testing.T) {
 	// Create a mock LLM client
-	mockLLM := &MockSimpleLLMClient{}
+	mockLLM := &MockLLMClient{}
 
 	// Create a graph extractor
 	extractor := NewGraphExtractor(mockLLM)
@@ -98,9 +104,9 @@ func TestGraphExtractor_Extract(t *testing.T) {
 
 func TestGraphExtractor_Extract_InvalidJSON(t *testing.T) {
 	// Create a mock LLM client that returns invalid JSON
-	mockLLM := &MockSimpleLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
-			return "invalid json", nil
+	mockLLM := &MockLLMClient{
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+			return &core.Response{Content: "invalid json"}, nil
 		},
 	}
 

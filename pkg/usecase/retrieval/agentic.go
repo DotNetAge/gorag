@@ -104,3 +104,34 @@ type EntityExtractionResult struct {
 type EntityExtractor interface {
 	Extract(ctx context.Context, query *entity.Query) (*EntityExtractionResult, error)
 }
+
+// ---------------------------------------------------------------------------
+// Agentic loop contracts
+// ---------------------------------------------------------------------------
+
+// ActionType is the decision made by the Agentic reasoner on each iteration.
+type ActionType string
+
+const (
+	ActionRetrieve ActionType = "retrieve"
+	ActionReflect  ActionType = "reflect"
+	ActionFinish   ActionType = "finish"
+)
+
+// AgentAction is the output of the action-selection step.
+type AgentAction struct {
+	Type  ActionType // which branch to execute next
+	Query string     // refined sub-query for the retrieve action (empty for reflect/finish)
+}
+
+// AgentReasoner analyses the current retrieval state and returns a natural-language
+// reasoning trace that summarises what has been found and what is still missing.
+type AgentReasoner interface {
+	Reason(ctx context.Context, query string, retrieved [][]*entity.Chunk, answer string) (reasoning string, err error)
+}
+
+// AgentActionSelector chooses the next action (retrieve / reflect / finish) based on
+// the reasoning trace and the current iteration count relative to the allowed maximum.
+type AgentActionSelector interface {
+	SelectAction(ctx context.Context, query, reasoning string, iteration, maxIterations int) (*AgentAction, error)
+}

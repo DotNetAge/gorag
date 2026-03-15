@@ -4,28 +4,35 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/stretchr/testify/assert"
 )
 
-// MockSimpleLLMClient is a mock implementation of SimpleLLMClient
-type MockSimpleLLMClient struct {
-	generateFn func(ctx context.Context, prompt string) (string, error)
+// MockLLMClient is a mock implementation of core.Client for testing
+type MockLLMClient struct {
+	chatFn func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error)
 }
 
-func (m *MockSimpleLLMClient) Generate(ctx context.Context, prompt string) (string, error) {
-	if m.generateFn != nil {
-		return m.generateFn(ctx, prompt)
+func (m *MockLLMClient) Chat(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+	if m.chatFn != nil {
+		return m.chatFn(ctx, messages, options...)
 	}
-	// Return a dummy response
-	return `{"year": 2023, "author": "test"}`, nil
+	// Default mock response
+	return &core.Response{Content: `{"year": 2023, "author": "test"}`}, nil
+}
+
+func (m *MockLLMClient) ChatStream(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Stream, error) {
+	// For this test, we don't need streaming support
+	// Return nil stream and no error (will not be used in tests)
+	return nil, nil
 }
 
 func TestFilterExtractor_ExtractFilters(t *testing.T) {
 	// Create a mock LLM client
-	mockLLM := &MockSimpleLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
-			return `{"year": 2023, "author": "John Doe"}`, nil
+	mockLLM := &MockLLMClient{
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+			return &core.Response{Content: `{"year": 2023, "author": "John Doe"}`}, nil
 		},
 	}
 
@@ -49,9 +56,9 @@ func TestFilterExtractor_ExtractFilters(t *testing.T) {
 
 func TestFilterExtractor_ExtractFilters_EmptyFilters(t *testing.T) {
 	// Create a mock LLM client that returns empty filters
-	mockLLM := &MockSimpleLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
-			return `{}`, nil
+	mockLLM := &MockLLMClient{
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+			return &core.Response{Content: `{}`}, nil
 		},
 	}
 
@@ -74,9 +81,9 @@ func TestFilterExtractor_ExtractFilters_EmptyFilters(t *testing.T) {
 
 func TestFilterExtractor_ExtractFilters_InvalidJSON(t *testing.T) {
 	// Create a mock LLM client that returns invalid JSON
-	mockLLM := &MockSimpleLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
-			return "invalid json", nil
+	mockLLM := &MockLLMClient{
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+			return &core.Response{Content: "invalid json"}, nil
 		},
 	}
 

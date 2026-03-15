@@ -4,20 +4,25 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/stretchr/testify/assert"
 )
 
-// MockLLMClient is a mock implementation of SimpleLLMClient
- type MockLLMClient struct {
-	generateFn func(ctx context.Context, prompt string) (string, error)
- }
+// MockLLMClient is a mock implementation of core.Client for testing
+type MockLLMClient struct {
+	chatFn func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error)
+}
 
- func (m *MockLLMClient) Generate(ctx context.Context, prompt string) (string, error) {
-	if m.generateFn != nil {
-		return m.generateFn(ctx, prompt)
+func (m *MockLLMClient) Chat(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+	if m.chatFn != nil {
+		return m.chatFn(ctx, messages, options...)
 	}
-	return "Test answer", nil
+	return &core.Response{Content: "Test answer"}, nil
+}
+
+func (m *MockLLMClient) ChatStream(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Stream, error) {
+	return nil, nil
 }
 
 func TestCitationGenerator_New(t *testing.T) {
@@ -33,16 +38,16 @@ func TestCitationGenerator_New(t *testing.T) {
 func TestCitationGenerator_GenerateWithCitations(t *testing.T) {
 	// Create a mock LLM client that returns a specific response
 	mockLLM := &MockLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
 			// Verify that the prompt contains the expected structure
-			assert.Contains(t, prompt, "[Documents]")
-			assert.Contains(t, prompt, "[Question]")
-			assert.Contains(t, prompt, "[doc_1]")
-			assert.Contains(t, prompt, "[doc_2]")
-			assert.Contains(t, prompt, "Paris is the capital of France")
-			assert.Contains(t, prompt, "France is a country in Europe")
-			assert.Contains(t, prompt, "What is the capital of France?")
-			return "The capital of France is Paris [doc_1]", nil
+			assert.Contains(t, messages[0].Content, "[Documents]")
+			assert.Contains(t, messages[0].Content, "[Question]")
+			assert.Contains(t, messages[0].Content, "[doc_1]")
+			assert.Contains(t, messages[0].Content, "[doc_2]")
+			assert.Contains(t, messages[0].Content, "Paris is the capital of France")
+			assert.Contains(t, messages[0].Content, "France is a country in Europe")
+			assert.Contains(t, messages[0].Content, "What is the capital of France?")
+			return &core.Response{Content: "The capital of France is Paris [doc_1]"}, nil
 		},
 	}
 
@@ -76,12 +81,12 @@ func TestCitationGenerator_GenerateWithCitations(t *testing.T) {
 func TestCitationGenerator_GenerateWithCitations_EmptyChunks(t *testing.T) {
 	// Create a mock LLM client
 	mockLLM := &MockLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
 			// Verify that the prompt contains the expected structure even with empty chunks
-			assert.Contains(t, prompt, "[Documents]")
-			assert.Contains(t, prompt, "[Question]")
-			assert.Contains(t, prompt, "What is the capital of France?")
-			return "I don't have enough information.", nil
+			assert.Contains(t, messages[0].Content, "[Documents]")
+			assert.Contains(t, messages[0].Content, "[Question]")
+			assert.Contains(t, messages[0].Content, "What is the capital of France?")
+			return &core.Response{Content: "I don't have enough information."}, nil
 		},
 	}
 
@@ -106,10 +111,10 @@ func TestCitationGenerator_GenerateWithCitations_EmptyChunks(t *testing.T) {
 func TestCitationGenerator_GenerateWithCitations_SingleChunk(t *testing.T) {
 	// Create a mock LLM client
 	mockLLM := &MockLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
 			// Verify that the prompt contains the expected structure with a single chunk
-			assert.Contains(t, prompt, "[doc_1]")
-			return "Paris is the capital of France [doc_1]", nil
+			assert.Contains(t, messages[0].Content, "[doc_1]")
+			return &core.Response{Content: "Paris is the capital of France [doc_1]"}, nil
 		},
 	}
 

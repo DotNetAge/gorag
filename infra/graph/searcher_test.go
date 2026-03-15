@@ -4,12 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 )
 
 // MockGraphStore is a mock implementation of abstraction.GraphStore
 type MockGraphStore struct {
-	getNeighborsFn        func(ctx context.Context, nodeID string, limit int) ([]*abstraction.Node, error)
+	getNeighborsFn          func(ctx context.Context, nodeID string, limit int) ([]*abstraction.Node, error)
 	getCommunitySummariesFn func(ctx context.Context, limit int) ([]map[string]any, error)
 }
 
@@ -118,9 +119,9 @@ func TestGlobalSearcher_Search(t *testing.T) {
 	mockStore := &MockGraphStore{}
 
 	// Create a mock LLM client
-	mockLLM := &MockSimpleLLMClient{
-		generateFn: func(ctx context.Context, prompt string) (string, error) {
-			return "Global answer based on community summaries", nil
+	mockLLM := &MockLLMClient{
+		chatFn: func(ctx context.Context, messages []core.Message, options ...core.Option) (*core.Response, error) {
+			return &core.Response{Content: "Global answer based on community summaries"}, nil
 		},
 	}
 
@@ -151,7 +152,7 @@ func TestGlobalSearcher_Search_EmptySummaries(t *testing.T) {
 	}
 
 	// Create a mock LLM client
-	mockLLM := &MockSimpleLLMClient{}
+	mockLLM := &MockLLMClient{}
 
 	// Create a global searcher
 	searcher := NewGlobalSearcher(mockStore, mockLLM)

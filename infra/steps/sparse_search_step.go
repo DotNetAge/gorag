@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
-	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 )
 
@@ -15,25 +14,37 @@ var _ pipeline.Step[*entity.PipelineState] = (*SparseSearchStep)(nil)
 // SparseSearchStep is a pipeline step that performs sparse retrieval (e.g., BM25).
 // It's effective for keyword-based search and works well with dense retrieval.
 type SparseSearchStep struct {
-	sparseIndex abstraction.SparseIndex
-	topK        int
+	searcher SparseSearcher
+	topK     int
+}
+
+// SparseSearcher defines the interface for sparse search operations.
+type SparseSearcher interface {
+	Search(ctx context.Context, query string, topK int) ([]*SearchResult, error)
+}
+
+// SearchResult represents a search result.
+type SearchResult struct {
+	ID       string
+	Content  string
+	Metadata map[string]any
 }
 
 // NewSparseSearchStep creates a new sparse search step.
 //
 // Parameters:
-// - sparseIndex: The sparse index (BM25) to use for retrieval
+// - searcher: The sparse searcher to use for retrieval
 // - topK: Number of top results to return (default: 10)
 //
 // Returns:
 // - A new SparseSearchStep instance
-func NewSparseSearchStep(sparseIndex abstraction.SparseIndex, topK int) *SparseSearchStep {
+func NewSparseSearchStep(searcher SparseSearcher, topK int) *SparseSearchStep {
 	if topK <= 0 {
 		topK = 10
 	}
 	return &SparseSearchStep{
-		sparseIndex: sparseIndex,
-		topK:        topK,
+		searcher: searcher,
+		topK:     topK,
 	}
 }
 
@@ -50,7 +61,7 @@ func (s *SparseSearchStep) Execute(ctx context.Context, state *entity.PipelineSt
 	}
 
 	// Perform sparse search
-	results, err := s.sparseIndex.Search(ctx, state.Query.Text, s.topK)
+	results, err := s.searcher.Search(ctx, state.Query.Text, s.topK)
 	if err != nil {
 		return fmt.Errorf("SparseSearchStep failed to search: %w", err)
 	}
@@ -58,13 +69,14 @@ func (s *SparseSearchStep) Execute(ctx context.Context, state *entity.PipelineSt
 	// Convert results to chunks
 	var chunks []*entity.Chunk
 	for _, result := range results {
-		chunk := &entity.Chunk{
-			ID:       result.ID,
-			Document: result.Document,
-			Content:  result.Content,
-			Score:    result.Score,
-			Metadata: result.Metadata,
-		}
+		chunk := entity.NewChunk(
+			result.ID,
+			"", // DocumentID will be set by the indexer
+			result.Content,
+			0, // StartIndex
+			len(result.Content), // EndIndex
+			result.Metadata,
+		)
 		chunks = append(chunks, chunk)
 	}
 

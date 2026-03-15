@@ -41,15 +41,30 @@ func (s *VectorSearchStep) Execute(ctx context.Context, state *entity.PipelineSt
 		return fmt.Errorf("VectorSearchStep: 'query' not found in state")
 	}
 
-	// 1. Embed the query
-	embeddings, err := s.embedder.Embed(ctx, []string{state.Query.Text})
-	if err != nil {
-		return fmt.Errorf("VectorSearchStep failed to embed query: %w", err)
+	// 1. Obtain the query vector.
+	// When embedder is nil (multimodal pipeline), use the pre-computed vector written
+	// by MultimodalEmbeddingStep into state.Agentic.Custom["query_vector"].
+	var queryVector []float32
+	if s.embedder != nil {
+		embeddings, err := s.embedder.Embed(ctx, []string{state.Query.Text})
+		if err != nil {
+			return fmt.Errorf("VectorSearchStep failed to embed query: %w", err)
+		}
+		if len(embeddings) == 0 {
+			return fmt.Errorf("VectorSearchStep failed to get query embedding")
+		}
+		queryVector = embeddings[0]
+	} else {
+		// Expect MultimodalEmbeddingStep to have populated query_vector.
+		if state.Agentic == nil {
+			return fmt.Errorf("VectorSearchStep: embedder is nil and no AgenticMetadata found")
+		}
+		vec, ok := state.Agentic.Custom["query_vector"].([]float32)
+		if !ok || len(vec) == 0 {
+			return fmt.Errorf("VectorSearchStep: embedder is nil and query_vector not set in AgenticMetadata")
+		}
+		queryVector = vec
 	}
-	if len(embeddings) == 0 {
-		return fmt.Errorf("VectorSearchStep failed to get query embedding")
-	}
-	queryVector := embeddings[0]
 
 	// 2. Use filters from state (if FilterExtractorStep ran before this)
 	filters := state.Filters

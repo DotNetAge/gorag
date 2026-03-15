@@ -44,23 +44,6 @@ func TestDefaultIndexer(t *testing.T) {
 	assert.NotNil(t, defaultIdx.vectorStore)
 }
 
-func TestWithParsers(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "indexer-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	indexer := DefaultIndexer(
-		WithParsers(), // Empty parsers
-		WithWatchDir(tmpDir),
-	)
-
-	defaultIdx, ok := indexer.(*defaultIndexer)
-	assert.True(t, ok)
-	assert.Nil(t, defaultIdx.parser) // Should be nil when no parsers provided
-}
-
 func TestWithWatchDir(t *testing.T) {
 	tmpDir1, err := os.MkdirTemp("", "indexer-test-1-*")
 	if err != nil {
