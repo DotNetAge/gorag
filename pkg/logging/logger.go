@@ -51,3 +51,16 @@ func (l *defaultLogger) Debug(msg string, fields ...map[string]interface{}) {
 func (l *defaultLogger) Warn(msg string, fields ...map[string]interface{}) {
 	log.Printf("[WARN] %s - %v", msg, fields)
 }
+
+// noopLogger 是一个空的日志记录器，用于测试或不需要日志的场景
+type noopLogger struct{}
+
+// NewNoopLogger 创建一个空的日志记录器
+func NewNoopLogger() Logger {
+	return &noopLogger{}
+}
+
+func (l *noopLogger) Info(string, ...map[string]interface{})         {}
+func (l *noopLogger) Error(string, error, ...map[string]interface{}) {}
+func (l *noopLogger) Debug(string, ...map[string]interface{})        {}
+func (l *noopLogger) Warn(string, ...map[string]interface{})         {}

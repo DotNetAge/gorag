@@ -3,66 +3,74 @@ package steps
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	chat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
 
 // ensure interface implementation
-var _ pipeline.Step[*entity.PipelineState] = (*GenerationStep)(nil)
+var _ pipeline.Step[*entity.PipelineState] = (*generationStep)(nil)
 
-// GenerationStep takes the final query and retrieved chunks, builds a prompt, and generates the answer.
-type GenerationStep struct {
-	llm chat.Client
+// generator is a thin adapter that delegates to infra/service.
+type generationStep struct {
+	generator retrieval.Generator
+	logger    logging.Logger
 }
 
-// NewGenerationStep creates a standard generation step.
-func NewGenerationStep(llm chat.Client) *GenerationStep {
-	return &GenerationStep{llm: llm}
+// NewGenerator creates a new generation step with logger.
+func NewGenerator(generator retrieval.Generator, logger logging.Logger) *generationStep {
+	if logger == nil {
+		logger = logging.NewNoopLogger()
+	}
+	return &generationStep{
+		generator: generator,
+		logger:    logger,
+	}
 }
 
-func (s *GenerationStep) Name() string {
-	return "GenerationStep"
+// Name returns the step name
+func (s *generationStep) Name() string {
+	return "Generator"
 }
 
-func (s *GenerationStep) Execute(ctx context.Context, state *entity.PipelineState) error {
-	if state.Query == nil {
-		return fmt.Errorf("GenerationStep: 'query' not found in state")
+// Execute generates answer using infra/service.
+// This is a thin adapter (<30 lines).
+func (s *generationStep) Execute(ctx context.Context, state *entity.PipelineState) error {
+	if state.Query == nil || state.Query.Text == "" {
+		return fmt.Errorf("generator: query required")
 	}
 
-	var contextBuilder strings.Builder
-	for i, chunks := range state.RetrievedChunks {
-		for j, chunk := range chunks {
-			contextBuilder.WriteString(fmt.Sprintf("--- Document %d-%d --\n%s\n\n", i+1, j+1, chunk.Content))
-		}
+	s.logger.Debug("generating response", map[string]interface{}{
+		"step":  "Generator",
+		"query": state.Query.Text,
+	})
+
+	// Flatten RetrievedChunks to []*entity.Chunk
+	var chunks []*entity.Chunk
+	for _, chunkGroup := range state.RetrievedChunks {
+		chunks = append(chunks, chunkGroup...)
 	}
 
-	prompt := fmt.Sprintf(`You are a helpful and professional AI assistant.
-Please answer the user's question based on the provided reference documents.
-If the documents do not contain the answer, say "I don't know based on the provided context."
-
-[Reference Documents]
-%s
-
-[User Question]
-%s
-
-Answer:`, contextBuilder.String(), state.Query.Text)
-
-	// Update state with the final prompt being used
-	state.GenerationPrompt = prompt
-
-	messages := []chat.Message{
-		chat.NewUserMessage(prompt),
-	}
-	response, err := s.llm.Chat(ctx, messages)
+	// Delegate to infra/service (thick business logic)
+	result, err := s.generator.Generate(ctx, state.Query, chunks)
 	if err != nil {
-		return fmt.Errorf("GenerationStep failed: %w", err)
+		s.logger.Error("generate failed", err, map[string]interface{}{
+			"step":  "Generator",
+			"query": state.Query.Text,
+		})
+		return fmt.Errorf("generator: Generate failed: %w", err)
 	}
 
-	state.Answer = response.Content
+	// Update state (thin adapter 职责)
+	state.Answer = result.Answer
+
+	s.logger.Info("response generated", map[string]interface{}{
+		"step":          "Generator",
+		"answer_length": len(result.Answer),
+		"query":         state.Query.Text,
+	})
 
 	return nil
 }
