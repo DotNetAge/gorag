@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/DotNetAge/gorag/infra/parser/config/types"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/usecase/dataprep"
 	"github.com/google/uuid"
@@ -16,24 +17,6 @@ import (
 // ensure interface implementation
 var _ dataprep.Parser = (*ConfigStreamParser)(nil)
 
-// Format represents the configuration file format
-type Format int
-
-const (
-	// Unknown represents an unknown format
-	Unknown Format = iota
-	// TOML format
-	TOML
-	// INI format
-	INI
-	// Properties format
-	Properties
-	// ENV format
-	ENV
-	// YAML format
-	YAML
-)
-
 // ConfigStreamParser implements the configuration file parser with streaming support
 type ConfigStreamParser struct {
 	chunkSize    int
@@ -41,7 +24,7 @@ type ConfigStreamParser struct {
 	maskSecrets  bool
 	expandEnv    bool
 	autoDetect   bool
-	format       Format
+	format       types.ParserType
 }
 
 // NewConfigStreamParser creates a new configuration parser
@@ -52,6 +35,7 @@ func NewConfigStreamParser() *ConfigStreamParser {
 		maskSecrets:  true,
 		expandEnv:    false, // Default to false for security - users must explicitly enable
 		autoDetect:   true,
+		format:       types.UNKNOWN,
 	}
 }
 
@@ -110,7 +94,7 @@ func (p *ConfigStreamParser) ParseStream(ctx context.Context, r io.Reader, metad
 						docMetaCopy := copyMeta(docMeta)
 						docMetaCopy["part_index"] = position
 						docMetaCopy["position"] = position
-						docMetaCopy["format"] = Unknown.String()
+						docMetaCopy["format"] = p.format.String()
 
 						doc := entity.NewDocument(
 							uuid.New().String(),
@@ -154,7 +138,7 @@ func (p *ConfigStreamParser) ParseStream(ctx context.Context, r io.Reader, metad
 				docMetaCopy := copyMeta(docMeta)
 				docMetaCopy["part_index"] = position
 				docMetaCopy["position"] = position
-				docMetaCopy["format"] = Unknown.String()
+				docMetaCopy["format"] = p.format.String()
 
 				doc := entity.NewDocument(
 					uuid.New().String(),
@@ -225,24 +209,6 @@ func (p *ConfigStreamParser) maskSensitiveLine(line string) string {
 	}
 
 	return result
-}
-
-// String returns the string representation of Format
-func (f Format) String() string {
-	switch f {
-	case TOML:
-		return "TOML"
-	case INI:
-		return "INI"
-	case Properties:
-		return "Properties"
-	case ENV:
-		return "ENV"
-	case YAML:
-		return "YAML"
-	default:
-		return "Unknown"
-	}
 }
 
 func copyMeta(m map[string]any) map[string]any {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
@@ -80,7 +81,7 @@ type GlobalSearcher struct {
 	// store is the graph store used for searching
 	store abstraction.GraphStore
 	// llm is the LLM client used for synthesizing results
-	llm SimpleLLMClient
+	llm core.Client
 }
 
 // NewGlobalSearcher creates a new global searcher.
@@ -91,7 +92,7 @@ type GlobalSearcher struct {
 //
 // Returns:
 // - A new GlobalSearcher instance
-func NewGlobalSearcher(store abstraction.GraphStore, llm SimpleLLMClient) *GlobalSearcher {
+func NewGlobalSearcher(store abstraction.GraphStore, llm core.Client) *GlobalSearcher {
 	return &GlobalSearcher{store: store, llm: llm}
 }
 
@@ -115,9 +116,9 @@ func (s *GlobalSearcher) Search(ctx context.Context, query string, communityLeve
 		return "No global community data available.", nil
 	}
 
-	// MAP Phase: Filter/Score each summary (simplified here by joining, 
+	// MAP Phase: Filter/Score each summary (simplified here by joining,
 	// but a true Map-Reduce would ask LLM to score relevance first if there are too many).
-	
+
 	// REDUCE Phase: Ask LLM to synthesize a global answer from the summaries
 	var contextBuilder strings.Builder
 	for i, summary := range summaries {
@@ -136,5 +137,15 @@ Ignore summaries that are irrelevant to the question.
 
 [Global Answer]`, query, contextBuilder.String())
 
-	return s.llm.Generate(ctx, prompt)
+	// Use gochat's standard Chat interface
+	messages := []core.Message{
+		core.NewUserMessage(prompt),
+	}
+
+	response, err := s.llm.Chat(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+
+	return response.Content, nil
 }

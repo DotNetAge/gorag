@@ -31,7 +31,8 @@ func TestNeo4jGraphStoreIntegration(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 初始化 Neo4J GraphStore
-	store := NewNeo4jGraphStore()
+	store, err := NewGraphStore(StoreTypeNeo4j)
+	assert.NoError(t, err)
 	assert.NotNil(t, store)
 
 	// 初始化存储

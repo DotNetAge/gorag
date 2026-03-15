@@ -21,9 +21,14 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+replace github.com/DotNetAge/gochat => ../gochat
+
+replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20240227224415-6ceb2ff114de
+
 require (
 	github.com/chewxy/math32 v1.10.1 // indirect
 	github.com/coder/hnsw v0.6.1 // indirect
+	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/google/renameio v1.0.1 // indirect
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect

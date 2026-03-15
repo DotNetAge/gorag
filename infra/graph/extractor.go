@@ -9,24 +9,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/usecase/dataprep"
 )
-
-// SimpleLLMClient represents the required LLM functions for graph extraction.
-type SimpleLLMClient interface {
-	// Generate generates text based on the given prompt
-	//
-	// Parameters:
-	// - ctx: The context for the operation
-	// - prompt: The prompt to generate text from
-	//
-	// Returns:
-	// - The generated text
-	// - An error if generation fails
-	Generate(ctx context.Context, prompt string) (string, error)
-}
 
 var _ dataprep.GraphExtractor = (*GraphExtractor)(nil)
 
@@ -34,7 +21,7 @@ var _ dataprep.GraphExtractor = (*GraphExtractor)(nil)
 // It helps build knowledge graphs from unstructured text for better retrieval and reasoning.
 type GraphExtractor struct {
 	// llm is the LLM client used for extracting graph elements
-	llm SimpleLLMClient
+	llm core.Client
 }
 
 // NewGraphExtractor creates a new graph extractor.
@@ -44,8 +31,14 @@ type GraphExtractor struct {
 //
 // Returns:
 // - A new GraphExtractor instance
-func NewGraphExtractor(llm SimpleLLMClient) *GraphExtractor {
+func NewGraphExtractor(llm core.Client) *GraphExtractor {
 	return &GraphExtractor{llm: llm}
+}
+
+// DefaultGraphExtractor 创建默认的图提取器
+// 使用 gochat 的标准 LLM 客户端进行实体和关系提取
+func DefaultGraphExtractor(llm core.Client) *GraphExtractor {
+	return NewGraphExtractor(llm)
 }
 
 // extractResult represents the result of graph extraction.
@@ -76,19 +69,24 @@ Edges must have "source" (node id), "target" (node id), and "type" (relationship
 [Text]
 %s`, chunk.Content)
 
-	response, err := e.llm.Generate(ctx, prompt)
+	// Use gochat's standard Chat interface
+	messages := []core.Message{
+		core.NewUserMessage(prompt),
+	}
+
+	response, err := e.llm.Chat(ctx, messages)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Clean up potential markdown formatting from LLM output
-	cleanJSON := strings.TrimPrefix(strings.TrimSpace(response), "```json")
+	cleanJSON := strings.TrimPrefix(strings.TrimSpace(response.Content), "```json")
 	cleanJSON = strings.TrimPrefix(cleanJSON, "```")
 	cleanJSON = strings.TrimSuffix(cleanJSON, "```")
 
 	var result extractResult
 	if err := json.Unmarshal([]byte(cleanJSON), &result); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse extracted graph JSON: %w\nRaw Output: %s", err, response)
+		return nil, nil, fmt.Errorf("failed to parse extracted graph JSON: %w\nRaw Output: %s", err, response.Content)
 	}
 
 	// Attach chunk tracking metadata to the nodes/edges for traceability

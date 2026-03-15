@@ -5,21 +5,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 )
-
-// SimpleLLMClient represents the required LLM functions.
-type SimpleLLMClient interface {
-	Generate(ctx context.Context, prompt string) (string, error)
-}
 
 // CitationGenerator handles the "Citation & Grounding" spec.
 // It injects citation markers into the context and forces the LLM to use them.
 type CitationGenerator struct {
-	llm SimpleLLMClient
+	llm core.Client
 }
 
-func NewCitationGenerator(llm SimpleLLMClient) *CitationGenerator {
+func NewCitationGenerator(llm core.Client) *CitationGenerator {
 	return &CitationGenerator{llm: llm}
 }
 
@@ -27,7 +23,7 @@ func NewCitationGenerator(llm SimpleLLMClient) *CitationGenerator {
 // and instructs the LLM to strictly cite its claims.
 func (g *CitationGenerator) GenerateWithCitations(ctx context.Context, query string, chunks []*entity.Chunk) (string, error) {
 	var contextBuilder strings.Builder
-	
+
 	// Inject Citation Markers
 	for i, chunk := range chunks {
 		marker := fmt.Sprintf("[doc_%d]", i+1)
@@ -46,5 +42,15 @@ If a claim cannot be supported by the documents, do not make it. If the document
 
 Answer:`, contextBuilder.String(), query)
 
-	return g.llm.Generate(ctx, prompt)
+	// Use gochat's standard Chat interface
+	messages := []core.Message{
+		core.NewUserMessage(prompt),
+	}
+
+	response, err := g.llm.Chat(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+
+	return response.Content, nil
 }

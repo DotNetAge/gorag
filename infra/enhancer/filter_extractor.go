@@ -9,23 +9,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
-
-// SimpleLLMClient defines a simple LLM client interface for text generation
-type SimpleLLMClient interface {
-	// Generate generates text based on the given prompt
-	//
-	// Parameters:
-	// - ctx: The context for the operation
-	// - prompt: The prompt to generate text from
-	//
-	// Returns:
-	// - The generated text
-	// - An error if generation fails
-	Generate(ctx context.Context, prompt string) (string, error)
-}
 
 var _ retrieval.FilterExtractor = (*FilterExtractor)(nil)
 
@@ -34,7 +21,7 @@ var _ retrieval.FilterExtractor = (*FilterExtractor)(nil)
 // extracting explicit filtering conditions from user queries.
 type FilterExtractor struct {
 	// llm is the LLM client used for extracting filters
-	llm SimpleLLMClient
+	llm core.Client
 }
 
 // NewFilterExtractor creates a new filter extractor.
@@ -44,7 +31,7 @@ type FilterExtractor struct {
 //
 // Returns:
 // - A new FilterExtractor instance
-func NewFilterExtractor(llm SimpleLLMClient) *FilterExtractor {
+func NewFilterExtractor(llm core.Client) *FilterExtractor {
 	return &FilterExtractor{llm: llm}
 }
 
@@ -65,19 +52,24 @@ If no explicit filters are mentioned, return an empty JSON object {}.
 
 Query: "%s"`, query.Text)
 
-	response, err := f.llm.Generate(ctx, prompt)
+	// Use gochat's standard Chat interface
+	messages := []core.Message{
+		core.NewUserMessage(prompt),
+	}
+
+	response, err := f.llm.Chat(ctx, messages)
 	if err != nil {
 		return nil, err
 	}
 
-	cleanJSON := strings.TrimPrefix(strings.TrimSpace(response), "```json")
+	cleanJSON := strings.TrimPrefix(strings.TrimSpace(response.Content), "```json")
 	cleanJSON = strings.TrimPrefix(cleanJSON, "```")
 	cleanJSON = strings.TrimSuffix(cleanJSON, "```")
 
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(cleanJSON), &filters); err != nil {
 		// Fallback to empty filter instead of breaking the pipeline
-		return make(map[string]any), nil 
+		return make(map[string]any), nil
 	}
 
 	return filters, nil
