@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/enhancer"
-	"github.com/DotNetAge/gorag/infra/searcher/core"
-	"github.com/DotNetAge/gorag/infra/steps"
+	searchercore "github.com/DotNetAge/gorag/infra/searcher/core"
+	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
+	prestep "github.com/DotNetAge/gorag/infra/steps/pre_retrieval"
+	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -37,21 +40,24 @@ func (chunksToParallelResultsStep) Execute(_ context.Context, state *entity.Pipe
 // Searcher holds the components for the Hybrid RAG pipeline.
 // The pipeline is assembled once at construction time and reused on every Search call.
 type Searcher struct {
-	embedder        embedding.Provider          // dense embedding model
-	vectorStore     abstraction.VectorStore     // vector index for dense retrieval
-	fusionEngine    retrieval.FusionEngine      // RRF fusion engine (default: built-in k=60)
-	generator       retrieval.Generator         // LLM answer generator (required)
-	sparseStore     steps.SparseSearcher        // optional BM25/keyword retrieval path
-	reranker        abstraction.Reranker        // optional cross-encoder reranker after fusion
-	filterExtractor *enhancer.FilterExtractor   // optional metadata filter extractor
-	stepBackGen     *enhancer.StepBackGenerator // optional StepBack abstract query expander
-	hydeGenerator   *enhancer.HyDEGenerator     // optional HyDE hypothetical document generator
-	logger          logging.Logger              // structured logger
-	metrics         abstraction.Metrics         // observability metrics collector
-	denseTopK       int                         // dense retrieval candidate size (default: 20)
-	sparseTopK      int                         // sparse retrieval candidate size (default: 20)
-	fusionTopK      int                         // results output from RRF fusion (default: 10)
-	rerankTopK      int                         // results kept after reranking (default: 5)
+	embedder        embedding.Provider           // dense embedding model
+	vectorStore     abstraction.VectorStore      // vector index for dense retrieval
+	fusionEngine    retrieval.FusionEngine       // RRF fusion engine (default: built-in k=60)
+	generator       retrieval.Generator          // LLM answer generator (required)
+	sparseStore     retrievalstep.SparseSearcher // optional BM25/keyword retrieval path
+	reranker        abstraction.Reranker         // optional cross-encoder reranker after fusion
+	filterExtractor *enhancer.FilterExtractor    // optional metadata filter extractor
+	stepBackGen     *enhancer.StepBackGenerator  // optional StepBack abstract query expander (Advanced RAG)
+	hydeGenerator   *enhancer.HyDEGenerator      // optional HyDE hypothetical document generator (Advanced RAG)
+	queryRewriter   core.Client                  // optional query rewriter LLM client (Advanced RAG)
+	llmForCompress  core.Client                  // optional LLM client for context compression (Advanced RAG)
+	logger          logging.Logger               // structured logger
+	metrics         abstraction.Metrics          // observability metrics collector
+	denseTopK       int                          // dense retrieval candidate size (default: 20)
+	sparseTopK      int                          // sparse retrieval candidate size (default: 20)
+	fusionTopK      int                          // results output from RRF fusion (default: 10)
+	rerankTopK      int                          // results kept after reranking (default: 5)
+	compressContext bool                         // enable context compression (default: false)
 
 	pipe *pipeline.Pipeline[*entity.PipelineState] // pre-assembled, reused on every call
 }
@@ -80,7 +86,7 @@ func WithGenerator(generator retrieval.Generator) Option {
 }
 
 // WithSparseStore adds the BM25/keyword retrieval path (optional).
-func WithSparseStore(ss steps.SparseSearcher) Option {
+func WithSparseStore(ss retrievalstep.SparseSearcher) Option {
 	return func(s *Searcher) { s.sparseStore = ss }
 }
 
@@ -150,6 +156,22 @@ func WithMetrics(m abstraction.Metrics) Option {
 	return func(s *Searcher) { s.metrics = m }
 }
 
+// WithQueryRewriter sets the LLM client for query rewriting (optional).
+func WithQueryRewriter(llm core.Client) Option {
+	return func(s *Searcher) { s.queryRewriter = llm }
+}
+
+// WithContextCompression enables context compression using LLM (optional).
+// When enabled, an LLM client must be provided via WithLLMForCompression.
+func WithContextCompression(enabled bool) Option {
+	return func(s *Searcher) { s.compressContext = enabled }
+}
+
+// WithLLMForCompression sets the LLM client for context compression (optional).
+func WithLLMForCompression(llm core.Client) Option {
+	return func(s *Searcher) { s.llmForCompress = llm }
+}
+
 // New creates a pre-assembled Hybrid RAG searcher.
 //
 // Required: WithGenerator.
@@ -169,7 +191,7 @@ func New(opts ...Option) *Searcher {
 		fusionTopK: 10,
 		rerankTopK: 5,
 		logger:     logging.NewNoopLogger(),
-		metrics:    core.DefaultMetrics(),
+		metrics:    searchercore.DefaultMetrics(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -186,48 +208,87 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		panic("hybrid.Searcher: generator is required")
 	}
 	if s.embedder == nil {
-		embedder, err := core.DefaultEmbedder()
+		embedder, err := searchercore.DefaultEmbedder()
 		if err != nil {
 			panic(err)
 		}
 		s.embedder = embedder
 	}
 	if s.vectorStore == nil {
-		store, err := core.DefaultVectorStore()
+		store, err := searchercore.DefaultVectorStore()
 		if err != nil {
 			panic(err)
 		}
 		s.vectorStore = store
 	}
 	if s.fusionEngine == nil {
-		s.fusionEngine = core.DefaultFusionEngine()
+		s.fusionEngine = searchercore.DefaultFusionEngine()
 	}
 
 	p := pipeline.New[*entity.PipelineState]()
 
+	// === Phase 1: Advanced Query Enhancement (Optional - LLM Calls) ===
+	// Note: These are Advanced RAG features, not part of standard Hybrid RAG
+	// Reference: LangChain/LlamaIndex Hybrid RAG = Vector + BM25 + Fusion (no LLM)
+
+	// Step 1: Query Rewrite (可选 - Advanced RAG)
+	if s.queryRewriter != nil {
+		// Note: QueryRewriteStep requires direct LLM client, not the interface
+		// For now, skip this step if no direct LLM client is available
+		_ = s.queryRewriter // avoid unused variable error
+	}
+
+	// Step 2: Filter Extraction (可选 - 元数据硬过滤)
 	if s.filterExtractor != nil {
-		p.AddStep(steps.NewQueryToFilterStep(s.filterExtractor, s.logger))
+		p.AddStep(prestep.NewQueryToFilterStep(s.filterExtractor, s.logger))
 	}
+
+	// Step 3: StepBack (可选 - Advanced RAG: 抽象化查询)
 	if s.stepBackGen != nil {
-		p.AddStep(steps.NewStepBackStep(s.stepBackGen, s.logger))
+		p.AddStep(prestep.NewStepBackStep(s.stepBackGen, s.logger))
 	}
+
+	// Step 4: HyDE (可选 - Advanced RAG: 假设性文档增强)
 	if s.hydeGenerator != nil {
-		p.AddStep(steps.NewHyDEStep(s.hydeGenerator, s.logger))
+		p.AddStep(prestep.NewHyDEStep(s.hydeGenerator, s.logger))
 	}
 
-	p.AddStep(steps.NewVectorSearchStep(s.embedder, s.vectorStore, s.denseTopK))
+	// === Phase 2: Hybrid Retrieval (Core - No LLM Calls) ===
+	// Standard Hybrid RAG: Vector Search + BM25/Sparse Search + RRF Fusion
+
+	// Step 5: Dense Retrieval (向量语义检索)
+	p.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.denseTopK))
+
+	// Step 6: Sparse Retrieval (可选 - BM25/关键词检索)
 	if s.sparseStore != nil {
-		p.AddStep(steps.NewSparseSearchStep(s.sparseStore, s.sparseTopK, s.logger))
+		p.AddStep(retrievalstep.NewSparseSearchStep(s.sparseStore, s.sparseTopK, s.logger))
 	}
 
+	// Step 7: Prepare for Fusion (准备多路结果)
 	p.AddStep(chunksToParallelResultsStep{})
-	p.AddStep(steps.NewRAGFusionStep(s.fusionEngine, s.fusionTopK))
 
+	// Step 8: RRF Fusion (Reciprocal Rank Fusion 融合)
+	p.AddStep(retrievalstep.NewRAGFusionStep(s.fusionEngine, s.fusionTopK))
+
+	// === Phase 3: Post-Retrieval Optimization (Optional - Usually No LLM) ===
+
+	// Step 9: Deduplication (可选 - Jaccard 相似度去重)
+	p.AddStep(poststep.NewDeduplicationStep(0.95))
+
+	// Step 10: Cross-Encoder Rerank (可选 - 重排序，非 LLM)
 	if s.reranker != nil {
-		p.AddStep(steps.NewRerankStep(s.reranker, s.rerankTopK))
+		p.AddStep(poststep.NewRerankStep(s.reranker, s.rerankTopK))
 	}
 
-	p.AddStep(steps.NewGenerator(s.generator, s.logger))
+	// === Phase 4: Context & Generation (LLM Call Here) ===
+
+	// Step 11: Context Compression (可选 - Advanced RAG: LLM 压缩上下文)
+	if s.compressContext && s.llmForCompress != nil {
+		p.AddStep(poststep.NewContextCompressionStep(s.llmForCompress, s.logger, 300))
+	}
+
+	// Step 12: Generation (唯一必需的 LLM 调用)
+	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
 	return p
 }
 

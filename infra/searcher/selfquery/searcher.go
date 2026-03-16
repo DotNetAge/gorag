@@ -1,0 +1,142 @@
+// Package selfquery provides Self-Query RAG implementation.
+// It extracts structured filters from natural language queries for filtered vector search.
+package selfquery
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/DotNetAge/gochat/pkg/embedding"
+	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/infra/enhancer"
+	searchercore "github.com/DotNetAge/gorag/infra/searcher/core"
+	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
+	prestep "github.com/DotNetAge/gorag/infra/steps/pre_retrieval"
+	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
+	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
+	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
+)
+
+// Searcher implements Self-Query RAG pattern.
+// It extracts metadata filters from natural language queries.
+type Searcher struct {
+	embedder        embedding.Provider        // dense embedding model
+	vectorStore     abstraction.VectorStore   // vector index
+	generator       retrieval.Generator       // LLM answer generator
+	filterExtractor *enhancer.FilterExtractor // metadata filter extractor
+	logger          logging.Logger            // structured logger
+	metrics         abstraction.Metrics       // metrics collector
+	topK            int                       // number of results (default: 10)
+
+	pipe *pipeline.Pipeline[*entity.PipelineState]
+}
+
+// Option is a functional option for SelfQuery Searcher.
+type Option func(*Searcher)
+
+// WithEmbedding sets the embedding provider.
+func WithEmbedding(provider embedding.Provider) Option {
+	return func(s *Searcher) { s.embedder = provider }
+}
+
+// WithVectorStore sets the vector store.
+func WithVectorStore(store abstraction.VectorStore) Option {
+	return func(s *Searcher) { s.vectorStore = store }
+}
+
+// WithGenerator sets the LLM answer generator.
+func WithGenerator(generator retrieval.Generator) Option {
+	return func(s *Searcher) { s.generator = generator }
+}
+
+// WithFilterExtractor sets the filter extractor for metadata extraction.
+func WithFilterExtractor(extractor *enhancer.FilterExtractor) Option {
+	return func(s *Searcher) { s.filterExtractor = extractor }
+}
+
+// WithTopK sets the number of results to retrieve (default: 10).
+func WithTopK(k int) Option {
+	return func(s *Searcher) {
+		if k > 0 {
+			s.topK = k
+		}
+	}
+}
+
+// WithLogger sets the logger.
+func WithLogger(logger logging.Logger) Option {
+	return func(s *Searcher) { s.logger = logger }
+}
+
+// WithMetrics sets the metrics collector.
+func WithMetrics(m abstraction.Metrics) Option {
+	return func(s *Searcher) { s.metrics = m }
+}
+
+// New creates a new SelfQuery Searcher.
+//
+// Pipeline: [QueryToFilterStep] → VectorSearchStep (with filters) → GenerationStep
+//
+// Required: WithGenerator, WithFilterExtractor.
+//
+// Example:
+//
+//	filterExt := enhancer.NewFilterExtractor(llmClient)
+//	searcher := selfquery.New(
+//	    selfquery.WithGenerator(gen),
+//	    selfquery.WithFilterExtractor(filterExt),
+//	    selfquery.WithTopK(10),
+//	)
+func New(opts ...Option) *Searcher {
+	s := &Searcher{
+		topK:    10,
+		logger:  logging.NewNoopLogger(),
+		metrics: searchercore.DefaultMetrics(),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	s.pipe = s.buildPipeline()
+	return s
+}
+
+// buildPipeline builds the Self-Query RAG pipeline.
+func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
+	p := pipeline.New[*entity.PipelineState]()
+
+	// Step 1: Extract metadata filters from query
+	if s.filterExtractor != nil {
+		p.AddStep(prestep.NewQueryToFilterStep(s.filterExtractor, s.logger))
+	}
+
+	// Step 2: Vector Search with extracted filters
+	p.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
+
+	// Step 3: Generation
+	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
+
+	return p
+}
+
+// Search executes the Self-Query RAG pipeline.
+func (s *Searcher) Search(ctx context.Context, query string) (string, error) {
+	start := time.Now()
+	state := entity.NewPipelineState()
+	state.Query = entity.NewQuery("", query, nil)
+
+	if err := s.pipe.Execute(ctx, state); err != nil {
+		s.metrics.RecordSearchError("selfquery", err)
+		return "", fmt.Errorf("selfquery.Searcher.Search: %w", err)
+	}
+
+	chunkCount := 0
+	for _, g := range state.RetrievedChunks {
+		chunkCount += len(g)
+	}
+	s.metrics.RecordSearchDuration("selfquery", time.Since(start))
+	s.metrics.RecordSearchResult("selfquery", chunkCount)
+	return state.Answer, nil
+}

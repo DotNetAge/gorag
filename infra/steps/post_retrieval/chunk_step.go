@@ -1,4 +1,4 @@
-package steps
+package post_retrieval
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/usecase/dataprep"
 )
 
-// ChunkStep 语义分块步骤（用于索引阶段）
+// ChunkStep 语义分块步骤
 type ChunkStep struct {
 	chunker dataprep.SemanticChunker
 }

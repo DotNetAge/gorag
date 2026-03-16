@@ -14,7 +14,9 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/searcher/core"
-	"github.com/DotNetAge/gorag/infra/steps"
+	agenticstep "github.com/DotNetAge/gorag/infra/steps/agentic"
+	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
+	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -223,25 +225,25 @@ func (s *Searcher) buildPipelines() (loopBody, finalPipe *pipeline.Pipeline[*ent
 
 	// --- Loop body ---
 	loop := pipeline.New[*entity.PipelineState]()
-	loop.AddStep(steps.NewReasoningStep(s.reasoner, s.logger))
-	loop.AddStep(steps.NewActionSelectionStep(s.actionSelector, s.maxIterations, s.logger))
-	loop.AddStep(steps.NewTerminationCheckStep(s.logger))
+	loop.AddStep(agenticstep.NewReasoningStep(s.reasoner, s.logger))
+	loop.AddStep(agenticstep.NewActionSelectionStep(s.actionSelector, s.maxIterations, s.logger))
+	loop.AddStep(agenticstep.NewTerminationCheckStep(s.logger))
 
 	// Retrieval step (only executes when action == retrieve; guarded inside the loop by Search)
 	if s.retriever != nil {
-		loop.AddStep(steps.NewParallelRetriever(s.retriever, s.topK, s.logger))
+		loop.AddStep(agenticstep.NewParallelRetriever(s.retriever, s.topK, s.logger))
 	} else {
-		loop.AddStep(steps.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
+		loop.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
 	}
 
-	loop.AddStep(steps.NewObservationStep(s.logger))
+	loop.AddStep(agenticstep.NewObservationStep(s.logger))
 
 	// --- Final pipeline (post-loop) ---
 	final := pipeline.New[*entity.PipelineState]()
 	if s.reranker != nil {
-		final.AddStep(steps.NewRerankStep(s.reranker, s.rerankTopK))
+		final.AddStep(poststep.NewRerankStep(s.reranker, s.rerankTopK))
 	}
-	final.AddStep(steps.NewGenerator(s.generator, s.logger))
+	final.AddStep(poststep.NewGenerator(s.generator, s.logger))
 	if s.selfJudge != nil {
 		final.AddStep(&selfRAGStep{judge: s.selfJudge, strict: s.strictRAG, threshold: 0.8})
 	}
@@ -270,14 +272,14 @@ func (s *Searcher) Search(ctx context.Context, query string) (string, error) {
 	})
 
 	for i := 0; i < s.maxIterations; i++ {
-		steps.AgentSetIteration(state, i)
+		agenticstep.AgentSetIteration(state, i)
 
 		if err := s.loopBody.Execute(ctx, state); err != nil {
 			s.metrics.RecordSearchError("agentic", err)
 			return "", fmt.Errorf("agentic.Searcher.Search: loop iteration %d: %w", i, err)
 		}
 
-		if steps.AgentFinished(state) {
+		if agenticstep.AgentFinished(state) {
 			s.logger.Info("agent loop finished early", map[string]interface{}{
 				"iteration": i,
 			})

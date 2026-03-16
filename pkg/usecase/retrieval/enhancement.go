@@ -25,3 +25,8 @@ type HyDEGenerator interface {
 type FilterExtractor interface {
 	ExtractFilters(ctx context.Context, query *entity.Query) (map[string]any, error)
 }
+
+// ResultEnhancer enhances retrieval results (e.g., reranking, pruning, expansion).
+type ResultEnhancer interface {
+	Enhance(ctx context.Context, results *entity.RetrievalResult) (*entity.RetrievalResult, error)
+}
