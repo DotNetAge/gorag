@@ -16,18 +16,6 @@ import (
 // ensure interface implementation
 var _ retrieval.Generator = (*generator)(nil)
 
-// generatorConfig holds configuration for generation.
-type generatorConfig struct {
-	PromptTemplate string
-}
-
-// DefaultGeneratorConfig returns a default configuration.
-func DefaultGeneratorConfig() generatorConfig {
-	return generatorConfig{
-		PromptTemplate: defaultGenerationPrompt,
-	}
-}
-
 const defaultGenerationPrompt = `You are a helpful and professional AI assistant.
 Please answer the user's question based on the provided reference documents.
 If the documents do not contain the answer, say "I don't know based on the provided context."
@@ -42,29 +30,57 @@ Answer:`
 
 // generator is the infrastructure implementation of retrieval.Generator.
 type generator struct {
-	llm       core.Client
-	config    generatorConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm            core.Client
+	promptTemplate string
+	logger         logging.Logger
+	collector      observability.Collector
 }
 
-// NewGenerator creates a new generator with logger and metrics.
-func NewGenerator(llm core.Client, config generatorConfig, logger logging.Logger, collector observability.Collector) *generator {
-	if config.PromptTemplate == "" {
-		config = DefaultGeneratorConfig()
+// GeneratorOption configures a generator instance.
+type GeneratorOption func(*generator)
+
+// WithPromptTemplate overrides the default generation prompt.
+func WithPromptTemplate(tmpl string) GeneratorOption {
+	return func(g *generator) {
+		if tmpl != "" {
+			g.promptTemplate = tmpl
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithGeneratorLogger sets a structured logger.
+func WithGeneratorLogger(logger logging.Logger) GeneratorOption {
+	return func(g *generator) {
+		if logger != nil {
+			g.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithGeneratorCollector sets an observability collector.
+func WithGeneratorCollector(collector observability.Collector) GeneratorOption {
+	return func(g *generator) {
+		if collector != nil {
+			g.collector = collector
+		}
 	}
-	return &generator{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// NewGenerator creates a new generator.
+//
+// Required: llm.
+// Optional (via options): WithPromptTemplate, WithGeneratorLogger, WithGeneratorCollector.
+func NewGenerator(llm core.Client, opts ...GeneratorOption) *generator {
+	g := &generator{
+		llm:            llm,
+		promptTemplate: defaultGenerationPrompt,
+		logger:         logging.NewNoopLogger(),
+		collector:      observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // Generate generates an answer based on query and retrieved context.
@@ -97,7 +113,7 @@ func (g *generator) Generate(ctx context.Context, query *entity.Query, chunks []
 	contextStr := contextBuilder.String()
 
 	// Build prompt
-	prompt := fmt.Sprintf(g.config.PromptTemplate, contextStr, query.Text)
+	prompt := fmt.Sprintf(g.promptTemplate, contextStr, query.Text)
 
 	// Call LLM
 	messages := []core.Message{

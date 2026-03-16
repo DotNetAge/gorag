@@ -73,9 +73,7 @@ Original query: "%s"`, query.Text)
 		rewrittenText = query.Text // fallback
 	}
 
-	newQuery := entity.NewQuery(uuid.New().String(), rewrittenText, query.Metadata)
-	newQuery.Metadata["original_query"] = query.Text
-	newQuery.Metadata["is_rewritten"] = true
+	newQuery := entity.NewQuery(uuid.New().String(), rewrittenText, nil)
 
 	return newQuery, nil
 }
@@ -179,8 +177,7 @@ Original question: "%s"`, query.Text)
 		return nil, err
 	}
 
-	newQuery := entity.NewQuery(uuid.New().String(), strings.TrimSpace(response.Content), query.Metadata)
-	newQuery.Metadata["step_back_for"] = query.Text
+	newQuery := entity.NewQuery(uuid.New().String(), strings.TrimSpace(response.Content), nil)
 
 	return newQuery, nil
 }

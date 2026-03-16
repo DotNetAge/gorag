@@ -206,10 +206,18 @@ func (s *Searcher) buildPipelines() (loopBody, finalPipe *pipeline.Pipeline[*ent
 	// Ensure defaults for vector path
 	if s.retriever == nil {
 		if s.embedder == nil {
-			s.embedder = core.DefaultEmbedder()
+			embedder, err := core.DefaultEmbedder()
+			if err != nil {
+				panic(err)
+			}
+			s.embedder = embedder
 		}
 		if s.vectorStore == nil {
-			s.vectorStore = core.DefaultVectorStore()
+			store, err := core.DefaultVectorStore()
+			if err != nil {
+				panic(err)
+			}
+			s.vectorStore = store
 		}
 	}
 

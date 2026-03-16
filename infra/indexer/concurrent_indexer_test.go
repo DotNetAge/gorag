@@ -218,21 +218,16 @@ func TestConcurrentIndexer_New(t *testing.T) {
 	mockExtractor := &MockGraphExtractor{}
 
 	// Test with custom options
-	opts := IndexerOptions{
-		ParseWorkers:  2,
-		EmbedWorkers:  2,
-		UpsertWorkers: 5,
-	}
-
 	// Create a ConcurrentIndexer
 	indexer := NewConcurrentIndexer(
 		mockParser,
 		mockChunker,
 		mockEmbedder,
 		mockVectorStore,
-		mockGraphStore,
-		mockExtractor,
-		opts,
+		WithGraphSupport(mockGraphStore, mockExtractor),
+		WithParseWorkers(2),
+		WithEmbedWorkers(2),
+		WithUpsertWorkers(5),
 	)
 
 	// Check that the indexer is created correctly
@@ -255,22 +250,13 @@ func TestConcurrentIndexer_New_DefaultOptions(t *testing.T) {
 	mockEmbedder := &MockEmbeddingProvider{}
 	mockVectorStore := &MockVectorStore{}
 
-	// Test with default options (negative values)
-	opts := IndexerOptions{
-		ParseWorkers:  -1,
-		EmbedWorkers:  -1,
-		UpsertWorkers: -1,
-	}
-
+	// Test with default options (all defaults)
 	// Create a ConcurrentIndexer
 	indexer := NewConcurrentIndexer(
 		mockParser,
 		mockChunker,
 		mockEmbedder,
 		mockVectorStore,
-		nil, // No graph store
-		nil, // No extractor
-		opts,
 	)
 
 	// Check that default values are used
@@ -354,9 +340,6 @@ func TestConcurrentIndexer_IndexFile(t *testing.T) {
 		mockChunker,
 		mockEmbedder,
 		mockVectorStore,
-		nil,
-		nil,
-		IndexerOptions{},
 	)
 
 	// Test IndexFile
@@ -440,13 +423,9 @@ func TestConcurrentIndexer_IndexDirectory(t *testing.T) {
 		mockChunker,
 		mockEmbedder,
 		mockVectorStore,
-		nil,
-		nil,
-		IndexerOptions{
-			ParseWorkers:  2,
-			EmbedWorkers:  2,
-			UpsertWorkers: 2,
-		},
+		WithParseWorkers(2),
+		WithEmbedWorkers(2),
+		WithUpsertWorkers(2),
 	)
 
 	// Test IndexDirectory with recursive=true

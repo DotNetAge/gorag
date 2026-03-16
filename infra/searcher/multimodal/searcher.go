@@ -192,7 +192,11 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		panic("multimodal.Searcher: generator is required")
 	}
 	if s.vectorStore == nil {
-		s.vectorStore = core.DefaultVectorStore()
+		store, err := core.DefaultVectorStore()
+		if err != nil {
+			panic(err)
+		}
+		s.vectorStore = store
 	}
 	if s.fusionEngine == nil {
 		s.fusionEngine = core.DefaultFusionEngine()
@@ -213,7 +217,7 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 
 	// Branch B: sparse/keyword search (optional)
 	if s.sparseStore != nil {
-		p.AddStep(steps.NewSparseSearchStep(s.sparseStore, s.sparseTopK))
+		p.AddStep(steps.NewSparseSearchStep(s.sparseStore, s.sparseTopK, s.logger))
 	}
 
 	// Branch C: image vector search (no-op when image_vector absent)

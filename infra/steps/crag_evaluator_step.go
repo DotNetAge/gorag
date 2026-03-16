@@ -79,57 +79,35 @@ func (s *cragEvaluator) Execute(ctx context.Context, state *entity.PipelineState
 	return nil
 }
 
-// CRAGEvaluation represents the result of CRAG evaluation
-type CRAGEvaluation struct {
-	// Relevance is the relevance score (0.0-1.0)
-	Relevance float32 `json:"relevance"`
-	// Label is the categorical evaluation
-	Label CRAGLabel `json:"label"`
-	// Reason explains why this evaluation was given
-	Reason string `json:"reason"`
-}
-
-// CRAGLabel represents the categorical evaluation of retrieved context
-type CRAGLabel string
-
-const (
-	// CRAGRelevant means the context is highly relevant and sufficient
-	CRAGRelevant CRAGLabel = "relevant"
-	// CRAGIrrelevant means the context is not relevant, need fallback
-	CRAGIrrelevant CRAGLabel = "irrelevant"
-	// CRAGAmbiguous means the context is partially relevant or ambiguous, need refinement
-	CRAGAmbiguous CRAGLabel = "ambiguous"
-)
-
-// GetCRAGEvaluation retrieves the CRAG evaluation from state
-func GetCRAGEvaluation(state *entity.PipelineState) CRAGEvaluation {
-	labelStr, labelOk := state.Query.Metadata["crag_label"].(string)
-	relevance, _ := state.Query.Metadata["crag_relevance"].(float32)
-	reason, _ := state.Query.Metadata["crag_reason"].(string)
-
-	if !labelOk {
-		return CRAGEvaluation{
-			Relevance: 0.0,
-			Label:     CRAGIrrelevant,
-			Reason:    "No evaluation performed",
+// GetCRAGEvaluation retrieves the CRAG evaluation label from state.
+// It reads from state.Agentic.CRAGEvaluation (strongly-typed field).
+func GetCRAGEvaluation(state *entity.PipelineState) retrieval.CRAGEvaluation {
+	if state.Agentic != nil && state.Agentic.CRAGEvaluation != "" {
+		return retrieval.CRAGEvaluation{
+			Label: retrieval.CRAGLabel(state.Agentic.CRAGEvaluation),
 		}
 	}
 
-	return CRAGEvaluation{
-		Relevance: relevance,
-		Label:     CRAGLabel(labelStr),
-		Reason:    reason,
+	// No evaluation performed
+	return retrieval.CRAGEvaluation{
+		Relevance: 0.0,
+		Label:     retrieval.CRAGIrrelevant,
+		Reason:    "No evaluation performed",
 	}
 }
 
-// NeedsRefinement checks if the context needs query refinement
+// NeedsRefinement checks if the context needs query refinement (CRAG ambiguous).
 func NeedsRefinement(state *entity.PipelineState) bool {
-	needsRefine, ok := state.Query.Metadata["needs_refinement"].(bool)
-	return ok && needsRefine
+	if state.Agentic != nil {
+		return state.Agentic.CRAGEvaluation == string(retrieval.CRAGAmbiguous)
+	}
+	return false
 }
 
-// NeedsFallback checks if the context needs fallback to external search
+// NeedsFallback checks if the context needs fallback to external search (CRAG irrelevant).
 func NeedsFallback(state *entity.PipelineState) bool {
-	needsFallback, ok := state.Query.Metadata["needs_fallback"].(bool)
-	return ok && needsFallback
+	if state.Agentic != nil {
+		return state.Agentic.CRAGEvaluation == string(retrieval.CRAGIrrelevant)
+	}
+	return false
 }

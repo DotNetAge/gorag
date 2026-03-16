@@ -8,6 +8,7 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/graph"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 // ensure interface implementation
@@ -19,6 +20,7 @@ type GraphLocalSearchStep struct {
 	searcher *graph.LocalSearcher
 	maxHops  int
 	topK     int
+	logger   logging.Logger
 }
 
 // NewGraphLocalSearchStep creates a new graph local search step.
@@ -41,6 +43,7 @@ func NewGraphLocalSearchStep(searcher *graph.LocalSearcher, maxHops, topK int) *
 		searcher: searcher,
 		maxHops:  maxHops,
 		topK:     topK,
+		logger:   logging.NewNoopLogger(),
 	}
 }
 
@@ -56,11 +59,11 @@ func (s *GraphLocalSearchStep) Execute(ctx context.Context, state *entity.Pipeli
 		return fmt.Errorf("GraphLocalSearchStep: 'query' not found in state")
 	}
 
-	// Get entity IDs from query metadata
+	// Get entity IDs from AgenticMetadata (strongly-typed, no blackboard pattern)
 	var entityIDs []string
 
-	if ids, ok := state.Query.Metadata["entity_ids"].([]string); ok && len(ids) > 0 {
-		entityIDs = ids
+	if state.Agentic != nil && len(state.Agentic.EntityIDs) > 0 {
+		entityIDs = state.Agentic.EntityIDs
 	} else if queryText := state.Query.Text; queryText != "" {
 		// If no entities, use query text as entity ID (simple case)
 		entityIDs = []string{queryText}
@@ -87,6 +90,9 @@ func (s *GraphLocalSearchStep) Execute(ctx context.Context, state *entity.Pipeli
 
 	state.RetrievedChunks = append(state.RetrievedChunks, []*entity.Chunk{chunk})
 
-	fmt.Printf("GraphLocalSearchStep: found relationships for %d entit(ies)\n", len(entityIDs))
+	s.logger.Info("GraphLocalSearchStep completed", map[string]interface{}{
+		"step":         "GraphLocalSearchStep",
+		"entity_count": len(entityIDs),
+	})
 	return nil
 }

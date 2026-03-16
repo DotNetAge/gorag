@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -16,43 +17,61 @@ import (
 // ensure interface implementation
 var _ retrieval.Retriever = (*retriever)(nil)
 
-// retrieverConfig holds configuration for retrieval.
-type retrieverConfig struct {
-	DefaultTopK int
-}
-
-// DefaultRetrieverConfig returns a default configuration.
-func DefaultRetrieverConfig() retrieverConfig {
-	return retrieverConfig{
-		DefaultTopK: 5,
-	}
-}
-
 // retriever is the infrastructure implementation of retrieval.Retriever.
 type retriever struct {
 	vectorStore abstraction.VectorStore
-	config      retrieverConfig
+	embedder    embedding.Provider
+	defaultTopK int
 	logger      logging.Logger
 	collector   observability.Collector
 }
 
-// NewRetriever creates a new retriever with logger and metrics.
-func NewRetriever(vectorStore abstraction.VectorStore, config retrieverConfig, logger logging.Logger, collector observability.Collector) *retriever {
-	if config.DefaultTopK <= 0 {
-		config.DefaultTopK = 5
+// Option configures a retriever instance.
+type RetrieverOption func(*retriever)
+
+// WithTopK sets the default top-K when the caller passes topK <= 0.
+func WithTopK(k int) RetrieverOption {
+	return func(r *retriever) {
+		if k > 0 {
+			r.defaultTopK = k
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithRetrieverLogger sets a structured logger.
+func WithRetrieverLogger(logger logging.Logger) RetrieverOption {
+	return func(r *retriever) {
+		if logger != nil {
+			r.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithRetrieverCollector sets an observability collector.
+func WithRetrieverCollector(collector observability.Collector) RetrieverOption {
+	return func(r *retriever) {
+		if collector != nil {
+			r.collector = collector
+		}
 	}
-	return &retriever{
+}
+
+// NewRetriever creates a new retriever.
+//
+// Required: vectorStore, embedder.
+// Optional (via options): WithTopK (default 5), WithRetrieverLogger, WithRetrieverCollector.
+func NewRetriever(vectorStore abstraction.VectorStore, embedder embedding.Provider, opts ...RetrieverOption) *retriever {
+	r := &retriever{
 		vectorStore: vectorStore,
-		config:      config,
-		logger:      logger,
-		collector:   collector,
+		embedder:    embedder,
+		defaultTopK: 5,
+		logger:      logging.NewNoopLogger(),
+		collector:   observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // retrievalResult holds internal retrieval result.
@@ -79,7 +98,7 @@ func (r *retriever) Retrieve(ctx context.Context, queries []string, topK int) ([
 	}
 
 	if topK <= 0 {
-		topK = r.config.DefaultTopK
+		topK = r.defaultTopK
 	}
 
 	r.logger.Debug("starting retrieval", map[string]interface{}{
@@ -164,11 +183,15 @@ func (r *retriever) Retrieve(ctx context.Context, queries []string, topK int) ([
 
 // retrieveSingle performs retrieval for a single query.
 func (r *retriever) retrieveSingle(ctx context.Context, query string, topK int) (*retrieval.RetrievalResult, error) {
-	// TODO: Generate embedding for query
-	// For now, use placeholder - this should be injected via dependency
-	embedding := []float32{0.1, 0.2, 0.3} // Placeholder until embedding service is integrated
+	embeddings, err := r.embedder.Embed(ctx, []string{query})
+	if err != nil {
+		return nil, fmt.Errorf("retriever: embed failed: %w", err)
+	}
+	if len(embeddings) == 0 {
+		return nil, fmt.Errorf("retriever: embed returned empty result")
+	}
 
-	vectors, scores, err := r.vectorStore.Search(ctx, embedding, topK, nil)
+	vectors, scores, err := r.vectorStore.Search(ctx, embeddings[0], topK, nil)
 	if err != nil {
 		return nil, fmt.Errorf("retriever: Search failed: %w", err)
 	}
@@ -180,7 +203,6 @@ func (r *retriever) retrieveSingle(ctx context.Context, query string, topK int) 
 		chunks[i] = &entity.Chunk{
 			ID:       vector.ID,
 			Metadata: vector.Metadata,
-			// Content will be loaded from document store by upstream components
 		}
 	}
 

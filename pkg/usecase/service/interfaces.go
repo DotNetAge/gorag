@@ -34,13 +34,15 @@ type CRAGEvaluator interface {
 }
 
 // Retriever defines the interface for document retrieval.
+// The signature aligns with retrieval.Retriever and infra/service.retriever.
 type Retriever interface {
-	Retrieve(ctx context.Context, queries []string, topK int) ([][]*entity.Chunk, error)
+	Retrieve(ctx context.Context, queries []string, topK int) ([]*retrieval.RetrievalResult, error)
 }
 
 // Generator defines the interface for answer generation.
+// The return type matches retrieval.Generator.Generate which returns *retrieval.GenerationResult.
 type Generator interface {
-	Generate(ctx context.Context, query *entity.Query, chunks []*entity.Chunk) (string, error)
+	Generate(ctx context.Context, query *entity.Query, chunks []*entity.Chunk) (*retrieval.GenerationResult, error)
 }
 
 // RAGEvaluator defines the interface for answer quality evaluation.

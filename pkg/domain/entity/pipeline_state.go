@@ -1,5 +1,9 @@
 package entity
 
+import (
+	"fmt"
+)
+
 // RAGEScores holds RAGAS evaluation scores.
 type RAGEScores struct {
 	Faithfulness     float32 `json:"faithfulness"`
@@ -59,6 +63,125 @@ type AgenticMetadata struct {
 func NewAgenticMetadata() *AgenticMetadata {
 	return &AgenticMetadata{
 		Custom: make(map[string]any),
+	}
+}
+
+// Validate checks if the metadata is valid.
+func (m *AgenticMetadata) Validate() error {
+	if m == nil {
+		return fmt.Errorf("AgenticMetadata is nil")
+	}
+	return nil
+}
+
+// MergeToQuery merges the metadata into a Query's Metadata map.
+// This is used for backward compatibility with existing code.
+func (m *AgenticMetadata) MergeToQuery(query *Query) {
+	if m == nil || query == nil {
+		return
+	}
+
+	if query.Metadata == nil {
+		query.Metadata = make(map[string]any)
+	}
+
+	if m.Intent != "" {
+		query.Metadata["intent"] = m.Intent
+	}
+	if len(m.SubQueries) > 0 {
+		query.Metadata["sub_queries"] = m.SubQueries
+	}
+	if len(m.EntityIDs) > 0 {
+		query.Metadata["entity_ids"] = m.EntityIDs
+	}
+	if m.HydeApplied {
+		query.Metadata["hyde_applied"] = true
+	}
+	if m.CacheHit != nil {
+		query.Metadata["cache_hit"] = *m.CacheHit
+	}
+	if m.ToolExecuted {
+		query.Metadata["tool_executed"] = true
+	}
+	if m.CRAGEvaluation != "" {
+		query.Metadata["crag_evaluation"] = m.CRAGEvaluation
+	}
+	if m.RAGScores != nil {
+		query.Metadata["rag_scores"] = m.RAGScores
+	}
+	if m.OriginalQueryText != "" {
+		query.Metadata["original_query"] = m.OriginalQueryText
+	}
+	if m.RewrittenQueryText != "" {
+		query.Metadata["rewritten_query"] = m.RewrittenQueryText
+	}
+	if m.HypotheticalDocument != "" {
+		query.Metadata["hypothetical_document"] = m.HypotheticalDocument
+	}
+	if m.Filters != nil {
+		query.Metadata["filters"] = m.Filters
+	}
+	if m.StepBackQuery != "" {
+		query.Metadata["step_back_query"] = m.StepBackQuery
+	}
+	for k, v := range m.Custom {
+		query.Metadata[k] = v
+	}
+}
+
+// LoadFromQuery loads metadata from a Query's Metadata map.
+// This is used for backward compatibility with existing code.
+func (m *AgenticMetadata) LoadFromQuery(query *Query) {
+	if m == nil || query == nil || query.Metadata == nil {
+		return
+	}
+
+	if v, ok := query.Metadata["intent"].(string); ok {
+		m.Intent = v
+	}
+	if v, ok := query.Metadata["sub_queries"].([]string); ok {
+		m.SubQueries = v
+	}
+	if v, ok := query.Metadata["entity_ids"].([]string); ok {
+		m.EntityIDs = v
+	}
+	if v, ok := query.Metadata["hyde_applied"].(bool); ok {
+		m.HydeApplied = v
+	}
+	if v, ok := query.Metadata["cache_hit"].(bool); ok {
+		m.CacheHit = &v
+	}
+	if v, ok := query.Metadata["tool_executed"].(bool); ok {
+		m.ToolExecuted = v
+	}
+	if v, ok := query.Metadata["crag_evaluation"].(string); ok {
+		m.CRAGEvaluation = v
+	}
+	if v, ok := query.Metadata["original_query"].(string); ok {
+		m.OriginalQueryText = v
+	}
+	if v, ok := query.Metadata["rewritten_query"].(string); ok {
+		m.RewrittenQueryText = v
+	}
+	if v, ok := query.Metadata["hypothetical_document"].(string); ok {
+		m.HypotheticalDocument = v
+	}
+	if v, ok := query.Metadata["step_back_query"].(string); ok {
+		m.StepBackQuery = v
+	}
+
+	knownFields := map[string]bool{
+		"intent": true, "sub_queries": true, "entity_ids": true,
+		"hyde_applied": true, "cache_hit": true, "tool_executed": true,
+		"crag_evaluation": true, "original_query": true, "rewritten_query": true,
+		"hypothetical_document": true, "step_back_query": true,
+	}
+
+	m.Custom = make(map[string]any)
+	for k, v := range query.Metadata {
+		if !knownFields[k] {
+			m.Custom[k] = v
+		}
 	}
 }
 

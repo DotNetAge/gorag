@@ -45,11 +45,11 @@ type BreakerOptions struct {
 // CircuitBreakerStepWrapper wraps a generation/retrieval step to provide
 // fast failure and elegant fallback when the primary service degrades.
 type CircuitBreakerStepWrapper struct {
-	BaseStep      pipeline.Step[*entity.PipelineState]
-	FallbackStep  pipeline.Step[*entity.PipelineState]
-	options       BreakerOptions
-	consecutiveErr int32
-	lastErrorTime time.Time
+	BaseStep       pipeline.Step[*entity.PipelineState]
+	FallbackStep   pipeline.Step[*entity.PipelineState]
+	options        BreakerOptions
+	consecutiveErr atomic.Int32
+	lastErrorTime  atomic.Int64 // Unix nanoseconds, protected by atomic operations
 }
 
 func WithCircuitBreakerAndFallback(base pipeline.Step[*entity.PipelineState], fallback pipeline.Step[*entity.PipelineState], opts BreakerOptions) *CircuitBreakerStepWrapper {
@@ -69,9 +69,10 @@ func (w *CircuitBreakerStepWrapper) Name() string {
 
 func (w *CircuitBreakerStepWrapper) Execute(ctx context.Context, state *entity.PipelineState) error {
 	// Check if the circuit is "Open" (failing)
-	if atomic.LoadInt32(&w.consecutiveErr) >= int32(w.options.ErrorThreshold) {
+	if w.consecutiveErr.Load() >= int32(w.options.ErrorThreshold) {
 		// Check if timeout has expired to "Half-Open" and retry
-		if time.Since(w.lastErrorTime) < w.options.Timeout {
+		lastErrNano := w.lastErrorTime.Load()
+		if lastErrNano > 0 && time.Since(time.Unix(0, lastErrNano)) < w.options.Timeout {
 			// Circuit is OPEN, fast fail to fallback
 			if w.FallbackStep != nil {
 				return w.FallbackStep.Execute(ctx, state)
@@ -82,11 +83,11 @@ func (w *CircuitBreakerStepWrapper) Execute(ctx context.Context, state *entity.P
 
 	// Attempt to execute the primary step
 	err := w.BaseStep.Execute(ctx, state)
-	
+
 	if err != nil {
-		w.lastErrorTime = time.Now()
-		atomic.AddInt32(&w.consecutiveErr, 1)
-		
+		w.lastErrorTime.Store(time.Now().UnixNano())
+		w.consecutiveErr.Add(1)
+
 		// If it just broke, or we have a fallback, try fallback immediately
 		if w.FallbackStep != nil {
 			return w.FallbackStep.Execute(ctx, state)
@@ -95,6 +96,6 @@ func (w *CircuitBreakerStepWrapper) Execute(ctx context.Context, state *entity.P
 	}
 
 	// Success, reset the breaker (circuit "Closed")
-	atomic.StoreInt32(&w.consecutiveErr, 0)
+	w.consecutiveErr.Store(0)
 	return nil
 }

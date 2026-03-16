@@ -60,14 +60,9 @@ type CRAGEvaluator interface {
 	Evaluate(ctx context.Context, query *entity.Query, chunks []*entity.Chunk) (*CRAGEvaluation, error)
 }
 
-// RAGEScores holds RAGAS-inspired evaluation metrics.
-type RAGEScores struct {
-	Faithfulness     float32
-	AnswerRelevance  float32
-	ContextPrecision float32
-	OverallScore     float32
-	Passed           bool
-}
+// RAGEScores is an alias for entity.RAGEScores.
+// All score fields are defined on entity.RAGEScores as the single source of truth.
+type RAGEScores = entity.RAGEScores
 
 // RAGEvaluator evaluates the quality of generated answers.
 type RAGEvaluator interface {

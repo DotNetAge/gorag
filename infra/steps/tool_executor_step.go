@@ -16,16 +16,19 @@ var _ pipeline.Step[*entity.PipelineState] = (*toolExecutor)(nil)
 // toolExecutor is a thin adapter that uses gochat's built-in tool calling capability.
 type toolExecutor struct {
 	llm    core.Client
+	tools  []core.Tool
 	logger logging.Logger
 }
 
-// NewToolExecutor creates a new tool executor step with logger.
-func NewToolExecutor(llm core.Client, logger logging.Logger) *toolExecutor {
+// NewToolExecutor creates a new tool executor step with injected tools and logger.
+// tools: the tool schemas that will be passed to the LLM. Pass nil or empty to skip tool-calling mode.
+func NewToolExecutor(llm core.Client, tools []core.Tool, logger logging.Logger) *toolExecutor {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
 	return &toolExecutor{
 		llm:    llm,
+		tools:  tools,
 		logger: logger,
 	}
 }
@@ -60,11 +63,10 @@ func (s *toolExecutor) Execute(ctx context.Context, state *entity.PipelineState)
 		"query": state.Query.Text,
 	})
 
-	// Use gochat's native tool calling with Options
-	tools := getToolSchemas()
+	// Use gochat's native tool calling with injected tools
 	var opts []core.Option
-	if len(tools) > 0 {
-		opts = append(opts, core.WithTools(tools...))
+	if len(s.tools) > 0 {
+		opts = append(opts, core.WithTools(s.tools...))
 	}
 
 	result, err := s.llm.Chat(ctx, []core.Message{
@@ -93,10 +95,4 @@ func (s *toolExecutor) Execute(ctx context.Context, state *entity.PipelineState)
 	}
 
 	return nil
-}
-
-// getToolSchemas returns tool schemas for LLM tool calling.
-// TODO: This should come from infra/service or configuration.
-func getToolSchemas() []core.Tool {
-	return []core.Tool{} // Placeholder - implement based on use case
 }

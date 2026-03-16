@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
-	"github.com/DotNetAge/gorag/infra/enhancer"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/usecase/retrieval"
 )
 
 // ensure interface implementation
@@ -15,18 +16,23 @@ var _ pipeline.Step[*entity.PipelineState] = (*StepBackStep)(nil)
 // StepBackStep is a pipeline step that abstracts the query to a higher-level
 // background question, enabling retrieval of broader context.
 type StepBackStep struct {
-	generator *enhancer.StepBackGenerator
+	generator retrieval.StepBackGenerator
+	logger    logging.Logger
 }
 
 // NewStepBackStep creates a new step-back prompting step.
 //
 // Parameters:
-// - generator: The step-back generator instance
-//
-// Returns:
-// - A new StepBackStep instance
-func NewStepBackStep(generator *enhancer.StepBackGenerator) *StepBackStep {
-	return &StepBackStep{generator: generator}
+// - generator: Any retrieval.StepBackGenerator implementation
+// - logger: optional structured logger; pass nil to use noop
+func NewStepBackStep(generator retrieval.StepBackGenerator, logger logging.Logger) *StepBackStep {
+	if logger == nil {
+		logger = logging.NewNoopLogger()
+	}
+	return &StepBackStep{
+		generator: generator,
+		logger:    logger,
+	}
 }
 
 // Name returns the step name
@@ -50,10 +56,16 @@ func (s *StepBackStep) Execute(ctx context.Context, state *entity.PipelineState)
 	// Store original query and replace with step-back query
 	state.OriginalQuery = state.Query
 	state.Query = stepBackQuery
-	
-	// Mark that step-back was applied
-	state.Query.Metadata["step_back_applied"] = true
 
-	fmt.Printf("StepBackStep: generated step-back query: %s\n", stepBackQuery.Text)
+	// Record that step-back was applied via AgenticMetadata (not blackboard)
+	if state.Agentic == nil {
+		state.Agentic = entity.NewAgenticMetadata()
+	}
+	state.Agentic.StepBackQuery = stepBackQuery.Text
+
+	s.logger.Info("StepBackStep completed", map[string]interface{}{
+		"step":            "StepBackStep",
+		"step_back_query": stepBackQuery.Text,
+	})
 	return nil
 }

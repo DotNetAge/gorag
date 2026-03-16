@@ -19,23 +19,52 @@ type SemanticCacheService struct {
 	collector observability.Collector
 }
 
-// NewSemanticCacheService creates a new semantic cache service with logger and metrics.
-func NewSemanticCacheService(cache abstraction.SemanticCache, threshold float32, logger logging.Logger, collector observability.Collector) *SemanticCacheService {
-	if threshold <= 0 {
-		threshold = 0.98 // Default high threshold for exact match caching
+// SemanticCacheOption configures a SemanticCacheService instance.
+type SemanticCacheOption func(*SemanticCacheService)
+
+// WithCacheThreshold sets the similarity threshold for cache hits.
+func WithCacheThreshold(threshold float32) SemanticCacheOption {
+	return func(s *SemanticCacheService) {
+		if threshold > 0 {
+			s.threshold = threshold
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithSemanticCacheLogger sets a structured logger.
+func WithSemanticCacheLogger(logger logging.Logger) SemanticCacheOption {
+	return func(s *SemanticCacheService) {
+		if logger != nil {
+			s.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithSemanticCacheCollector sets an observability collector.
+func WithSemanticCacheCollector(collector observability.Collector) SemanticCacheOption {
+	return func(s *SemanticCacheService) {
+		if collector != nil {
+			s.collector = collector
+		}
 	}
-	return &SemanticCacheService{
+}
+
+// NewSemanticCacheService creates a new semantic cache service.
+//
+// Required: cache.
+// Optional (via options): WithCacheThreshold (default 0.98), WithSemanticCacheLogger,
+// WithSemanticCacheCollector.
+func NewSemanticCacheService(cache abstraction.SemanticCache, opts ...SemanticCacheOption) *SemanticCacheService {
+	s := &SemanticCacheService{
 		cache:     cache,
-		threshold: threshold,
-		logger:    logger,
-		collector: collector,
+		threshold: 0.98,
+		logger:    logging.NewNoopLogger(),
+		collector: observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CacheCheckResult holds the result of a cache check.

@@ -186,10 +186,18 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		panic("hybrid.Searcher: generator is required")
 	}
 	if s.embedder == nil {
-		s.embedder = core.DefaultEmbedder()
+		embedder, err := core.DefaultEmbedder()
+		if err != nil {
+			panic(err)
+		}
+		s.embedder = embedder
 	}
 	if s.vectorStore == nil {
-		s.vectorStore = core.DefaultVectorStore()
+		store, err := core.DefaultVectorStore()
+		if err != nil {
+			panic(err)
+		}
+		s.vectorStore = store
 	}
 	if s.fusionEngine == nil {
 		s.fusionEngine = core.DefaultFusionEngine()
@@ -198,18 +206,18 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 	p := pipeline.New[*entity.PipelineState]()
 
 	if s.filterExtractor != nil {
-		p.AddStep(steps.NewQueryToFilterStep(s.filterExtractor))
+		p.AddStep(steps.NewQueryToFilterStep(s.filterExtractor, s.logger))
 	}
 	if s.stepBackGen != nil {
-		p.AddStep(steps.NewStepBackStep(s.stepBackGen))
+		p.AddStep(steps.NewStepBackStep(s.stepBackGen, s.logger))
 	}
 	if s.hydeGenerator != nil {
-		p.AddStep(steps.NewHyDEStep(s.hydeGenerator))
+		p.AddStep(steps.NewHyDEStep(s.hydeGenerator, s.logger))
 	}
 
 	p.AddStep(steps.NewVectorSearchStep(s.embedder, s.vectorStore, s.denseTopK))
 	if s.sparseStore != nil {
-		p.AddStep(steps.NewSparseSearchStep(s.sparseStore, s.sparseTopK))
+		p.AddStep(steps.NewSparseSearchStep(s.sparseStore, s.sparseTopK, s.logger))
 	}
 
 	p.AddStep(chunksToParallelResultsStep{})

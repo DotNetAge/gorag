@@ -19,56 +19,90 @@ var _ dataprep.Indexer = (*ConcurrentIndexer)(nil)
 // ConcurrentIndexer implements the Next-Gen Indexing Pipeline using Goroutines and Channels.
 // It relies strictly on the interfaces defined in pkg/usecase/dataprep and pkg/domain/abstraction.
 type ConcurrentIndexer struct {
-	parser        dataprep.Parser
-	chunker       dataprep.SemanticChunker // we use the advanced chunker for parent-child features
-	embedder      embedding.Provider       // directly depends on gochat
-	vectorStore   abstraction.VectorStore
-	graphStore    abstraction.GraphStore   // Optional: can be nil if GraphRAG is disabled
-	extractor     dataprep.GraphExtractor  // Optional: can be nil if GraphRAG is disabled
+	parser      dataprep.Parser
+	chunker     dataprep.SemanticChunker // we use the advanced chunker for parent-child features
+	embedder    embedding.Provider       // directly depends on gochat
+	vectorStore abstraction.VectorStore
+	graphStore  abstraction.GraphStore  // Optional: can be nil if GraphRAG is disabled
+	extractor   dataprep.GraphExtractor // Optional: can be nil if GraphRAG is disabled
+	metrics     abstraction.Metrics     // Optional: metrics collector
 
 	parseWorkers  int
 	embedWorkers  int
 	upsertWorkers int
 }
 
-// IndexerOptions configures the concurrent pipeline.
-type IndexerOptions struct {
-	ParseWorkers  int
-	EmbedWorkers  int
-	UpsertWorkers int
+// ConcurrentIndexerOption configures a ConcurrentIndexer instance.
+type ConcurrentIndexerOption func(*ConcurrentIndexer)
+
+// WithGraphSupport enables optional GraphRAG by setting a graph store and extractor.
+func WithGraphSupport(graphStore abstraction.GraphStore, extractor dataprep.GraphExtractor) ConcurrentIndexerOption {
+	return func(idx *ConcurrentIndexer) {
+		idx.graphStore = graphStore
+		idx.extractor = extractor
+	}
+}
+
+// WithParseWorkers overrides the number of file-parsing goroutines.
+func WithParseWorkers(n int) ConcurrentIndexerOption {
+	return func(idx *ConcurrentIndexer) {
+		if n > 0 {
+			idx.parseWorkers = n
+		}
+	}
+}
+
+// WithEmbedWorkers overrides the number of embedding goroutines.
+func WithEmbedWorkers(n int) ConcurrentIndexerOption {
+	return func(idx *ConcurrentIndexer) {
+		if n > 0 {
+			idx.embedWorkers = n
+		}
+	}
+}
+
+// WithUpsertWorkers overrides the number of vector-store upsert goroutines.
+func WithUpsertWorkers(n int) ConcurrentIndexerOption {
+	return func(idx *ConcurrentIndexer) {
+		if n > 0 {
+			idx.upsertWorkers = n
+		}
+	}
+}
+
+// WithIndexerMetrics sets the metrics collector for the indexer.
+func WithIndexerMetrics(metrics abstraction.Metrics) ConcurrentIndexerOption {
+	return func(idx *ConcurrentIndexer) {
+		if metrics != nil {
+			idx.metrics = metrics
+		}
+	}
 }
 
 // NewConcurrentIndexer creates a highly concurrent, channel-based indexing pipeline.
+//
+// Required: parser, chunker, embedder, vectorStore.
+// Optional (via options): WithGraphSupport, WithParseWorkers, WithEmbedWorkers, WithUpsertWorkers.
 func NewConcurrentIndexer(
 	parser dataprep.Parser,
 	chunker dataprep.SemanticChunker,
 	embedder embedding.Provider,
 	vectorStore abstraction.VectorStore,
-	graphStore abstraction.GraphStore,
-	extractor dataprep.GraphExtractor,
-	opts IndexerOptions,
+	opts ...ConcurrentIndexerOption,
 ) *ConcurrentIndexer {
-	if opts.ParseWorkers <= 0 {
-		opts.ParseWorkers = 5
-	}
-	if opts.EmbedWorkers <= 0 {
-		opts.EmbedWorkers = 4
-	}
-	if opts.UpsertWorkers <= 0 {
-		opts.UpsertWorkers = 10 // DB writes need higher concurrency due to IO wait
-	}
-
-	return &ConcurrentIndexer{
+	idx := &ConcurrentIndexer{
 		parser:        parser,
 		chunker:       chunker,
 		embedder:      embedder,
 		vectorStore:   vectorStore,
-		graphStore:    graphStore,
-		extractor:     extractor,
-		parseWorkers:  opts.ParseWorkers,
-		embedWorkers:  opts.EmbedWorkers,
-		upsertWorkers: opts.UpsertWorkers,
+		parseWorkers:  5,
+		embedWorkers:  4,
+		upsertWorkers: 10,
 	}
+	for _, opt := range opts {
+		opt(idx)
+	}
+	return idx
 }
 
 // IndexFile processes a single file into the stores.
@@ -119,18 +153,20 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 
 	// Stage 1: Parsing
 	docChan := make(chan *entity.Document, 50)
+	totalFiles := 0
 	for i := 0; i < idx.parseWorkers; i++ {
 		parseGroup.Go(func() error {
 			for path := range fileChan {
+				totalFiles++
 				f, err := os.Open(path)
 				if err != nil {
 					// Log error and continue or return error to fail the whole pipeline.
 					// For robustness, usually we log and continue. We'll return for strictness here.
 					return fmt.Errorf("failed to open file %s: %w", path, err)
 				}
-				
+
 				meta := map[string]any{"source": path, "filename": filepath.Base(path)}
-				
+
 				// Using the Next-Gen ParseStream interface for O(1) memory
 				docStream, err := idx.parser.ParseStream(parseCtx, f, meta)
 				if err != nil {
@@ -161,7 +197,8 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 	// Stage 2 & 3: Chunking & Embedding (Merged for simplicity, can be separated)
 	// We use gochat's embedding BatchProcessor conceptually here.
 	chunkChan := make(chan *entity.Vector, 200)
-	
+	totalChunks := 0
+
 	for i := 0; i < idx.embedWorkers; i++ {
 		processGroup.Go(func() error {
 			for doc := range docChan {
@@ -177,40 +214,41 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 					for _, p := range parents {
 						nodes, edges, extErr := idx.extractor.Extract(processCtx, p)
 						if extErr == nil {
-						// Convert []abstraction.Node to []*abstraction.Node
-						nodePtrs := make([]*abstraction.Node, len(nodes))
-						for i, node := range nodes {
-							nodePtrs[i] = &node
+							// Convert []abstraction.Node to []*abstraction.Node
+							nodePtrs := make([]*abstraction.Node, len(nodes))
+							for i, node := range nodes {
+								nodePtrs[i] = &node
+							}
+							_ = idx.graphStore.UpsertNodes(processCtx, nodePtrs)
+
+							// Convert []abstraction.Edge to []*abstraction.Edge
+							edgePtrs := make([]*abstraction.Edge, len(edges))
+							for i, edge := range edges {
+								edgePtrs[i] = &edge
+							}
+							_ = idx.graphStore.UpsertEdges(processCtx, edgePtrs)
 						}
-						_ = idx.graphStore.UpsertNodes(processCtx, nodePtrs)
-						
-						// Convert []abstraction.Edge to []*abstraction.Edge
-						edgePtrs := make([]*abstraction.Edge, len(edges))
-						for i, edge := range edges {
-							edgePtrs[i] = &edge
-						}
-						_ = idx.graphStore.UpsertEdges(processCtx, edgePtrs)
-					}
 					}
 				}
 
 				// Process children for vector embeddings
-				// Depending on gochat's embedding signature, this is a placeholder 
+				// Depending on gochat's embedding signature, this is a placeholder
 				// for batch processing.
 				// Use batch embedding for better performance
 				texts := make([]string, len(children))
 				for i, child := range children {
 					texts[i] = child.Content
 				}
-				
+
 				embeddings, err := idx.embedder.Embed(processCtx, texts)
 				if err != nil {
 					continue // skip failed embeddings
 				}
-				
+
 				for i, child := range children {
 					if i < len(embeddings) {
 						vec := entity.NewVector(child.ID, embeddings[i], child.ID, child.Metadata)
+						totalChunks++
 						select {
 						case <-processCtx.Done():
 							return processCtx.Err()
@@ -231,7 +269,7 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 
 	// Stage 4: Storing to VectorStore
 	storeGroup, storeCtx := errgroup.WithContext(ctx)
-	
+
 	// Start Upsert Workers
 	for i := 0; i < idx.upsertWorkers; i++ {
 		storeGroup.Go(func() error {
@@ -241,7 +279,7 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 				err := idx.vectorStore.Add(storeCtx, vec)
 				if err != nil {
 					// Dead Letter Queue could be implemented here
-					_ = err 
+					_ = err
 				}
 			}
 			return nil
@@ -255,5 +293,16 @@ func (idx *ConcurrentIndexer) runPipeline(ctx context.Context, fileChan <-chan s
 	if err := processGroup.Wait(); err != nil {
 		return err
 	}
-	return storeGroup.Wait()
+	if err := storeGroup.Wait(); err != nil {
+		return err
+	}
+
+	// Record metrics after successful completion
+	if idx.metrics != nil {
+		idx.metrics.RecordParsingErrors("", nil) // Reset parsing errors
+		idx.metrics.RecordEmbeddingCount(totalChunks)
+		idx.metrics.RecordVectorStoreOperations("concurrent_index", totalChunks)
+	}
+
+	return nil
 }

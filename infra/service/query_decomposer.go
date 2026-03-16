@@ -17,20 +17,6 @@ import (
 // ensure interface implementation
 var _ retrieval.QueryDecomposer = (*queryDecomposer)(nil)
 
-// queryDecomposerConfig holds configuration for query decomposition.
-type queryDecomposerConfig struct {
-	PromptTemplate string
-	MaxSubQueries  int
-}
-
-// DefaultQueryDecomposerConfig returns a default configuration.
-func DefaultQueryDecomposerConfig() queryDecomposerConfig {
-	return queryDecomposerConfig{
-		PromptTemplate: defaultDecompositionPrompt,
-		MaxSubQueries:  5,
-	}
-}
-
 const defaultDecompositionPrompt = `You are an expert at breaking down complex questions into simpler sub-questions.
 Your task is to analyze the user's query and decompose it into 2-5 simpler, independent sub-questions.
 
@@ -52,29 +38,69 @@ Output your response as a valid JSON object with this exact structure:
 
 // queryDecomposer is the infrastructure implementation of retrieval.QueryDecomposer.
 type queryDecomposer struct {
-	llm       core.Client
-	config    queryDecomposerConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm            core.Client
+	promptTemplate string
+	maxSubQueries  int
+	logger         logging.Logger
+	collector      observability.Collector
 }
 
-// NewQueryDecomposer creates a new query decomposer with logger and metrics.
-func NewQueryDecomposer(llm core.Client, config queryDecomposerConfig, logger logging.Logger, collector observability.Collector) *queryDecomposer {
-	if config.PromptTemplate == "" {
-		config = DefaultQueryDecomposerConfig()
+// QueryDecomposerOption configures a queryDecomposer instance.
+type QueryDecomposerOption func(*queryDecomposer)
+
+// WithDecompositionPromptTemplate overrides the default decomposition prompt.
+func WithDecompositionPromptTemplate(tmpl string) QueryDecomposerOption {
+	return func(d *queryDecomposer) {
+		if tmpl != "" {
+			d.promptTemplate = tmpl
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithMaxSubQueries sets the maximum number of sub-queries to generate.
+func WithMaxSubQueries(max int) QueryDecomposerOption {
+	return func(d *queryDecomposer) {
+		if max > 0 {
+			d.maxSubQueries = max
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithQueryDecomposerLogger sets a structured logger.
+func WithQueryDecomposerLogger(logger logging.Logger) QueryDecomposerOption {
+	return func(d *queryDecomposer) {
+		if logger != nil {
+			d.logger = logger
+		}
 	}
-	return &queryDecomposer{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// WithQueryDecomposerCollector sets an observability collector.
+func WithQueryDecomposerCollector(collector observability.Collector) QueryDecomposerOption {
+	return func(d *queryDecomposer) {
+		if collector != nil {
+			d.collector = collector
+		}
 	}
+}
+
+// NewQueryDecomposer creates a new query decomposer.
+//
+// Required: llm.
+// Optional (via options): WithDecompositionPromptTemplate, WithMaxSubQueries,
+// WithQueryDecomposerLogger, WithQueryDecomposerCollector.
+func NewQueryDecomposer(llm core.Client, opts ...QueryDecomposerOption) *queryDecomposer {
+	d := &queryDecomposer{
+		llm:            llm,
+		promptTemplate: defaultDecompositionPrompt,
+		maxSubQueries:  5,
+		logger:         logging.NewNoopLogger(),
+		collector:      observability.NewNoopCollector(),
+	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // Decompose breaks down a complex query into simpler sub-queries.
@@ -97,7 +123,7 @@ func (d *queryDecomposer) Decompose(ctx context.Context, query *entity.Query) (*
 	})
 
 	// Build prompt
-	prompt := fmt.Sprintf(d.config.PromptTemplate, query.Text)
+	prompt := fmt.Sprintf(d.promptTemplate, query.Text)
 
 	// Call LLM
 	messages := []core.Message{
@@ -140,12 +166,12 @@ func (d *queryDecomposer) Decompose(ctx context.Context, query *entity.Query) (*
 	}
 
 	// Limit number of sub-queries
-	if len(result.SubQueries) > d.config.MaxSubQueries {
+	if len(result.SubQueries) > d.maxSubQueries {
 		d.logger.Debug("limiting sub-queries", map[string]interface{}{
 			"original_count": len(result.SubQueries),
-			"max_allowed":    d.config.MaxSubQueries,
+			"max_allowed":    d.maxSubQueries,
 		})
-		result.SubQueries = result.SubQueries[:d.config.MaxSubQueries]
+		result.SubQueries = result.SubQueries[:d.maxSubQueries]
 	}
 
 	// If no sub-queries generated, use original query

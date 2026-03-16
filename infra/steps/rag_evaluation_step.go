@@ -79,14 +79,7 @@ func (s *ragEvaluator) Execute(ctx context.Context, state *entity.PipelineState)
 	if state.Agentic == nil {
 		state.Agentic = entity.NewAgenticMetadata()
 	}
-	// Convert retrieval.RAGEScores to entity.RAGEScores
-	state.Agentic.RAGScores = &entity.RAGEScores{
-		Faithfulness:     result.Faithfulness,
-		AnswerRelevance:  result.AnswerRelevance,
-		ContextPrecision: result.ContextPrecision,
-		OverallScore:     result.OverallScore,
-		Passed:           result.Passed,
-	}
+	state.Agentic.RAGScores = result
 
 	s.logger.Info("RAG evaluation completed", map[string]interface{}{
 		"step":    "RAGEvaluator",

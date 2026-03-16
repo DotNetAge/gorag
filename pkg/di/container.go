@@ -323,3 +323,11 @@ func Clear() *Container {
 func RegisterDefaultServices(services ...func(*Container) *Container) *Container {
 	return Default().RegisterServices(services...)
 }
+
+// ResetForTesting resets the global default container and its initialization state.
+// This must only be called from test code to ensure clean state between tests.
+// Production code must never call this function.
+func ResetForTesting() {
+	once = sync.Once{}
+	defaultContainer = nil
+}

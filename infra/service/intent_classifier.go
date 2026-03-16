@@ -17,22 +17,6 @@ import (
 // ensure interface implementation
 var _ retrieval.IntentClassifier = (*intentRouter)(nil)
 
-// intentRouterConfig holds configuration for intent classification.
-type intentRouterConfig struct {
-	PromptTemplate string
-	DefaultIntent  retrieval.IntentType
-	MinConfidence  float32
-}
-
-// DefaultIntentRouterConfig returns a default configuration.
-func DefaultIntentRouterConfig() intentRouterConfig {
-	return intentRouterConfig{
-		PromptTemplate: defaultIntentPrompt,
-		DefaultIntent:  retrieval.IntentDomainSpecific,
-		MinConfidence:  0.7,
-	}
-}
-
 const defaultIntentPrompt = `You are an expert intent classifier for a RAG system.
 Your task is to classify the user's query into one of the following intents:
 
@@ -63,29 +47,78 @@ Output your response as a valid JSON object with this exact structure:
 // intentRouter is the infrastructure implementation of retrieval.IntentClassifier.
 // This contains the thick business logic for intent classification.
 type intentRouter struct {
-	llm       core.Client
-	config    intentRouterConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm            core.Client
+	promptTemplate string
+	defaultIntent  retrieval.IntentType
+	minConfidence  float32
+	logger         logging.Logger
+	collector      observability.Collector
 }
 
-// NewIntentRouter creates a new intent router with logger and metrics.
-func NewIntentRouter(llm core.Client, config intentRouterConfig, logger logging.Logger, collector observability.Collector) *intentRouter {
-	if config.PromptTemplate == "" {
-		config = DefaultIntentRouterConfig()
+// IntentRouterOption configures an intentRouter instance.
+type IntentRouterOption func(*intentRouter)
+
+// WithIntentPromptTemplate overrides the default intent classification prompt.
+func WithIntentPromptTemplate(tmpl string) IntentRouterOption {
+	return func(r *intentRouter) {
+		if tmpl != "" {
+			r.promptTemplate = tmpl
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithDefaultIntent sets the fallback intent when LLM confidence is low.
+func WithDefaultIntent(intent retrieval.IntentType) IntentRouterOption {
+	return func(r *intentRouter) {
+		r.defaultIntent = intent
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithMinConfidence sets the minimum confidence threshold.
+func WithMinConfidence(v float32) IntentRouterOption {
+	return func(r *intentRouter) {
+		if v > 0 {
+			r.minConfidence = v
+		}
 	}
-	return &intentRouter{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// WithIntentRouterLogger sets a structured logger.
+func WithIntentRouterLogger(logger logging.Logger) IntentRouterOption {
+	return func(r *intentRouter) {
+		if logger != nil {
+			r.logger = logger
+		}
 	}
+}
+
+// WithIntentRouterCollector sets an observability collector.
+func WithIntentRouterCollector(collector observability.Collector) IntentRouterOption {
+	return func(r *intentRouter) {
+		if collector != nil {
+			r.collector = collector
+		}
+	}
+}
+
+// NewIntentRouter creates a new intent router.
+//
+// Required: llm.
+// Optional (via options): WithIntentPromptTemplate, WithDefaultIntent, WithMinConfidence,
+// WithIntentRouterLogger, WithIntentRouterCollector.
+func NewIntentRouter(llm core.Client, opts ...IntentRouterOption) *intentRouter {
+	r := &intentRouter{
+		llm:            llm,
+		promptTemplate: defaultIntentPrompt,
+		defaultIntent:  retrieval.IntentDomainSpecific,
+		minConfidence:  0.7,
+		logger:         logging.NewNoopLogger(),
+		collector:      observability.NewNoopCollector(),
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Classify performs intent classification on the query.
@@ -109,7 +142,7 @@ func (i *intentRouter) Classify(ctx context.Context, query *entity.Query) (*retr
 	})
 
 	// Build prompt
-	prompt := fmt.Sprintf(i.config.PromptTemplate, query.Text)
+	prompt := fmt.Sprintf(i.promptTemplate, query.Text)
 
 	// Call LLM
 	messages := []core.Message{
@@ -142,25 +175,25 @@ func (i *intentRouter) Classify(ctx context.Context, query *entity.Query) (*retr
 		// Fallback to default intent
 		i.logger.Warn("failed to parse intent, using default", map[string]interface{}{
 			"error":          err,
-			"default_intent": i.config.DefaultIntent,
+			"default_intent": i.defaultIntent,
 		})
 		result = retrieval.IntentResult{
-			Intent:     i.config.DefaultIntent,
+			Intent:     i.defaultIntent,
 			Confidence: 0.5,
 			Reason:     "Failed to parse LLM response, using default intent",
 		}
 	}
 
 	// Validate confidence threshold
-	if result.Confidence < i.config.MinConfidence {
+	if result.Confidence < i.minConfidence {
 		i.logger.Debug("low confidence, using default intent", map[string]interface{}{
 			"confidence":     result.Confidence,
-			"threshold":      i.config.MinConfidence,
-			"default_intent": i.config.DefaultIntent,
+			"threshold":      i.minConfidence,
+			"default_intent": i.defaultIntent,
 		})
-		result.Intent = i.config.DefaultIntent
+		result.Intent = i.defaultIntent
 		result.Reason += fmt.Sprintf(" [Low confidence %.2f < %.2f, using default]",
-			result.Confidence, i.config.MinConfidence)
+			result.Confidence, i.minConfidence)
 	}
 
 	i.logger.Info("intent classified successfully", map[string]interface{}{

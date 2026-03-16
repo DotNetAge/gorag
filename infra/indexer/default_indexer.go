@@ -94,14 +94,6 @@ func WithEmbedding(provider embedding.Provider) IndexerOption {
 	}
 }
 
-// WithLLM 设置 LLM 客户端（用于智能分块和图提取）
-func WithLLM(client interface{}) IndexerOption {
-	// 保留接口，未来实现 LLM 客户端适配
-	return func(idx *defaultIndexer) {
-		// 预留位置，等待 LLM 接口定义完成后实现
-	}
-}
-
 // WithMetrics 设置指标收集器
 func WithMetrics(metrics abstraction.Metrics) IndexerOption {
 	return func(idx *defaultIndexer) {
@@ -302,22 +294,20 @@ func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) error
 		"path": filePath,
 	})
 
-	// 执行管线
+	// 创建共享 state 并直接执行管线，确保 state.TotalChunks 等字段被正确填充
 	state := indexing.DefaultState(ctx, filePath)
-	if err := idx.ExecutePipeline(ctx, filePath); err != nil {
-		// ✅ 记录错误指标
+	p := idx.assemblyPipeline()
+	if err := p.Execute(ctx, state); err != nil {
 		if idx.metrics != nil {
 			idx.metrics.RecordParsingErrors(filePath, err)
 		}
 		return fmt.Errorf("pipeline execution failed: %w", err)
 	}
 
-	// ✅ 记录成功指标
+	// 记录成功指标
 	duration := time.Since(startTime)
 	if idx.metrics != nil {
 		idx.metrics.RecordIndexingDuration(filePath, duration)
-
-		// 记录 chunk 数量（用于统计 embedding 数量）
 		if state.TotalChunks > 0 {
 			idx.metrics.RecordEmbeddingCount(state.TotalChunks)
 		}
@@ -350,13 +340,6 @@ func (idx *defaultIndexer) assemblyPipeline() *pipeline.Pipeline[*indexing.State
 	return p
 }
 
-// ExecutePipeline 执行管线
-func (idx *defaultIndexer) ExecutePipeline(ctx context.Context, filePath string) error {
-	p := idx.assemblyPipeline()
-	state := indexing.DefaultState(ctx, filePath)
-	return p.Execute(ctx, state)
-}
-
 // indexDirectory 索引目录的内部实现（并行处理文件）
 func (idx *defaultIndexer) indexDirectory(ctx context.Context, dir string, recursive, force bool) error {
 	idx.logger.Info("Indexing directory", map[string]interface{}{
@@ -379,7 +362,10 @@ func (idx *defaultIndexer) indexDirectory(ctx context.Context, dir string, recur
 
 		// 检查是否需要索引（增量模式）
 		modTime := info.ModTime()
-		if lastIndexed, exists := idx.indexedFiles[path]; exists && !force {
+		idx.mu.RLock()
+		lastIndexed, exists := idx.indexedFiles[path]
+		idx.mu.RUnlock()
+		if exists && !force {
 			if modTime.Before(lastIndexed) || modTime.Equal(lastIndexed) {
 				idx.logger.Debug("Skipping already indexed file", map[string]interface{}{
 					"path": path,
@@ -423,7 +409,9 @@ func (idx *defaultIndexer) indexDirectory(ctx context.Context, dir string, recur
 				return
 			}
 
+			idx.mu.Lock()
 			idx.indexedFiles[fp] = time.Now()
+			idx.mu.Unlock()
 			idx.logger.Debug("File indexed successfully", map[string]interface{}{
 				"path": fp,
 			})

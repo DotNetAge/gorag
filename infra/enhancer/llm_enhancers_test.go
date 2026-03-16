@@ -61,10 +61,6 @@ func TestQueryRewriter_Rewrite(t *testing.T) {
 	// Check that query was rewritten
 	assert.NotEqual(t, query.Text, rewrittenQuery.Text)
 	assert.Equal(t, "Rewritten test query", rewrittenQuery.Text)
-
-	// Check that metadata was updated
-	assert.Equal(t, "test query", rewrittenQuery.Metadata["original_query"])
-	assert.True(t, rewrittenQuery.Metadata["is_rewritten"].(bool))
 }
 
 func TestQueryRewriter_Rewrite_EmptyResponse(t *testing.T) {
@@ -154,5 +150,4 @@ func TestStepBackGenerator_GenerateStepBackQuery(t *testing.T) {
 	// Check that step-back query was generated
 	assert.NotEqual(t, query.Text, stepBackQuery.Text)
 	assert.Equal(t, "What are the underlying principles of the test query?", stepBackQuery.Text)
-	assert.Equal(t, "test query", stepBackQuery.Metadata["step_back_for"])
 }

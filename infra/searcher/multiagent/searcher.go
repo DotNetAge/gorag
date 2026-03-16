@@ -219,33 +219,70 @@ type agentTask struct {
 	query string
 }
 
-// runParallel executes all agents concurrently, collects their results, and
-// returns only the successful ones. Individual agent failures are logged and
-// skipped; the call fails only if every agent fails.
+// runParallel executes agents in two phases:
+//   - Phase 1: all non-Critic agents run concurrently.
+//   - Phase 2: Critic agents run with Phase 1 results as priorResults,
+//     enabling them to evaluate actual researcher/writer output.
+//
+// Individual agent failures are logged and skipped; the call fails only if
+// every agent in Phase 1 fails (no results for Critic to evaluate).
 func (s *Searcher) runParallel(ctx context.Context, tasks []agentTask) ([]*AgentResult, error) {
 	type outcome struct {
 		result *AgentResult
 		err    error
 	}
 
-	outcomes := make([]outcome, len(tasks))
-	var wg sync.WaitGroup
+	// Split tasks into non-Critic and Critic groups.
+	var phase1Tasks, criticTasks []agentTask
+	for _, t := range tasks {
+		if t.agent.Role() == RoleCritic {
+			criticTasks = append(criticTasks, t)
+		} else {
+			phase1Tasks = append(phase1Tasks, t)
+		}
+	}
 
-	for i, t := range tasks {
+	// Phase 1: run non-Critic agents concurrently.
+	phase1Outcomes := make([]outcome, len(phase1Tasks))
+	var wg sync.WaitGroup
+	for i, t := range phase1Tasks {
 		wg.Add(1)
 		go func(idx int, task agentTask) {
 			defer wg.Done()
 			res, err := task.agent.Run(ctx, task.query, nil)
-			outcomes[idx] = outcome{result: res, err: err}
+			phase1Outcomes[idx] = outcome{result: res, err: err}
 		}(i, t)
 	}
+	wg.Wait()
 
+	var phase1Results []*AgentResult
+	for _, o := range phase1Outcomes {
+		if o.err != nil {
+			s.logger.Error("agent execution failed", o.err, map[string]interface{}{})
+			continue
+		}
+		if o.result != nil {
+			phase1Results = append(phase1Results, o.result)
+		}
+	}
+
+	// Phase 2: run Critic agents with phase1 results as priorResults.
+	criticOutcomes := make([]outcome, len(criticTasks))
+	for i, t := range criticTasks {
+		wg.Add(1)
+		go func(idx int, task agentTask) {
+			defer wg.Done()
+			res, err := task.agent.Run(ctx, task.query, phase1Results)
+			criticOutcomes[idx] = outcome{result: res, err: err}
+		}(i, t)
+	}
 	wg.Wait()
 
 	var results []*AgentResult
-	for _, o := range outcomes {
+	results = append(results, phase1Results...)
+	for _, o := range criticOutcomes {
 		if o.err != nil {
-			s.logger.Error("agent execution failed", o.err, map[string]interface{}{})
+			s.logger.Error("critic agent execution failed", o.err, map[string]interface{}{})
 			continue
 		}
 		if o.result != nil {

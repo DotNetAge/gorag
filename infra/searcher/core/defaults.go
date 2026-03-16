@@ -4,6 +4,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gorag/infra/fusion"
 	"github.com/DotNetAge/gorag/infra/vectorstore"
@@ -21,22 +23,22 @@ func DefaultMetrics() abstraction.Metrics {
 // DefaultEmbedder returns the built-in local BGE embedding model.
 // It requires no API key and runs entirely on-device, making it suitable
 // as a zero-config fallback for development and prototyping.
-func DefaultEmbedder() embedding.Provider {
+func DefaultEmbedder() (embedding.Provider, error) {
 	provider, err := embedding.WithBEG("bge-small-zh-v1.5", "")
 	if err != nil {
-		panic("searcher/core: failed to initialize default BEG embedder: " + err.Error())
+		return nil, fmt.Errorf("searcher/core: failed to initialize default BEG embedder: %w", err)
 	}
-	return provider
+	return provider, nil
 }
 
 // DefaultVectorStore returns a local govector store persisted at
 // "./data/searcher/govector". No external services are required.
-func DefaultVectorStore() abstraction.VectorStore {
+func DefaultVectorStore() (abstraction.VectorStore, error) {
 	store, err := vectorstore.DefaultVectorStore("./data/searcher/govector")
 	if err != nil {
-		panic("searcher/core: failed to initialize default vector store: " + err.Error())
+		return nil, fmt.Errorf("searcher/core: failed to initialize default vector store: %w", err)
 	}
-	return store
+	return store, nil
 }
 
 // DefaultFusionEngine returns the built-in RRF (Reciprocal Rank Fusion) engine

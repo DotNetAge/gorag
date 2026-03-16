@@ -16,22 +16,6 @@ import (
 // ensure interface implementation
 var _ retrieval.RAGEvaluator = (*ragEvaluator)(nil)
 
-// ragEvaluatorConfig holds configuration for RAG evaluation.
-type ragEvaluatorConfig struct {
-	FaithfulnessPrompt     string
-	AnswerRelevancePrompt  string
-	ContextPrecisionPrompt string
-}
-
-// DefaultRAGEvaluatorConfig returns a default configuration.
-func DefaultRAGEvaluatorConfig() ragEvaluatorConfig {
-	return ragEvaluatorConfig{
-		FaithfulnessPrompt:     defaultFaithfulnessPrompt,
-		AnswerRelevancePrompt:  defaultAnswerRelevancePrompt,
-		ContextPrecisionPrompt: defaultContextPrecisionPrompt,
-	}
-}
-
 const defaultFaithfulnessPrompt = `Evaluate if the answer is faithful to the provided context.
 An answer is faithful if:
 - All claims can be directly inferred from the context
@@ -79,29 +63,68 @@ Rate context precision from 0.0 to 1.0 and output as JSON:
 
 // ragEvaluator is the infrastructure implementation of retrieval.RAGEvaluator.
 type ragEvaluator struct {
-	llm       core.Client
-	config    ragEvaluatorConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm                core.Client
+	faithfulnessPrompt string
+	relevancePrompt    string
+	precisionPrompt    string
+	logger             logging.Logger
+	collector          observability.Collector
 }
 
-// NewRAGEvaluator creates a new RAG evaluator with logger and metrics.
-func NewRAGEvaluator(llm core.Client, config ragEvaluatorConfig, logger logging.Logger, collector observability.Collector) *ragEvaluator {
-	if config.FaithfulnessPrompt == "" {
-		config = DefaultRAGEvaluatorConfig()
+// RAGEvaluatorOption configures a ragEvaluator instance.
+type RAGEvaluatorOption func(*ragEvaluator)
+
+// WithRAGEvaluationPromptTemplates overrides the default evaluation prompts.
+func WithRAGEvaluationPromptTemplates(faithfulness, relevance, precision string) RAGEvaluatorOption {
+	return func(e *ragEvaluator) {
+		if faithfulness != "" {
+			e.faithfulnessPrompt = faithfulness
+		}
+		if relevance != "" {
+			e.relevancePrompt = relevance
+		}
+		if precision != "" {
+			e.precisionPrompt = precision
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithRAGEvaluatorLogger sets a structured logger.
+func WithRAGEvaluatorLogger(logger logging.Logger) RAGEvaluatorOption {
+	return func(e *ragEvaluator) {
+		if logger != nil {
+			e.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithRAGEvaluatorCollector sets an observability collector.
+func WithRAGEvaluatorCollector(collector observability.Collector) RAGEvaluatorOption {
+	return func(e *ragEvaluator) {
+		if collector != nil {
+			e.collector = collector
+		}
 	}
-	return &ragEvaluator{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// NewRAGEvaluator creates a new RAG evaluator.
+//
+// Required: llm.
+// Optional (via options): WithRAGEvaluationPromptTemplates, WithRAGEvaluatorLogger,
+// WithRAGEvaluatorCollector.
+func NewRAGEvaluator(llm core.Client, opts ...RAGEvaluatorOption) *ragEvaluator {
+	e := &ragEvaluator{
+		llm:                llm,
+		faithfulnessPrompt: defaultFaithfulnessPrompt,
+		relevancePrompt:    defaultAnswerRelevancePrompt,
+		precisionPrompt:    defaultContextPrecisionPrompt,
+		logger:             logging.NewNoopLogger(),
+		collector:          observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Evaluate assesses the quality of generated answers using RAGAS-inspired metrics.
@@ -180,7 +203,7 @@ func (e *ragEvaluator) Evaluate(ctx context.Context, query, answer, context stri
 
 // evaluateFaithfulness evaluates if the answer is faithful to the context.
 func (e *ragEvaluator) evaluateFaithfulness(ctx context.Context, query, answer, context string) (float32, error) {
-	prompt := fmt.Sprintf(e.config.FaithfulnessPrompt, query, context, answer)
+	prompt := fmt.Sprintf(e.faithfulnessPrompt, query, context, answer)
 
 	response, err := e.llm.Chat(ctx, []core.Message{core.NewUserMessage(prompt)})
 	if err != nil {
@@ -192,7 +215,7 @@ func (e *ragEvaluator) evaluateFaithfulness(ctx context.Context, query, answer, 
 
 // evaluateAnswerRelevance evaluates if the answer addresses the query.
 func (e *ragEvaluator) evaluateAnswerRelevance(ctx context.Context, query, answer string) (float32, error) {
-	prompt := fmt.Sprintf(e.config.AnswerRelevancePrompt, query, answer)
+	prompt := fmt.Sprintf(e.relevancePrompt, query, answer)
 
 	response, err := e.llm.Chat(ctx, []core.Message{core.NewUserMessage(prompt)})
 	if err != nil {
@@ -204,7 +227,7 @@ func (e *ragEvaluator) evaluateAnswerRelevance(ctx context.Context, query, answe
 
 // evaluateContextPrecision evaluates if key information appears early.
 func (e *ragEvaluator) evaluateContextPrecision(ctx context.Context, query, context string) (float32, error) {
-	prompt := fmt.Sprintf(e.config.ContextPrecisionPrompt, query, context)
+	prompt := fmt.Sprintf(e.precisionPrompt, query, context)
 
 	response, err := e.llm.Chat(ctx, []core.Message{core.NewUserMessage(prompt)})
 	if err != nil {

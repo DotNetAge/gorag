@@ -106,15 +106,15 @@ func (s *AgenticSearchService) Search(ctx context.Context, req *SearchRequest) (
 	}
 
 	// Step 3: Parallel Retrieval
-	allChunks, err := s.retriever.Retrieve(ctx, subQueries, req.TopK)
+	allResults, err := s.retriever.Retrieve(ctx, subQueries, req.TopK)
 	if err != nil {
 		return nil, fmt.Errorf("retrieval failed: %w", err)
 	}
 
-	// Flatten chunks
+	// Flatten chunks from all retrieval results
 	var flatChunks []*entity.Chunk
-	for _, chunks := range allChunks {
-		flatChunks = append(flatChunks, chunks...)
+	for _, res := range allResults {
+		flatChunks = append(flatChunks, res.Chunks...)
 	}
 
 	// Step 4: CRAG Evaluation
@@ -139,21 +139,21 @@ func (s *AgenticSearchService) Search(ctx context.Context, req *SearchRequest) (
 	}
 
 	// Step 5: Answer Generation
-	answer, err := s.generator.Generate(ctx, req.Query, flatChunks)
+	genResult, err := s.generator.Generate(ctx, req.Query, flatChunks)
 	if err != nil {
 		return nil, fmt.Errorf("generation failed: %w", err)
 	}
-	resp.Answer = answer
+	resp.Answer = genResult.Answer
 
 	// Extract source documents
 	resp.SourceDocuments = extractSourceDocuments(flatChunks)
 
 	// Step 6: RAG Evaluation (optional, can be async)
 	contextStr := buildContextString(flatChunks)
-	ragEval, err := s.ragEvaluator.Evaluate(ctx, req.Query.Text, answer, contextStr)
+	ragEval, err := s.ragEvaluator.Evaluate(ctx, req.Query.Text, genResult.Answer, contextStr)
 	if err != nil {
-		// Log but don't fail the request
-		fmt.Printf("RAG evaluation failed: %v\n", err)
+		// non-fatal: evaluation failure should not block the response
+		_ = err
 	} else {
 		resp.RAGEvaluation = ragEval
 		if ragEval.Passed {
@@ -167,24 +167,45 @@ func (s *AgenticSearchService) Search(ctx context.Context, req *SearchRequest) (
 // handleChat handles simple chat queries without RAG.
 func (s *AgenticSearchService) handleChat(ctx context.Context, req *SearchRequest) (*AgenticSearchResponse, error) {
 	// Direct generation without retrieval
-	answer, err := s.generator.Generate(ctx, req.Query, nil)
+	genResult, err := s.generator.Generate(ctx, req.Query, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	return &AgenticSearchResponse{
 		SearchResponse: SearchResponse{
-			Answer: answer,
+			Answer: genResult.Answer,
 			Score:  0.95, // High confidence for chat
 			Intent: retrieval.IntentChat,
 		},
 	}, nil
 }
 
-// handleFactCheck handles fact-checking queries (may need external tools).
+// handleFactCheck handles fact-checking queries using RAG retrieval and generation.
 func (s *AgenticSearchService) handleFactCheck(ctx context.Context, req *SearchRequest) (*AgenticSearchResponse, error) {
-	// For now, treat as regular RAG but could integrate external APIs
-	return s.Search(ctx, req)
+	allChunks, err := s.retriever.Retrieve(ctx, []string{req.Query.Text}, req.TopK)
+	if err != nil {
+		return nil, fmt.Errorf("fact check retrieval failed: %w", err)
+	}
+
+	var flatChunks []*entity.Chunk
+	for _, result := range allChunks {
+		flatChunks = append(flatChunks, result.Chunks...)
+	}
+
+	genResult, err := s.generator.Generate(ctx, req.Query, flatChunks)
+	if err != nil {
+		return nil, fmt.Errorf("fact check generation failed: %w", err)
+	}
+
+	return &AgenticSearchResponse{
+		SearchResponse: SearchResponse{
+			Answer:          genResult.Answer,
+			Score:           0.7,
+			Intent:          retrieval.IntentFactCheck,
+			SourceDocuments: extractSourceDocuments(flatChunks),
+		},
+	}, nil
 }
 
 // extractSourceDocuments extracts unique document IDs from chunks.

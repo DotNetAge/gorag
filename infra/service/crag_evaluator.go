@@ -17,18 +17,6 @@ import (
 // ensure interface implementation
 var _ retrieval.CRAGEvaluator = (*cragEvaluator)(nil)
 
-// cragEvaluatorConfig holds configuration for CRAG evaluation.
-type cragEvaluatorConfig struct {
-	PromptTemplate string
-}
-
-// DefaultCRAGEvaluatorConfig returns a default configuration.
-func DefaultCRAGEvaluatorConfig() cragEvaluatorConfig {
-	return cragEvaluatorConfig{
-		PromptTemplate: defaultCRAGEvaluationPrompt,
-	}
-}
-
 const defaultCRAGEvaluationPrompt = `You are an expert evaluator of retrieved context quality for RAG systems.
 Your task is to assess how relevant the retrieved documents are to the user's query.
 
@@ -52,29 +40,57 @@ Output your response as a valid JSON object with this exact structure:
 
 // cragEvaluator is the infrastructure implementation of retrieval.CRAGEvaluator.
 type cragEvaluator struct {
-	llm       core.Client
-	config    cragEvaluatorConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm            core.Client
+	promptTemplate string
+	logger         logging.Logger
+	collector      observability.Collector
 }
 
-// NewCRAGEvaluator creates a new CRAG evaluator with logger and metrics.
-func NewCRAGEvaluator(llm core.Client, config cragEvaluatorConfig, logger logging.Logger, collector observability.Collector) *cragEvaluator {
-	if config.PromptTemplate == "" {
-		config = DefaultCRAGEvaluatorConfig()
+// CRAGEvaluatorOption configures a cragEvaluator instance.
+type CRAGEvaluatorOption func(*cragEvaluator)
+
+// WithCRAGPromptTemplate overrides the default evaluation prompt.
+func WithCRAGPromptTemplate(tmpl string) CRAGEvaluatorOption {
+	return func(e *cragEvaluator) {
+		if tmpl != "" {
+			e.promptTemplate = tmpl
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithCRAGLogger sets a structured logger.
+func WithCRAGLogger(logger logging.Logger) CRAGEvaluatorOption {
+	return func(e *cragEvaluator) {
+		if logger != nil {
+			e.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithCRAGCollector sets an observability collector.
+func WithCRAGCollector(collector observability.Collector) CRAGEvaluatorOption {
+	return func(e *cragEvaluator) {
+		if collector != nil {
+			e.collector = collector
+		}
 	}
-	return &cragEvaluator{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// NewCRAGEvaluator creates a new CRAG evaluator.
+//
+// Required: llm.
+// Optional (via options): WithCRAGPromptTemplate, WithCRAGLogger, WithCRAGCollector.
+func NewCRAGEvaluator(llm core.Client, opts ...CRAGEvaluatorOption) *cragEvaluator {
+	e := &cragEvaluator{
+		llm:            llm,
+		promptTemplate: defaultCRAGEvaluationPrompt,
+		logger:         logging.NewNoopLogger(),
+		collector:      observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Evaluate assesses the quality of retrieved context.
@@ -118,7 +134,7 @@ func (e *cragEvaluator) Evaluate(ctx context.Context, query *entity.Query, chunk
 	contextStr := contextBuilder.String()
 
 	// Build prompt
-	prompt := fmt.Sprintf(e.config.PromptTemplate, query.Text, len(chunks), contextStr)
+	prompt := fmt.Sprintf(e.promptTemplate, query.Text, len(chunks), contextStr)
 
 	// Call LLM
 	messages := []core.Message{

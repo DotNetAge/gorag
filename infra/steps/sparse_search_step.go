@@ -6,6 +6,7 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 // ensure interface implementation
@@ -16,6 +17,7 @@ var _ pipeline.Step[*entity.PipelineState] = (*SparseSearchStep)(nil)
 type SparseSearchStep struct {
 	searcher SparseSearcher
 	topK     int
+	logger   logging.Logger
 }
 
 // SparseSearcher defines the interface for sparse search operations.
@@ -35,16 +37,21 @@ type SearchResult struct {
 // Parameters:
 // - searcher: The sparse searcher to use for retrieval
 // - topK: Number of top results to return (default: 10)
+// - logger: optional structured logger; pass nil to use noop
 //
 // Returns:
 // - A new SparseSearchStep instance
-func NewSparseSearchStep(searcher SparseSearcher, topK int) *SparseSearchStep {
+func NewSparseSearchStep(searcher SparseSearcher, topK int, logger logging.Logger) *SparseSearchStep {
 	if topK <= 0 {
 		topK = 10
+	}
+	if logger == nil {
+		logger = logging.NewNoopLogger()
 	}
 	return &SparseSearchStep{
 		searcher: searcher,
 		topK:     topK,
+		logger:   logger,
 	}
 }
 
@@ -73,7 +80,7 @@ func (s *SparseSearchStep) Execute(ctx context.Context, state *entity.PipelineSt
 			result.ID,
 			"", // DocumentID will be set by the indexer
 			result.Content,
-			0, // StartIndex
+			0,                   // StartIndex
 			len(result.Content), // EndIndex
 			result.Metadata,
 		)
@@ -82,6 +89,9 @@ func (s *SparseSearchStep) Execute(ctx context.Context, state *entity.PipelineSt
 
 	state.RetrievedChunks = append(state.RetrievedChunks, chunks)
 
-	fmt.Printf("SparseSearchStep: retrieved %d chunks using BM25\n", len(chunks))
+	s.logger.Info("SparseSearchStep completed", map[string]interface{}{
+		"step":         "SparseSearchStep",
+		"chunks_count": len(chunks),
+	})
 	return nil
 }

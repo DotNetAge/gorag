@@ -7,6 +7,7 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/graph"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
+	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 // ensure interface implementation
@@ -17,6 +18,7 @@ var _ pipeline.Step[*entity.PipelineState] = (*GraphGlobalSearchStep)(nil)
 type GraphGlobalSearchStep struct {
 	searcher       *graph.GlobalSearcher
 	communityLevel int
+	logger         logging.Logger
 }
 
 // NewGraphGlobalSearchStep creates a new graph global search step.
@@ -34,6 +36,7 @@ func NewGraphGlobalSearchStep(searcher *graph.GlobalSearcher, communityLevel int
 	return &GraphGlobalSearchStep{
 		searcher:       searcher,
 		communityLevel: communityLevel,
+		logger:         logging.NewNoopLogger(),
 	}
 }
 
@@ -67,6 +70,9 @@ func (s *GraphGlobalSearchStep) Execute(ctx context.Context, state *entity.Pipel
 
 	state.RetrievedChunks = append(state.RetrievedChunks, []*entity.Chunk{chunk})
 
-	fmt.Printf("GraphGlobalSearchStep: synthesized global answer from community summaries\n")
+	s.logger.Info("GraphGlobalSearchStep completed", map[string]interface{}{
+		"step":            "GraphGlobalSearchStep",
+		"community_level": s.communityLevel,
+	})
 	return nil
 }

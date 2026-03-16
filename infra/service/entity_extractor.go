@@ -17,18 +17,6 @@ import (
 // ensure interface implementation
 var _ retrieval.EntityExtractor = (*entityExtractor)(nil)
 
-// entityExtractorConfig holds configuration for entity extraction.
-type entityExtractorConfig struct {
-	PromptTemplate string
-}
-
-// DefaultEntityExtractorConfig returns a default configuration.
-func DefaultEntityExtractorConfig() entityExtractorConfig {
-	return entityExtractorConfig{
-		PromptTemplate: defaultEntityExtractionPrompt,
-	}
-}
-
 const defaultEntityExtractionPrompt = `You are an expert entity extraction system.
 Your task is to extract key entities (people, places, organizations, concepts, etc.) from the user's question.
 Return ONLY a JSON object with an "entities" array containing the entity names as strings.
@@ -43,29 +31,58 @@ Example Output: {"entities": ["Microsoft", "Bill Gates"]}
 
 // entityExtractor is the infrastructure implementation of retrieval.EntityExtractor.
 type entityExtractor struct {
-	llm       core.Client
-	config    entityExtractorConfig
-	logger    logging.Logger
-	collector observability.Collector
+	llm            core.Client
+	promptTemplate string
+	logger         logging.Logger
+	collector      observability.Collector
 }
 
-// NewEntityExtractor creates a new entity extractor with logger and metrics.
-func NewEntityExtractor(llm core.Client, config entityExtractorConfig, logger logging.Logger, collector observability.Collector) *entityExtractor {
-	if config.PromptTemplate == "" {
-		config = DefaultEntityExtractorConfig()
+// EntityExtractorOption configures an entityExtractor instance.
+type EntityExtractorOption func(*entityExtractor)
+
+// WithEntityExtractionPromptTemplate overrides the default extraction prompt.
+func WithEntityExtractionPromptTemplate(tmpl string) EntityExtractorOption {
+	return func(e *entityExtractor) {
+		if tmpl != "" {
+			e.promptTemplate = tmpl
+		}
 	}
-	if logger == nil {
-		logger = logging.NewNoopLogger()
+}
+
+// WithEntityExtractorLogger sets a structured logger.
+func WithEntityExtractorLogger(logger logging.Logger) EntityExtractorOption {
+	return func(e *entityExtractor) {
+		if logger != nil {
+			e.logger = logger
+		}
 	}
-	if collector == nil {
-		collector = observability.NewNoopCollector()
+}
+
+// WithEntityExtractorCollector sets an observability collector.
+func WithEntityExtractorCollector(collector observability.Collector) EntityExtractorOption {
+	return func(e *entityExtractor) {
+		if collector != nil {
+			e.collector = collector
+		}
 	}
-	return &entityExtractor{
-		llm:       llm,
-		config:    config,
-		logger:    logger,
-		collector: collector,
+}
+
+// NewEntityExtractor creates a new entity extractor.
+//
+// Required: llm.
+// Optional (via options): WithEntityExtractionPromptTemplate, WithEntityExtractorLogger,
+// WithEntityExtractorCollector.
+func NewEntityExtractor(llm core.Client, opts ...EntityExtractorOption) *entityExtractor {
+	e := &entityExtractor{
+		llm:            llm,
+		promptTemplate: defaultEntityExtractionPrompt,
+		logger:         logging.NewNoopLogger(),
+		collector:      observability.NewNoopCollector(),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Extract extracts entities from the query.
@@ -88,7 +105,7 @@ func (e *entityExtractor) Extract(ctx context.Context, query *entity.Query) (*re
 	})
 
 	// Build prompt
-	prompt := fmt.Sprintf(e.config.PromptTemplate, query.Text)
+	prompt := fmt.Sprintf(e.promptTemplate, query.Text)
 
 	// Call LLM
 	messages := []core.Message{
