@@ -73,7 +73,7 @@ func main() {
 
     // 1. 初始化大模型客户端 (基于 gochat SDK)
     llmClient, _ := ollama.New(ollama.Config{
-        Config: base.Config{Model: "qwen:0.5b"},
+        Config: base.Config{Model: "qwen3.5:0.8b"},
     })
 
     // 2. 初始化纯 Go 原生向量数据库 (零外部依赖)

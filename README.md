@@ -73,7 +73,7 @@ func main() {
 
     // 1. Init LLM Client (via gochat)
     llmClient, _ := ollama.New(ollama.Config{
-        Config: base.Config{Model: "qwen:0.5b"},
+        Config: base.Config{Model: "qwen3.5:0.8b"},
     })
 
     // 2. Init Pure-Go Vector Store (Zero dependencies)
