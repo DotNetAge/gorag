@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,7 +172,7 @@ func TestPycodeStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 	ctx := context.Background()
 
 	// Read all files in .data directory
-	files, err := ioutil.ReadDir(dataDir)
+	files, err := os.ReadDir(dataDir)
 	require.NoError(t, err, "Failed to read .data directory")
 	require.NotEmpty(t, files, "No files found in .data directory")
 
@@ -186,7 +185,7 @@ func TestPycodeStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 		filePath := filepath.Join(dataDir, file.Name())
 		t.Run(file.Name(), func(t *testing.T) {
 			// Read file content
-			content, err := ioutil.ReadFile(filePath)
+			content, err := os.ReadFile(filePath)
 			require.NoError(t, err, "Failed to read test file: %s", filePath)
 
 			// Create reader from file content

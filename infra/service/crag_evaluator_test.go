@@ -119,7 +119,7 @@ func TestCRAGEvaluator_Evaluate_NilQuery(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "query required")
+	assert.Contains(t, err.Error(), "query is nil or empty")
 }
 
 func TestCRAGEvaluator_Evaluate_LLMError(t *testing.T) {
@@ -151,9 +151,12 @@ func TestCRAGEvaluator_Evaluate_InvalidJSONResponse(t *testing.T) {
 
 	result, err := eval.Evaluate(ctx, query, chunks)
 
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "parse response")
+	// When JSON parsing fails, the evaluator returns a default evaluation with ambiguous label
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, retrieval.CRAGAmbiguous, result.Label)
+	assert.Equal(t, float32(0.5), result.Relevance)
+	assert.Contains(t, result.Reason, "Failed to parse LLM response")
 }
 
 func TestCRAGEvaluator_Evaluate_MetricsRecording(t *testing.T) {

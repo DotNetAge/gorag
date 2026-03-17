@@ -28,7 +28,9 @@ func setupQdrantContainer(t *testing.T) (string, func()) {
 	endpoint := host + ":" + port.Port()
 
 	cleanup := func() {
-		container.Terminate(ctx)
+		if err := container.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate qdrant container: %v", err)
+		}
 	}
 
 	return endpoint, cleanup
@@ -64,7 +66,7 @@ func TestStore_Add_Search_Delete(t *testing.T) {
 	query := []float32{0.1, 0.2, 0.3, 0.4}
 	results, scores, err := store.Search(ctx, query, 5, nil)
 	require.NoError(t, err)
-	
+
 	assert.GreaterOrEqual(t, len(results), 1)
 	if len(results) > 0 {
 		assert.Equal(t, uid1, results[0].ID)

@@ -34,9 +34,8 @@ Rate each chunk on a scale from 0.0 to 1.0:
 %s
 
 [Retrieved Chunks - %d total]
-Chunk[0]: %s
-Chunk[1]: %s
-Chunk[2]: %s
+  %s
+
 ...
 
 Output your response as a valid JSON array of scores, one score per chunk in order:
@@ -255,11 +254,7 @@ func sortByScore(chunks []*entity.Chunk, oldScores []float32, newScores []float3
 
 	for i, idx := range indices {
 		sortedChunks[i] = chunks[idx]
-		if i < len(oldScores) {
-			sortedScores[i] = oldScores[idx]
-		} else {
-			sortedScores[i] = newScores[idx]
-		}
+		sortedScores[i] = newScores[idx]
 	}
 
 	return sortedChunks, sortedScores

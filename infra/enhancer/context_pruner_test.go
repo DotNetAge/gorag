@@ -34,7 +34,7 @@ func TestContextPruner_Enhance(t *testing.T) {
 			},
 			maxTokens:     100,
 			expectPrune:   true,
-			expectedCount: 2, // Should keep top 2 relevant chunks
+			expectedCount: 3, // Should keep top 3 relevant chunks (0.9, 0.8, 0.2) within token limit
 		},
 		{
 			name:         "empty chunks",

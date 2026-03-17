@@ -35,9 +35,8 @@ Rate each chunk on a scale from 0.0 to 1.0:
 %s
 
 [Retrieved Chunks - %d total]
-Chunk[0]: %s
-Chunk[1]: %s
-Chunk[2]: %s
+  %s
+
 ...
 
 Output your response as a valid JSON array with this exact structure:

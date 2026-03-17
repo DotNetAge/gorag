@@ -12,6 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const (
+	filePathKey contextKey = "file_path"
+)
+
 // ensure interface implementation
 var _ dataprep.Parser = (*JsonStreamParser)(nil)
 
@@ -96,7 +103,7 @@ func (p *JsonStreamParser) ParseStream(ctx context.Context, r io.Reader, metadat
 
 					// 获取文件路径
 					filePath := ""
-					if path, ok := ctx.Value("file_path").(string); ok {
+					if path, ok := ctx.Value(filePathKey).(string); ok {
 						filePath = path
 					}
 
@@ -153,7 +160,7 @@ func (p *JsonStreamParser) ParseStream(ctx context.Context, r io.Reader, metadat
 		if buffer.Len() > 0 {
 			// 获取文件路径
 			filePath := ""
-			if path, ok := ctx.Value("file_path").(string); ok {
+			if path, ok := ctx.Value(filePathKey).(string); ok {
 				filePath = path
 			}
 

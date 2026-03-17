@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -241,7 +242,17 @@ func (fw *FileWatcher) shouldProcessEvent(event fsnotify.Event) bool {
 		}
 
 		// 检查是否在监控路径下
-		if filepath.HasPrefix(event.Name, config.Path) {
+		// 使用 strings.HasPrefix 替代已弃用的 filepath.HasPrefix
+		// 确保路径比对的安全性：event.Name 要么等于 config.Path，要么以 config.Path + 路径分隔符开头
+		eventPath := event.Name
+		watchPath := config.Path
+
+		// 规范化路径
+		eventPath = filepath.Clean(eventPath)
+		watchPath = filepath.Clean(watchPath)
+
+		// 精确匹配或以 watchPath 为前缀（后跟路径分隔符）
+		if eventPath == watchPath || strings.HasPrefix(eventPath, watchPath+string(filepath.Separator)) {
 			return true
 		}
 	}

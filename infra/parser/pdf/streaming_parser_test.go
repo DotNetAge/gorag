@@ -43,7 +43,7 @@ func TestParser_ParseStream_WithFilepathContext(t *testing.T) {
 	pdfContent := "PDF content with filepath"
 	reader := strings.NewReader(pdfContent)
 
-	ctx := context.WithValue(context.Background(), "file_path", "/path/to/test.pdf")
+	ctx := context.WithValue(context.Background(), filePathKey, "/path/to/test.pdf")
 	docChan, err := parser.ParseStream(ctx, reader, nil)
 	assert.NoError(t, err)
 
@@ -76,7 +76,7 @@ func TestParser_ParseStream_Cancellation(t *testing.T) {
 	parser := NewParser()
 
 	// Create a large content to ensure parser is working when we cancel
-	largeContent := strings.Repeat("Line " + strings.Repeat("x", 100) + "\n", 100)
+	largeContent := strings.Repeat("Line "+strings.Repeat("x", 100)+"\n", 100)
 	reader := strings.NewReader(largeContent)
 
 	ctx, cancel := context.WithCancel(context.Background())

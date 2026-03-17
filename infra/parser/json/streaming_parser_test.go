@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,7 +131,7 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 	ctx := context.Background()
 
 	// Read all files in .data directory
-	files, err := ioutil.ReadDir(dataDir)
+	files, err := os.ReadDir(dataDir)
 	require.NoError(t, err, "Failed to read .data directory")
 	require.NotEmpty(t, files, "No files found in .data directory")
 
@@ -155,7 +154,7 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 
 		t.Run(file.Name(), func(t *testing.T) {
 			// Read file content
-			content, err := ioutil.ReadFile(filePath)
+			content, err := os.ReadFile(filePath)
 			require.NoError(t, err, "Failed to read test file: %s", filePath)
 
 			// Create reader from file content
@@ -174,8 +173,8 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 			assert.NotEmpty(t, documents, "Should have at least one document")
 			for _, doc := range documents {
 				assert.NotEmpty(t, doc.ID)
-	
-			assert.NotEmpty(t, doc.Content)
+
+				assert.NotEmpty(t, doc.Content)
 				assert.Equal(t, "application/json", doc.ContentType)
 				assert.Equal(t, "json", doc.Metadata["type"])
 			}
@@ -187,9 +186,9 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 func TestJsonStreamParser_ParseStream_WithContextFilePath(t *testing.T) {
 	parser := NewJsonStreamParser()
 	ctx := context.Background()
-	
+
 	// Add file path to context
-	ctx = context.WithValue(ctx, "file_path", "/test/path/file.json")
+	ctx = context.WithValue(ctx, filePathKey, "/test/path/file.json")
 
 	jsonContent := []byte(`{
 		"name": "Test",

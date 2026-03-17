@@ -19,8 +19,12 @@ func main() {
 	)
 	
 	// 执行索引（Init 会自动调用）
-	idx.Index()  // 增量索引
-	// idx.Start() // 或者启动持续监控模式（阻塞式）
+	err := idx.Index()  // 增量索引，无需手动调用 Init
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 或者 idx.IndexAll() // 全量索引
+	// 或者 idx.Start() // 启动持续监控模式（阻塞式）
 }
 ```
 
@@ -262,6 +266,15 @@ err := idx.IndexAll()
 
 // 启动持续监控模式（阻塞式）
 err := idx.Start()
+
+// 索引指定目录（可指定是否递归）
+err := idx.IndexDirectory(ctx, "./data/docs", true)
+
+// 索引单个文件
+err := idx.IndexFile(ctx, "./data/docs/file.pdf")
+
+// 获取指标数据
+metrics := idx.GetMetrics()
 ```
 
 ---
@@ -275,6 +288,13 @@ gorag/
 │   │   ├── default_indexer.go       # DefaultIndexer 核心实现
 │   │   ├── watcher.go               # 文件监控器（fsnotify）
 │   │   └── default_indexer_test.go  # 单元测试
+│   ├── indexing/
+│   │   └── state.go                 # Pipeline State 定义
+│   ├── steps/                       # Pipeline Steps（三阶段）
+│   │   ├── parse_step.go            # 解析步骤
+│   │   ├── chunk_step.go            # 分块步骤
+│   │   ├── embed_step.go            # 嵌入步骤
+│   │   └── store_step.go            # 存储步骤
 │   ├── parser/
 │   │   └── config/types/
 │   │       ├── types.go             # ParserType iota 枚举
@@ -290,9 +310,11 @@ gorag/
 │       └── factory.go               # SemanticChunker 工厂
 ├── pkg/
 │   ├── domain/abstraction/
-│   │   └── metrics.go               # Metrics 接口
-│   └── usecase/dataprep/
-│       └── indexer.go               # Indexer 接口定义
+│   │   ├── metrics.go               # Metrics 接口
+│   │   └── vectorstore.go           # VectorStore 接口
+│   ├── usecase/dataprep/
+│   │   └── indexer.go               # Indexer 接口定义
+│   └── di/                          # 依赖注入容器
 └── .docs/
     └── QUICKSTART_IMPLEMENTATION_SUMMARY.md  # 实施总结
 

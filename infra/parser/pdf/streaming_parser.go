@@ -11,6 +11,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const (
+	filePathKey contextKey = "file_path"
+)
+
 // Parser implements a PDF document parser
 type Parser struct {
 	chunkSize    int
@@ -59,7 +66,7 @@ func (p *Parser) ParseStream(ctx context.Context, r io.Reader, metadata map[stri
 
 					// 获取文件路径
 					filePath := ""
-					if path, ok := ctx.Value("file_path").(string); ok {
+					if path, ok := ctx.Value(filePathKey).(string); ok {
 						filePath = path
 					}
 
@@ -103,7 +110,7 @@ func (p *Parser) ParseStream(ctx context.Context, r io.Reader, metadata map[stri
 		if len(buffer) > 0 {
 			// 获取文件路径
 			filePath := ""
-			if path, ok := ctx.Value("file_path").(string); ok {
+			if path, ok := ctx.Value(filePathKey).(string); ok {
 				filePath = path
 			}
 
