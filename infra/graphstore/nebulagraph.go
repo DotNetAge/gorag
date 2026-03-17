@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
+	nebulaPool "github.com/vesoft-inc/nebula-go/v3"
 	"github.com/vesoft-inc/nebula-go/v3/nebula"
 	"github.com/vesoft-inc/nebula-go/v3/nebula/meta"
 	"github.com/vesoft-inc/nebula-go/v3/nebula/graph"
-	nebulaPool "github.com/vesoft-inc/nebula-go/v3/pool"
 )
 
 // NebulaGraphStore implements GraphStore using NebulaGraph

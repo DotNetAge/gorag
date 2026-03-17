@@ -9,7 +9,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/arangodb/go-driver/v2/arangodb/shared"
-	"github.com/arangodb/go-driver/v2/http"
+	"github.com/arangodb/go-driver/v2/connection"
 )
 
 // ArangoDBStore implements GraphStore using ArangoDB
