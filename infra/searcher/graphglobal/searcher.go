@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
-	"github.com/DotNetAge/gorag/infra/graph"
+	graphpkg "github.com/DotNetAge/gorag/infra/graph"
 	"github.com/DotNetAge/gorag/infra/searcher/core"
-	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
-	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
+	"github.com/DotNetAge/gorag/infra/steps/generate"
+	stepgraph "github.com/DotNetAge/gorag/infra/steps/graph"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -22,12 +22,12 @@ import (
 // Searcher holds the components for the Graph-Global RAG pipeline.
 // The pipeline is assembled once at construction time and reused on every Search call.
 type Searcher struct {
-	graphGlobalSearcher *graph.GlobalSearcher   // community-summary graph searcher (required)
-	generator           retrieval.Generator     // LLM answer generator (required)
-	queryRewriter       retrieval.QueryRewriter // optional query rewriter
-	logger              logging.Logger          // structured logger
-	metrics             abstraction.Metrics     // observability metrics collector
-	communityLevel      int                     // community hierarchy level to search (default: 1)
+	graphGlobalSearcher *graphpkg.GlobalSearcher // community-summary graph searcher (required)
+	generator           retrieval.Generator      // LLM answer generator (required)
+	queryRewriter       retrieval.QueryRewriter  // optional query rewriter
+	logger              logging.Logger           // structured logger
+	metrics             abstraction.Metrics      // observability metrics collector
+	communityLevel      int                      // community hierarchy level to search (default: 1)
 
 	pipe *pipeline.Pipeline[*entity.PipelineState] // pre-assembled, reused on every call
 }
@@ -36,7 +36,7 @@ type Searcher struct {
 type Option func(*Searcher)
 
 // WithGraphSearcher sets the graph global searcher.
-func WithGraphSearcher(gs *graph.GlobalSearcher) Option {
+func WithGraphSearcher(gs *graphpkg.GlobalSearcher) Option {
 	return func(s *Searcher) { s.graphGlobalSearcher = gs }
 }
 
@@ -113,8 +113,8 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		_ = s.queryRewriter // avoid unused variable error
 	}
 
-	p.AddStep(retrievalstep.NewGraphGlobalSearchStep(s.graphGlobalSearcher, s.communityLevel))
-	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
+	p.AddStep(stepgraph.Global(s.graphGlobalSearcher, s.communityLevel, s.logger, s.metrics))
+	p.AddStep(generate.Generate(s.generator, s.logger, s.metrics))
 	return p
 }
 

@@ -12,9 +12,9 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	searchercore "github.com/DotNetAge/gorag/infra/searcher/core"
 	"github.com/DotNetAge/gorag/infra/service"
-	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
-	prestep "github.com/DotNetAge/gorag/infra/steps/pre_retrieval"
-	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
+	"github.com/DotNetAge/gorag/infra/steps/cache"
+	"github.com/DotNetAge/gorag/infra/steps/generate"
+	"github.com/DotNetAge/gorag/infra/steps/vector"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -135,7 +135,7 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 	p := pipeline.New[*entity.PipelineState]()
 
 	if s.cacheService != nil {
-		p.AddStep(prestep.NewSemanticCacheChecker(s.cacheService, s.logger))
+		p.AddStep(cache.Check(s.cacheService, s.logger, s.metrics))
 	}
 	if s.queryRewriter != nil {
 		// Note: QueryRewriteStep requires direct LLM client, not the interface
@@ -143,11 +143,11 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		_ = s.queryRewriter // avoid unused variable error
 	}
 
-	p.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
-	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
+	p.AddStep(vector.Search(s.embedder, s.vectorStore, s.topK, s.logger, s.metrics))
+	p.AddStep(generate.Generate(s.generator, s.logger, s.metrics))
 
 	if s.cacheService != nil {
-		p.AddStep(prestep.NewCacheResponseWriter(s.cacheService, s.logger))
+		p.AddStep(cache.Store(s.cacheService, s.logger, s.metrics))
 	}
 
 	return p

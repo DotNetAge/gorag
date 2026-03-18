@@ -1,3 +1,4 @@
+//go:build nebulagraph
 // +build nebulagraph
 
 package graphstore
@@ -9,8 +10,6 @@ import (
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	nebulaPool "github.com/vesoft-inc/nebula-go/v3"
 	"github.com/vesoft-inc/nebula-go/v3/nebula"
-	"github.com/vesoft-inc/nebula-go/v3/nebula/meta"
-	"github.com/vesoft-inc/nebula-go/v3/nebula/graph"
 )
 
 // NebulaGraphStore implements GraphStore using NebulaGraph

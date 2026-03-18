@@ -11,9 +11,9 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/enhancer"
 	searchercore "github.com/DotNetAge/gorag/infra/searcher/core"
-	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
-	prestep "github.com/DotNetAge/gorag/infra/steps/pre_retrieval"
-	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
+	"github.com/DotNetAge/gorag/infra/steps/generate"
+	"github.com/DotNetAge/gorag/infra/steps/hyde"
+	"github.com/DotNetAge/gorag/infra/steps/vector"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -109,14 +109,14 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 
 	// Step 1: Generate hypothetical document (HyDE)
 	if s.hydeGenerator != nil {
-		p.AddStep(prestep.NewHyDEStep(s.hydeGenerator, s.logger))
+		p.AddStep(hyde.Generate(s.hydeGenerator, s.logger, s.metrics))
 	}
 
 	// Step 2: Vector Search using hypothetical document's embedding
-	p.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
+	p.AddStep(vector.Search(s.embedder, s.vectorStore, s.topK, s.logger, s.metrics))
 
 	// Step 3: Generation
-	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
+	p.AddStep(generate.Generate(s.generator, s.logger, s.metrics))
 
 	return p
 }

@@ -11,11 +11,12 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
-	"github.com/DotNetAge/gorag/infra/graph"
+	graphpkg "github.com/DotNetAge/gorag/infra/graph"
 	"github.com/DotNetAge/gorag/infra/searcher/core"
-	"github.com/DotNetAge/gorag/infra/steps"
-	poststep "github.com/DotNetAge/gorag/infra/steps/post_retrieval"
-	retrievalstep "github.com/DotNetAge/gorag/infra/steps/retrieval"
+	"github.com/DotNetAge/gorag/infra/steps/fuse"
+	"github.com/DotNetAge/gorag/infra/steps/generate"
+	stepgraph "github.com/DotNetAge/gorag/infra/steps/graph"
+	"github.com/DotNetAge/gorag/infra/steps/vector"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
 	"github.com/DotNetAge/gorag/pkg/domain/entity"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -26,7 +27,7 @@ import (
 // The pipeline is assembled once at construction time and reused on every Search call.
 type Searcher struct {
 	entityExtractor    retrieval.EntityExtractor // LLM-based named entity extractor (required)
-	graphLocalSearcher *graph.LocalSearcher      // N-Hop graph traversal engine (required)
+	graphLocalSearcher *graphpkg.LocalSearcher   // N-Hop graph traversal engine (required)
 	generator          retrieval.Generator       // LLM answer generator (required)
 	queryRewriter      retrieval.QueryRewriter   // optional query rewriter
 	embedder           embedding.Provider        // optional dense embedder for vector supplement
@@ -49,7 +50,7 @@ func WithEntityExtractor(extractor retrieval.EntityExtractor) Option {
 }
 
 // WithGraphSearcher sets the graph local searcher.
-func WithGraphSearcher(gs *graph.LocalSearcher) Option {
+func WithGraphSearcher(gs *graphpkg.LocalSearcher) Option {
 	return func(s *Searcher) { s.graphLocalSearcher = gs }
 }
 
@@ -155,16 +156,17 @@ func (s *Searcher) buildPipeline() *pipeline.Pipeline[*entity.PipelineState] {
 		_ = s.queryRewriter // avoid unused variable error
 	}
 
-	p.AddStep(steps.NewEntityExtractor(s.entityExtractor, s.logger))
-	p.AddStep(retrievalstep.NewGraphLocalSearchStep(s.graphLocalSearcher, s.maxHops, s.topK))
+	// Note: Entity extraction is handled internally by graphLocalSearcher
+	// p.AddStep(indexing.Entities(s.entityExtractor, s.logger))
+	p.AddStep(stepgraph.Local(s.graphLocalSearcher, s.maxHops, s.topK, s.logger, s.metrics))
 
 	if s.embedder != nil && s.vectorStore != nil && s.fusionEngine != nil {
-		p.AddStep(retrievalstep.NewVectorSearchStep(s.embedder, s.vectorStore, s.topK))
+		p.AddStep(vector.Search(s.embedder, s.vectorStore, s.topK, s.logger, s.metrics))
 		p.AddStep(chunksToParallelResultsStep{})
-		p.AddStep(retrievalstep.NewRAGFusionStep(s.fusionEngine, s.topK))
+		p.AddStep(fuse.RRF(s.fusionEngine, s.topK, s.logger, s.metrics))
 	}
 
-	p.AddStep(poststep.NewGenerator(s.generator, s.logger))
+	p.AddStep(generate.Generate(s.generator, s.logger, s.metrics))
 	return p
 }
 

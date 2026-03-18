@@ -11,9 +11,9 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/infra/chunker/semantic"
-	"github.com/DotNetAge/gorag/infra/indexing"
+	idxing "github.com/DotNetAge/gorag/infra/indexing"
 	"github.com/DotNetAge/gorag/infra/parser/config/types"
-	"github.com/DotNetAge/gorag/infra/steps"
+	stepinx "github.com/DotNetAge/gorag/infra/steps/indexing"
 	"github.com/DotNetAge/gorag/infra/vectorstore"
 	"github.com/DotNetAge/gorag/pkg/di"
 	"github.com/DotNetAge/gorag/pkg/domain/abstraction"
@@ -295,7 +295,7 @@ func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) error
 	})
 
 	// 创建共享 state 并直接执行管线，确保 state.TotalChunks 等字段被正确填充
-	state := indexing.DefaultState(ctx, filePath)
+	state := idxing.DefaultState(ctx, filePath)
 	p := idx.assemblyPipeline()
 	if err := p.Execute(ctx, state); err != nil {
 		if idx.metrics != nil {
@@ -324,17 +324,17 @@ func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) error
 
 // assemblyPipeline 装配标准的索引阶段管线
 // 使用 gochat/pkg/pipeline 的泛型 Pipeline
-func (idx *defaultIndexer) assemblyPipeline() *pipeline.Pipeline[*indexing.State] {
+func (idx *defaultIndexer) assemblyPipeline() *pipeline.Pipeline[*idxing.State] {
 	// 创建泛型 Pipeline[*indexing.State]
-	p := pipeline.New[*indexing.State]()
+	p := pipeline.New[*idxing.State]()
 
-	// 添加标准 Step（使用 infra/steps 中的通用组件，并传递 metrics）
+	// 添加标准 Step（使用新的精简命名包）
 	p.AddSteps(
-		steps.NewFileDiscoveryStep(),
-		steps.NewParseStep(idx.parsers...), // ✅ 传入所有解析器，自动根据文件类型选择
-		steps.NewChunkStep(idx.chunker),
-		steps.NewEmbedStep(idx.embedder, idx.metrics),    // ✅ 传递 metrics
-		steps.NewStoreStep(idx.vectorStore, idx.metrics), // ✅ 传递 metrics
+		stepinx.Discover(),
+		stepinx.Multi(idx.parsers...), // ✅ 传入所有解析器，自动根据文件类型选择
+		stepinx.Chunk(idx.chunker),
+		stepinx.Batch(idx.embedder, idx.metrics),     // ✅ 传递 metrics
+		stepinx.Upsert(idx.vectorStore, idx.metrics), // ✅ 传递 metrics
 	)
 
 	return p

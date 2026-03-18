@@ -33,7 +33,7 @@ Whether you are building a simple document Q&A bot or a complex Agentic RAG syst
 - **Chinese AI**: Kimi, DeepSeek, GLM-4, Minimax, Baichuan, etc.
 
 ### 🗄️ Vector Databases
-- **govector** 🌟 (Pure Go embedded vector store - Zero external dependencies!)
+- **govector** 🌟 (Pure Go embedded vector store - Zero dependencies!)
 - **Milvus / Zilliz** (Enterprise standard)
 - **Qdrant** (High-performance Rust engine)
 - **Weaviate** (Leading semantic search)
@@ -41,6 +41,13 @@ Whether you are building a simple document Q&A bot or a complex Agentic RAG syst
 
 ### 📄 Universal Parsers
 Native streaming support for **16+ formats** including: Text, PDF, DOCX, Markdown, HTML, CSV, JSON, and source code (Go, Python, Java, TS/JS).
+
+### 🧠 Agentic RAG Integration
+- **[GoReact](https://github.com/DotNetAge/goreact)** 🌟 - Advanced Agentic Framework for complex task reasoning and multi-tool orchestration
+  - Use GoRAG as a Tool within GoReact Agent
+  - Combine RAG with Calculator, WebSearch, CodeExecutor, and more
+  - Leverage ReAct Thinker for multi-hop reasoning over retrieved documents
+  - See: [GoRAG + GoReact Integration Guide](docs/GO_REACT_INTEGRATION_GUIDE.md)
 
 ---
 
@@ -124,33 +131,34 @@ for resp := range ch {
 
 GoRAG is not just a glue framework; it implements cutting-edge retrieval paradigms natively:
 
-- **Agentic RAG / CRAG**: Intelligent routing, self-reflection, and fallback mechanisms for complex queries.
+### 🔁 Built-in Agentic RAG Loop (No External Framework Required!)
+Unlike traditional RAG frameworks, GoRAG includes **native Agentic reasoning capabilities** for complex retrieval scenarios:
+
+- **Self-RAG** 🪞: Real-time hallucination detection and answer quality evaluation
+- **CRAG Evaluation** 📊: Automatic retrieval quality assessment with smart fallback to web search
+- **Iterative Retrieval** 🔄: Multi-round reasoning to decide "retrieve more" vs "generate answer"
+- **Termination Control** 🎯: Intelligent loop control based on confidence scores and context quality
+
+```go
+// ✅ GoRAG has built-in Agentic reasoning - no external framework needed!
+searcher := native.NewSearcher(
+    native.WithSelfRAG(true),        // Built-in quality checker
+    native.WithCRAGEvaluation(true), // Built-in retrieval quality eval
+)
+
+result := searcher.Search(ctx, query) // Automatically iterates until high-quality results
+fmt.Printf("Confidence: %f\n", result.SelfRagScore)
+```
+
+**Want More Advanced Agentic Workflows?** → Combine with [GoReact](https://github.com/DotNetAge/goreact) for multi-tool orchestration and complex task planning. See our [Integration Guide](docs/GO_REACT_INTEGRATION_GUIDE.md).
+
+### Other Advanced RAG Patterns
 - **RAG-Fusion & Multi-Query**: Rewrites user queries into multiple perspectives, retrieving and applying Reciprocal Rank Fusion (RRF) for higher accuracy.
 - **Context Pruning & Cross-Encoder**: Extracts only the most relevant sentences from chunks and reranks them, saving LLM tokens and reducing hallucinations.
 - **Graph RAG**: Native support for Neo4j and ArangoDB for cross-node multi-hop reasoning.
 
 ---
 
-## 🛠️ CLI Tool
-GoRAG comes with a powerful built-in CLI for rapid testing and administration:
-
-```bash
-# Install the CLI
-go install github.com/DotNetAge/gorag/cmd/gorag@latest
-
-# Index a file directly from the terminal
-gorag index --api-key $OPENAI_API_KEY --file ./docs/architecture.md
-
-# Query your knowledge base
-gorag query --api-key $OPENAI_API_KEY "How does the circuit breaker work?"
-```
-
-## 📈 Roadmap
-- [x] Core architecture and pluggable interfaces
-- [x] Advanced Enhancers (HyDE, Context Pruning, Reranking)
-- [x] Native Graph RAG integration (Neo4j, ArangoDB)
-- [ ] Multi-modal RAG (Image & Video indexing)
-- [ ] Enterprise Dashboard and API server
 
 ## 🤝 Contributing
 We welcome contributions! Whether it's adding a new vector store driver, improving the documentation, or fixing a bug, please check out our [Contributing Guidelines](CONTRIBUTING.md).
