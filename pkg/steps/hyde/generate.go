@@ -1,5 +1,4 @@
-// Package hyde provides HyDE (Hypothetical Document Embeddings) steps for RAG retrieval pipelines.
-package stephyde
+package hyde
 
 import (
 	"context"
@@ -10,77 +9,48 @@ import (
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
-// generate generates a hypothetical document to improve dense core.
-type generate struct {
-	generator core.HyDEGenerator
+type hydeStep struct {
+	generator core.Generator
 	logger    logging.Logger
-	metrics   core.Metrics
 }
 
-// Generate creates a new HyDE generation step with logger and metrics.
-//
-// Parameters:
-//   - generator: HyDE generator implementation
-//   - logger: structured logger (auto-defaults to NoopLogger if nil)
-//   - metrics: metrics collector (optional, can be nil)
-//
-// Example:
-//
-//	p.AddStep(hyde.Generate(generator, logger, metrics))
-func Generate(
-	generator core.HyDEGenerator,
-	logger logging.Logger,
-	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+// Generate 创建一个 HyDE 生成步骤
+func Generate(generator core.Generator, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
-	return &generate{
+	return &hydeStep{
 		generator: generator,
 		logger:    logger,
-		metrics:   metrics,
 	}
 }
 
-// Name returns the step name
-func (s *generate) Name() string {
-	return "HyDEGeneration"
+func (s *hydeStep) Name() string {
+	return "HyDE-Generate"
 }
 
-// Execute generates a hypothetical document based on the query.
-func (s *generate) Execute(ctx context.Context, state *core.State) error {
-	if state.Query == nil {
-		return fmt.Errorf("HyDEGeneration: 'query' not found in state")
+func (s *hydeStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	if context.Query == nil || context.Query.Text == "" {
+		return fmt.Errorf("HyDE: query required in context")
 	}
 
-	// Generate hypothetical document
-	hypotheticalDoc, err := s.generator.GenerateHypotheticalDocument(ctx, state.Query)
+	s.logger.Debug("generating hypothetical document", map[string]any{
+		"query": context.Query.Text,
+	})
+
+	doc, err := s.generator.GenerateHypotheticalDocument(ctx, context.Query)
 	if err != nil {
-		s.logger.Error("hyde generation failed", err, map[string]interface{}{
-			"step":  "HyDEGeneration",
-			"query": state.Query.Text,
-		})
-		return fmt.Errorf("HyDEGeneration failed: %w", err)
+		return fmt.Errorf("HyDE: failed to generate doc: %w", err)
 	}
 
-	// Store the hypothetical document for embedding
-	state.GenerationPrompt = hypotheticalDoc
-
-	// Mark that HyDE was applied via AgenticMetadata
-	if state.Agentic == nil {
-		state.Agentic = core.NewAgenticState()
+	if context.Agentic == nil {
+		context.Agentic = &core.AgenticContext{}
 	}
-	state.Agentic.HydeApplied = true
-	state.Agentic.HypotheticalDocument = hypotheticalDoc
+	context.Agentic.HypotheticalDocument = doc
+	context.Agentic.HydeApplied = true
 
-	// Record metrics
-	if s.metrics != nil {
-		s.metrics.RecordSearchResult("hyde", 1)
-	}
-
-	s.logger.Info("HyDEGeneration completed", map[string]interface{}{
-		"step":       "HyDEGeneration",
-		"doc_length": len(hypotheticalDoc),
+	s.logger.Info("hypothetical document generated", map[string]any{
+		"doc_length": len(doc),
 	})
 
 	return nil

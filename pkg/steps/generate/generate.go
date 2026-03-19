@@ -18,20 +18,11 @@ type generate struct {
 }
 
 // Generate creates a new generation step with logger and metrics.
-//
-// Parameters:
-//   - generator: LLM answer generator implementation
-//   - logger: structured logger (auto-defaults to NoopLogger if nil)
-//   - metrics: metrics collector (optional, can be nil)
-//
-// Example:
-//
-//	p.AddStep(generate.Generate(generator, logger, metrics))
 func Generate(
 	generator core.Generator,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -48,46 +39,34 @@ func (s *generate) Name() string {
 }
 
 // Execute generates answer by delegating to the Generator interface.
-func (s *generate) Execute(ctx context.Context, state *core.State) error {
-	if state.Query == nil || state.Query.Text == "" {
+func (s *generate) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	if context.Query == nil || context.Query.Text == "" {
 		return fmt.Errorf("Generator: query required")
 	}
 
 	s.logger.Debug("generating response", map[string]interface{}{
 		"step":  "Generator",
-		"query": state.Query.Text,
+		"query": context.Query.Text,
 	})
 
 	// Flatten RetrievedChunks to []*core.Chunk
 	var chunks []*core.Chunk
-	for _, chunkGroup := range state.RetrievedChunks {
+	for _, chunkGroup := range context.RetrievedChunks {
 		chunks = append(chunks, chunkGroup...)
 	}
 
-	// Delegate to Generator interface (business logic abstraction)
-	result, err := s.generator.Generate(ctx, state.Query, chunks)
+	// Delegate to Generator interface
+	result, err := s.generator.Generate(ctx, context.Query, chunks)
 	if err != nil {
 		s.logger.Error("generate failed", err, map[string]interface{}{
 			"step":  "Generator",
-			"query": state.Query.Text,
+			"query": context.Query.Text,
 		})
 		return fmt.Errorf("Generator: Generate failed: %w", err)
 	}
 
-	// Update state
-	state.Answer = &core.Result{Answer: result.Answer}
-
-	// Record metrics
-	if s.metrics != nil {
-		s.metrics.RecordSearchResult("generation", 1)
-	}
-
-	s.logger.Info("response generated", map[string]interface{}{
-		"step":          "Generator",
-		"answer_length": len(result.Answer),
-		"query":         state.Query.Text,
-		"chunk_count":   len(chunks),
-	})
+	// Update context
+	context.Answer = &core.Result{Answer: result.Answer}
 
 	return nil
 }

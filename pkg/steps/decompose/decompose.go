@@ -2,10 +2,11 @@
 package decompose
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"fmt"
+
 	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
@@ -13,31 +14,19 @@ import (
 type decompose struct {
 	decomposer core.QueryDecomposer
 	logger     logging.Logger
-	metrics    core.Metrics
 }
 
-// Decompose creates a new query decomposition step with logger and metrics.
-//
-// Parameters:
-//   - decomposer: query decomposer implementation
-//   - logger: structured logger (auto-defaults to NoopLogger if nil)
-//   - metrics: metrics collector (optional, can be nil)
-//
-// Example:
-//
-//	p.AddStep(decompose.Decompose(decomposer, logger, metrics))
+// Decompose creates a new query decomposition step with logger.
 func Decompose(
 	decomposer core.QueryDecomposer,
 	logger logging.Logger,
-	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
 	return &decompose{
 		decomposer: decomposer,
 		logger:     logger,
-		metrics:    metrics,
 	}
 }
 
@@ -47,37 +36,28 @@ func (s *decompose) Name() string {
 }
 
 // Execute decomposes complex queries using infra/service.
-func (s *decompose) Execute(ctx context.Context, state *core.State) error {
-	if state.Query == nil || state.Query.Text == "" {
+func (s *decompose) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	if context.Query == nil || context.Query.Text == "" {
 		return fmt.Errorf("QueryDecomposition: query required")
 	}
 
-	// Delegate to infra/service
-	result, err := s.decomposer.Decompose(ctx, state.Query)
+	s.logger.Debug("decomposing query", map[string]interface{}{
+		"query": context.Query.Text,
+	})
+
+	result, err := s.decomposer.Decompose(ctx, context.Query)
 	if err != nil {
-		s.logger.Error("query decomposition failed", err, map[string]interface{}{
-			"step":  "QueryDecomposition",
-			"query": state.Query.Text,
-		})
 		return fmt.Errorf("QueryDecomposition failed: %w", err)
 	}
 
-	// Update state using AgenticMetadata
-	if state.Agentic == nil {
-		state.Agentic = core.NewAgenticState()
+	if context.Agentic == nil {
+		context.Agentic = &core.AgenticContext{}
 	}
-	state.Agentic.SubQueries = result.SubQueries
-
-	// Record metrics
-	if s.metrics != nil {
-		s.metrics.RecordSearchResult("decompose", len(result.SubQueries))
-	}
+	context.Agentic.SubQueries = result.SubQueries
 
 	s.logger.Info("query decomposed", map[string]interface{}{
-		"step":        "QueryDecomposition",
 		"sub_queries": len(result.SubQueries),
 		"is_complex":  result.IsComplex,
-		"query":       state.Query.Text,
 	})
 
 	return nil

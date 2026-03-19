@@ -42,8 +42,10 @@ type IntentResult struct {
 type RetrievalResult struct {
 	ID       string         `json:"id"`
 	QueryID  string         `json:"query_id"`
+	Query    string         `json:"query"`  // Original query text
 	Chunks   []*Chunk       `json:"chunks"`
 	Scores   []float32      `json:"scores"`
+	Answer   string         `json:"answer"` // Generated answer (if any)
 	Metadata map[string]any `json:"metadata"`
 }
 

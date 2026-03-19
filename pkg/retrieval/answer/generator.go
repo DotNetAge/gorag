@@ -2,12 +2,13 @@
 package answer
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"fmt"
 	"strings"
 	"time"
+
 	chat "github.com/DotNetAge/gochat/pkg/core"
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
 )
@@ -44,7 +45,7 @@ func WithPromptTemplate(tmpl string) Option {
 	}
 }
 
-// WithGeneratorLogger sets a structured logger.
+// WithLogger sets a structured logger.
 func WithLogger(logger logging.Logger) Option {
 	return func(g *Generator) {
 		if logger != nil {
@@ -53,7 +54,7 @@ func WithLogger(logger logging.Logger) Option {
 	}
 }
 
-// WithGeneratorCollector sets an observability collector.
+// WithCollector sets an observability collector.
 func WithCollector(collector observability.Collector) Option {
 	return func(g *Generator) {
 		if collector != nil {
@@ -134,4 +135,22 @@ func (g *Generator) Generate(ctx context.Context, query *core.Query, chunks []*c
 	return &core.Result{
 		Answer: response.Content,
 	}, nil
+}
+
+// GenerateHypotheticalDocument generates a hypothetical document for HyDE.
+func (g *Generator) GenerateHypotheticalDocument(ctx context.Context, query *core.Query) (string, error) {
+	if query == nil || query.Text == "" {
+		return "", fmt.Errorf("generator: query required")
+	}
+
+	prompt := fmt.Sprintf("Please write a short document that could be a relevant search result for the following question:\n\nQuestion: %s\n\nDocument:", query.Text)
+	messages := []chat.Message{
+		chat.NewUserMessage(prompt),
+	}
+	response, err := g.llm.Chat(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("generator: HyDE chat failed: %w", err)
+	}
+
+	return response.Content, nil
 }

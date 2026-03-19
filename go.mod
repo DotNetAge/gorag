@@ -3,18 +3,21 @@ module github.com/DotNetAge/gorag
 go 1.25.1
 
 require (
-	github.com/DotNetAge/gochat v0.1.8
+	github.com/DotNetAge/gochat v0.1.9
 	github.com/DotNetAge/govector v0.1.3
-	github.com/armon/go-metrics v0.4.1
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/google/uuid v1.6.0
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/milvus-io/milvus-sdk-go/v2 v2.4.2
+	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/pinecone-io/go-pinecone v1.1.1
 	github.com/qdrant/go-client v1.13.0
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/milvus v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/qdrant v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/weaviate v0.40.0
+	github.com/unidoc/unioffice v1.39.0
 	github.com/weaviate/weaviate v1.29.0
 	github.com/weaviate/weaviate-go-client/v4 v4.11.0
 	github.com/xuri/excelize/v2 v2.10.1
@@ -24,46 +27,23 @@ require (
 )
 
 require (
-	github.com/adrg/strutil v0.3.1 // indirect
-	github.com/adrg/sysfont v0.1.2 // indirect
-	github.com/adrg/xdg v0.5.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/chewxy/math32 v1.10.1 // indirect
 	github.com/coder/hnsw v0.6.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/disintegration/imaging v1.6.2 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/renameio v1.0.1 // indirect
-	github.com/gorilla/i18n v0.0.0-20150820051429-8b358169da46 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
-	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
-	github.com/llgcode/draw2d v0.0.0-20231212091825-f55e0c776b44 // indirect
-	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/richardlehane/mscfb v1.0.6 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
-	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/testcontainers/testcontainers-go v0.41.0 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
-	github.com/unidoc/emf v0.1.0 // indirect
-	github.com/unidoc/freetype v0.2.3 // indirect
-	github.com/unidoc/garabic v0.0.0-20220702200334-8c7cb25baa11 // indirect
-	github.com/unidoc/pkcs7 v0.2.0 // indirect
-	github.com/unidoc/timestamp v0.0.0-20200412005513-91597fd3793a // indirect
-	github.com/unidoc/unichart v0.3.0 // indirect
-	github.com/unidoc/unioffice v1.39.0 // indirect
-	github.com/unidoc/unipdf/v3 v3.55.0 // indirect
-	github.com/unidoc/unitype v0.4.0 // indirect
 	github.com/viterin/partial v1.1.0 // indirect
 	github.com/viterin/vek v0.4.2 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/image v0.25.0 // indirect
-	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
@@ -150,7 +130,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250825161204-c5933d9347a5 // indirect
