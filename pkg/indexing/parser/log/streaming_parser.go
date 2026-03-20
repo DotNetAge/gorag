@@ -250,6 +250,33 @@ func (p *Parser) GetSupportedTypes() []string {
 	return []string{".log", ".txt"}
 }
 
+// Supports checks if the content type is supported
+func (p *Parser) Supports(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	return contentType == ".log" || contentType == ".txt" || contentType == "text/plain" || contentType == "application/x-log" || contentType == "text/x-log"
+}
+
+// Parse implements the core.Parser interface
+func (p *Parser) Parse(ctx context.Context, content []byte, metadata map[string]any) (*core.Document, error) {
+	docChan, err := p.ParseStream(ctx, strings.NewReader(string(content)), metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	var firstDoc *core.Document
+	for doc := range docChan {
+		if firstDoc == nil {
+			firstDoc = doc
+		}
+	}
+
+	if firstDoc == nil {
+		return nil, fmt.Errorf("no document parsed")
+	}
+
+	return firstDoc, nil
+}
+
 // DetectFormat auto-detects log format from first few lines
 func (p *Parser) DetectFormat(r io.Reader) (Format, error) {
 	scanner := bufio.NewScanner(r)

@@ -330,6 +330,34 @@ func (p *Parser) createDocument(content string, position int, chunkType string, 
 	}
 }
 
+// GetSupportedTypes returns the supported file extensions
 func (p *Parser) GetSupportedTypes() []string {
 	return []string{".ts", ".tsx"}
+}
+
+// Supports checks if the content type is supported
+func (p *Parser) Supports(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	return contentType == ".ts" || contentType == ".tsx" || contentType == "text/typescript" || contentType == "application/typescript"
+}
+
+// Parse implements the core.Parser interface
+func (p *Parser) Parse(ctx context.Context, content []byte, metadata map[string]any) (*core.Document, error) {
+	docChan, err := p.ParseStream(ctx, strings.NewReader(string(content)), metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	var firstDoc *core.Document
+	for doc := range docChan {
+		if firstDoc == nil {
+			firstDoc = doc
+		}
+	}
+
+	if firstDoc == nil {
+		return nil, fmt.Errorf("no document parsed")
+	}
+
+	return firstDoc, nil
 }

@@ -11,12 +11,11 @@ import (
 	"regexp"
 	"strings"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
-	"github.com/DotNetAge/gorag/pkg/indexing/parser/base"
 	"github.com/google/uuid"
 )
 
 // ensure interface implementation
-var _ base.Parser = (*ConfigStreamParser)(nil)
+var _ core.Parser = (*ConfigStreamParser)(nil)
 
 // ConfigStreamParser implements the configuration file parser with streaming support
 type ConfigStreamParser struct {

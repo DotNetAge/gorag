@@ -216,3 +216,38 @@ All notable changes to this project will be documented in this file.
 * 自动化图构建（indexing 侧）。
 * 智能意图路由（retrieval 侧）。
 * 深度可观测性（framework 侧）。
+
+
+---
+
+
+核心改进概览
+
+
+1. Indexer 接口统一
+    * 统一了 pkg/indexing/indexing.go 与 pkg/indexer/builder.go 中的 Indexer 接口定义。
+    * IndexFile 现在返回 (*core.IndexingContext, error)，以便获取索引过程中的上下文和元数据。
+    * 新增了 IndexDirectory(ctx, path, recursive) 方法。
+2. 实现高效并发索引
+    * 在 defaultIndexer 中实现了 IndexDirectory。
+    * 引入了 Worker Pool 模式（基于 errgroup），支持多协程并发处理目录下的文件。
+    * 默认并发数为 10（可配置），显著提升了大规模文档库的初始化索引速度。
+3. 增强型工厂函数与配置选项 (Functional Options)
+    * 实现了 DefaultIndexer 工厂函数，支持以下配置选项：
+        * WithConcurrency(bool) / WithWorkers(int)：控制并发性能。
+        * WithAllParsers()：一键加载 20+ 内置解析器。
+        * WithWatchDir(dirs...)：配置监控目录。
+        * WithStore, WithGraph, WithEmbedding 等：支持 DI 风格的组件注入。
+4. 解析器兼容性补全 (Bug Fix)
+    * 修复了多个流式解析器（tscode, xml, yaml, log, config）未完全实现 core.Parser 接口的问题。
+    * 为这些解析器补全了 Parse(ctx, content, metadata) 和 Supports(contentType) 方法。
+    * 更新了 ParserRegistry，确保其返回类型统一为 core.Parser，解决了之前的类型转换编译错误。
+5. 文件监控 (Watcher) 适配
+    * 更新了 pkg/indexing/watcher.go，使其完美适配新的 Indexer 接口。
+    * 在 defaultIndexer 中增加了 Start() 方法，支持阻塞式启动目录监控。
+
+
+验证情况
+* 单元测试：新建了 pkg/indexer/builder_test.go，验证了 Init、WithAllParsers 以及自动初始化逻辑，全部通过。
+* 编译检查：解决了由于接口不一致导致的 pkg/indexer 编译失败问题。
+* 代码规范：所有修改均符合 GEMINI.md 定义的模块化和高性能要求。

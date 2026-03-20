@@ -308,7 +308,7 @@ func (fw *FileWatcher) handleCreateOrModify(filePath string) {
 		}
 
 		// ✅ 触发完整索引流程
-		if err := fw.indexer.IndexFile(fw.ctx, filePath); err != nil {
+		if _, err := fw.indexer.IndexFile(fw.ctx, filePath); err != nil {
 			fw.logger.Error("Failed to index file", err, map[string]interface{}{
 				"path": filePath,
 			})
