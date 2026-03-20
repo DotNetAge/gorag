@@ -4,6 +4,7 @@ import (
 	"context"
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
+	"github.com/DotNetAge/gorag/pkg/observability"
 )
 
 // IndexingContext 专门用于文档索引管线的上下文
@@ -11,6 +12,10 @@ type IndexingContext struct {
 	Ctx      context.Context `json:"-"`
 	FilePath string          `json:"file_path,omitempty"`
 	Metadata Metadata        `json:"metadata,omitempty"`
+
+	// 可观测性
+	Tracer observability.Tracer `json:"-"`
+	Span   observability.Span   `json:"-"`
 
 	// 流式处理通道
 	Documents <-chan *Document `json:"-"`
@@ -30,6 +35,7 @@ func NewIndexingContext(ctx context.Context, filePath string) *IndexingContext {
 		Ctx:      ctx,
 		FilePath: filePath,
 		Metadata: Metadata{Source: filePath, FileName: filePath},
+		Tracer:   observability.NewNoopTracer(),
 		Custom:   make(map[string]any),
 	}
 }
@@ -41,6 +47,10 @@ type RetrievalContext struct {
 	// 输入查询
 	OriginalQuery string `json:"original_query"`
 	Query         *Query `json:"query"` // 当前正在处理的查询（可能是重写后的）
+
+	// 可观测性
+	Tracer observability.Tracer `json:"-"`
+	Span   observability.Span   `json:"-"`
 
 	// 检索中间产物
 	RetrievedChunks [][]*Chunk          `json:"retrieved_chunks"` // 支持多路召回
@@ -67,6 +77,7 @@ func NewRetrievalContext(ctx context.Context, queryText string) *RetrievalContex
 		Ctx:             ctx,
 		OriginalQuery:   queryText,
 		Query:           &Query{Text: queryText},
+		Tracer:          observability.NewNoopTracer(),
 		RetrievedChunks: make([][]*Chunk, 0),
 		ParallelResults: make(map[string][]*Chunk),
 		Filters:         make(map[string]any),

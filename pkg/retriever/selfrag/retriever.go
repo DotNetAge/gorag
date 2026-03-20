@@ -11,6 +11,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
 	"github.com/DotNetAge/gorag/pkg/steps/generate"
@@ -19,6 +20,7 @@ import (
 
 type selfRAGRetriever struct {
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
+	tracer   observability.Tracer
 }
 
 // NewRetriever creates a new Self-RAG retriever with self-reflection capabilities.
@@ -36,6 +38,10 @@ func NewRetriever(
 
 	if options.logger == nil {
 		options.logger = logging.NewNoopLogger()
+	}
+
+	if options.tracer == nil {
+		options.tracer = observability.NewNoopTracer()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()
@@ -63,7 +69,10 @@ func NewRetriever(
 		logger:     options.logger,
 	})
 
-	return &selfRAGRetriever{pipeline: p}
+	return &selfRAGRetriever{
+		pipeline: p,
+		tracer:   options.tracer,
+	}
 }
 
 func (r *selfRAGRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
@@ -71,10 +80,19 @@ func (r *selfRAGRetriever) Retrieve(ctx context.Context, queries []string, topK 
 
 	for _, q := range queries {
 		retrievalCtx := core.NewRetrievalContext(ctx, q)
+		retrievalCtx.Tracer = r.tracer
 
-		if err := r.pipeline.Execute(ctx, retrievalCtx); err != nil {
+		// Start root span
+		retrievalCtx.Ctx, retrievalCtx.Span = r.tracer.StartSpan(retrievalCtx.Ctx, "SelfRAG.Retrieve")
+		retrievalCtx.Span.SetTag("query", q)
+
+		if err := r.pipeline.Execute(retrievalCtx.Ctx, retrievalCtx); err != nil {
+			retrievalCtx.Span.LogEvent("error", map[string]any{"error": err.Error()})
+			retrievalCtx.Span.End()
 			return nil, err
 		}
+
+		retrievalCtx.Span.End()
 
 		var allChunks []*core.Chunk
 		for _, group := range retrievalCtx.RetrievedChunks {
@@ -117,6 +135,9 @@ func (s *refinementStep) Name() string {
 }
 
 func (s *refinementStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	_, span := context.Tracer.StartSpan(ctx, "SelfRAG.RefinementLoop")
+	defer span.End()
+
 	var lastEval *core.RAGEvaluation
 
 	for i := 0; i < s.maxRetries; i++ {
@@ -133,9 +154,17 @@ func (s *refinementStep) Execute(ctx context.Context, context *core.RetrievalCon
 		eval, err := s.evaluator.Evaluate(ctx, context.Query.Text, context.Answer.Answer, contextStr)
 		if err != nil {
 			s.logger.Error("Self-RAG evaluation failed", err)
+			span.LogEvent("evaluation_error", map[string]any{"error": err.Error(), "retry": i})
 			return nil // Non-fatal, keep current answer
 		}
 		lastEval = eval
+
+		span.LogEvent("critique", map[string]any{
+			"retry":   i,
+			"score":   eval.OverallScore,
+			"passed":  eval.Passed,
+			"feedback": eval.Feedback,
+		})
 
 		if eval.OverallScore >= s.threshold || eval.Passed {
 			s.logger.Info("Self-RAG: answer passed evaluation", map[string]any{
@@ -152,6 +181,7 @@ func (s *refinementStep) Execute(ctx context.Context, context *core.RetrievalCon
 		})
 
 		// 3. Refine answer based on feedback
+		span.LogEvent("refining_answer", map[string]any{"retry": i})
 		refinePrompt := fmt.Sprintf(`The previous answer was not good enough. 
 Feedback: %s
 
@@ -172,6 +202,7 @@ New Answer:`, eval.Feedback, contextStr, context.Query.Text, context.Answer.Answ
 		resp, err := s.llm.Chat(ctx, messages)
 		if err != nil {
 			s.logger.Error("Self-RAG refinement Chat failed", err)
+			span.LogEvent("refinement_error", map[string]any{"error": err.Error(), "retry": i})
 			break
 		}
 
@@ -192,6 +223,7 @@ type Options struct {
 	maxRetries int
 	docStore   store.DocStore
 	logger     logging.Logger
+	tracer     observability.Tracer
 }
 
 func defaultOptions() *Options {
@@ -199,6 +231,7 @@ func defaultOptions() *Options {
 		topK:       5,
 		threshold:  0.7,
 		maxRetries: 3,
+		tracer:     observability.NewNoopTracer(),
 	}
 }
 
@@ -225,6 +258,12 @@ func WithMaxRetries(r int) Option {
 func WithDocStore(s store.DocStore) Option {
 	return func(o *Options) {
 		o.docStore = s
+	}
+}
+
+func WithTracer(t observability.Tracer) Option {
+	return func(o *Options) {
+		o.tracer = t
 	}
 }
 

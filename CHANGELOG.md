@@ -153,3 +153,66 @@ All notable changes to this project will be documented in this file.
 技术亮点：父子文档检索 (PDR)
 
 在本项目中，DocStore 不再仅仅是一个静态存储库，而是通过 Enrichment Step 变成了一个动态语境增强器。这解决了 RAG 的经典痛点：检索时需要小分块（精确），生成时需要大上下文（全面）。
+
+
+---
+
+1. 新增的存储驱动
+   * SQLite GraphStore: 推荐的默认本地方案。利用递归 CTE 实现高效的多跳关系遍历，无需额外安装数据库。
+   * BoltDB GraphStore: 纯 Go 实现的嵌入式 K/V 方案。通过内置邻接表索引，提供极高的本地读写性能。
+   * Neo4j GraphStore: 工业级方案。支持完整的 Cypher 查询语言，适用于大规模、复杂的企业级知识图谱。
+2. 核心架构优化
+   * 标准化接口: 所有驱动均严格遵循 store.GraphStore 接口，支持 UpsertNodes、UpsertEdges 和 GetNeighbors。
+   * Cypher 扩展: Neo4j 实现中直接支持 Query 方法执行原生 Cypher 语句，为未来的复杂图算法（如 PageRank 或社区发现）留下了接口。
+   * GraphRAG 深度集成: 这些存储驱动已与 pkg/retriever/graph 检索器无缝对接。现在在 GraphRAG 模式下，系统会根据提取的实体，自动从这些存储中检索子图上下文。
+3. 交付物
+   * pkg/indexing/store/sqlite/graphstore.go & graphstore_test.go
+   * pkg/indexing/store/bolt/graphstore.go & graphstore_test.go
+   * pkg/indexing/store/neo4j/graphstore.go (新增 Neo4j 官方驱动依赖)
+   * pkg/retriever/graph/README.md (更新了存储配置文档)
+
+
+---
+
+本次更新的关键特性：
+
+
+1. 新增 CypherStep (pkg/retriever/graph/cypher_step.go):
+    * 这是一个专门用于“逻辑跳跃”的检索步骤。它会利用你定义的 Cypher 模板（如：找 CEO、找竞争对手、找风险关联），在图数据库中自动运行并提取推理结果。
+    * 提取到的结果会自动注入到 graph_context 中，以 [Deep Reasoning Insights] 的形式提供给 LLM，极大地增强了 AI 处理复杂逻辑问题的能力。
+2. 灵活的流水线扩展:
+    * 更新了 NewRetriever 的设计，现在支持 WithCustomStep 选项。
+    * 这意味着你可以根据不同的业务场景，在检索器中注入无限多个 Cypher 模板步骤。例如，你可以同时运行一个“找合作伙伴”的模板和一个“找潜在风险”的模板。
+3. 文档同步更新:
+    * 在 pkg/retriever/graph/README.md 中补充了如何配置和使用 Cypher 模板的具体代码示例。
+
+现在的架构优势：
+你的 GoRAG 框架现在不仅能搜到“文档里写了什么”，还能通过图谱推理出“文档里没直说、但逻辑上存在的关系”。
+
+
+目前我们已经具备了：
+  * 本地嵌入式图存储 (SQLite/BoltDB)
+  * 工业级图存储 (Neo4j)
+  * Cypher 模板检索
+  * 父子文档原文增强 (PDR)
+
+
+---
+
+核心可观测性升级总结：
+
+
+1. 上下文贯通：在 IndexingContext 和 RetrievalContext 中原生集成了 Tracer 和 Span。这使得流水线中的每一个 Step 都能轻松开启子 Span。
+2. GraphRAG 全程追踪：
+    * Retrieve 方法会开启一个名为 GraphRAG.Retrieve 的根 Span。
+    * EntityExtraction 步骤会开启子 Span，并记录提取到的实体数量和具体名称。
+    * GraphSearch 步骤会记录每一跳找到的节点数和边数。
+3. 零侵入性：默认使用 NoopTracer，对不使用追踪的用户完全透明且无性能损耗。
+4. 标准化接口：用户可以通过注入符合 observability.Tracer 接口的实现（如接入 Jaeger, Honeycomb 或 OpenTelemetry），瞬间获得整个 RAG 系统的高级链路图。
+
+
+目前项目的状态：
+我们已经攻克了：
+* 自动化图构建（indexing 侧）。
+* 智能意图路由（retrieval 侧）。
+* 深度可观测性（framework 侧）。

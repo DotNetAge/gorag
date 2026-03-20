@@ -40,3 +40,43 @@ retriever := graph.NewRetriever(
     // 其他选项...
 )
 ```
+
+## 支持的图存储 (GraphStore)
+
+GoRAG 提供多种图存储实现：
+
+1.  **SQLite (嵌入式)**：推荐用于本地和轻量级应用。支持递归 CTE 遍历。
+2.  **BoltDB (嵌入式)**：纯 Go 实现，极高性能的本地 K/V 索引。
+3.  **Neo4j (工业级)**：支持大规模知识图谱，具备完整的 **Cypher** 查询能力。
+
+### Neo4j 使用示例
+
+```go
+import "github.com/DotNetAge/gorag/pkg/indexing/store/neo4j"
+
+graphStore, _ := neo4j.NewGraphStore("bolt://localhost:7687", "neo4j", "password", "neo4j")
+```
+
+## 使用 Cypher 模板进行深度推理
+
+通过 `CypherStep`，你可以定义特定的图路径查询模板，帮助 LLM 发现文档中未直接描述的隐藏关系。
+
+```go
+import "github.com/DotNetAge/gorag/pkg/retriever/graph"
+
+// 定义：查找某人入职公司的 CEO
+const ceoFinderTemplate = `
+    MATCH (p:Entity {id: $id})-[:WORKS_AT]->(c:Entity)<-[:CEO_OF]-(ceo:Entity)
+    RETURN ceo.id as name
+`
+
+retriever := graph.NewRetriever(
+    vectorStore,
+    graphStore,
+    docStore,
+    embedder,
+    llm,
+    // 注入自定义 Cypher 推理步骤
+    graph.WithCustomStep(graph.NewCypherStep(graphStore, ceoFinderTemplate, logger)),
+)
+```

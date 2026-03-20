@@ -29,6 +29,8 @@ const (
 	IntentChat           IntentType = "chat"
 	IntentDomainSpecific IntentType = "domain_specific"
 	IntentFactCheck      IntentType = "fact_check"
+	IntentRelational     IntentType = "relational" // New: Queries about entity relationships (GraphRAG)
+	IntentGlobal         IntentType = "global"     // New: Summary or global knowledge queries
 )
 
 // IntentResult holds the result of intent classification.

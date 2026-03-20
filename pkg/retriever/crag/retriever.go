@@ -9,6 +9,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	"github.com/DotNetAge/gorag/pkg/steps/crag"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
@@ -18,6 +19,7 @@ import (
 
 type cragRetriever struct {
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
+	tracer   observability.Tracer
 }
 
 // NewRetriever creates a new Corrective RAG (CRAG) retriever.
@@ -35,6 +37,10 @@ func NewRetriever(
 
 	if options.logger == nil {
 		options.logger = logging.NewNoopLogger()
+	}
+
+	if options.tracer == nil {
+		options.tracer = observability.NewNoopTracer()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()
@@ -63,7 +69,10 @@ func NewRetriever(
 	gen := answer.New(llm, answer.WithLogger(options.logger))
 	p.AddStep(stepgen.Generate(gen, options.logger, nil))
 
-	return &cragRetriever{pipeline: p}
+	return &cragRetriever{
+		pipeline: p,
+		tracer:   options.tracer,
+	}
 }
 
 func (r *cragRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
@@ -71,10 +80,19 @@ func (r *cragRetriever) Retrieve(ctx context.Context, queries []string, topK int
 
 	for _, q := range queries {
 		retrievalCtx := core.NewRetrievalContext(ctx, q)
+		retrievalCtx.Tracer = r.tracer
 
-		if err := r.pipeline.Execute(ctx, retrievalCtx); err != nil {
+		// Start root span
+		retrievalCtx.Ctx, retrievalCtx.Span = r.tracer.StartSpan(retrievalCtx.Ctx, "CRAG.Retrieve")
+		retrievalCtx.Span.SetTag("query", q)
+
+		if err := r.pipeline.Execute(retrievalCtx.Ctx, retrievalCtx); err != nil {
+			retrievalCtx.Span.LogEvent("error", map[string]any{"error": err.Error()})
+			retrievalCtx.Span.End()
 			return nil, err
 		}
+
+		retrievalCtx.Span.End()
 
 		var allChunks []*core.Chunk
 		for _, group := range retrievalCtx.RetrievedChunks {
@@ -104,7 +122,11 @@ func (s *cragFallbackStep) Name() string {
 }
 
 func (s *cragFallbackStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	_, span := context.Tracer.StartSpan(ctx, "CRAG.Fallback")
+	defer span.End()
+
 	if context.Agentic == nil || context.Agentic.Custom["crag_evaluation"] == nil {
+		span.LogEvent("no_evaluation_found", nil)
 		return nil
 	}
 
@@ -113,10 +135,7 @@ func (s *cragFallbackStep) Execute(ctx context.Context, context *core.RetrievalC
 		return nil
 	}
 
-	// Logic:
-	// - Correct: use retrieved chunks (do nothing here)
-	// - Incorrect: replace with web search results
-	// - Ambiguous: supplement with web search results
+	span.SetTag("label", string(evaluation.Label))
 
 	if evaluation.Label == core.CRAGRelevant {
 		s.logger.Debug("CRAG: context relevant, skipping fallback", map[string]any{"query": context.Query.Text})
@@ -125,6 +144,7 @@ func (s *cragFallbackStep) Execute(ctx context.Context, context *core.RetrievalC
 
 	if s.searcher == nil {
 		s.logger.Warn("CRAG: fallback needed but no WebSearcher provided", map[string]any{"label": evaluation.Label})
+		span.LogEvent("no_websearcher", nil)
 		return nil
 	}
 
@@ -133,11 +153,15 @@ func (s *cragFallbackStep) Execute(ctx context.Context, context *core.RetrievalC
 		"query": context.Query.Text,
 	})
 
+	span.LogEvent("web_search_start", nil)
 	webChunks, err := s.searcher.Search(ctx, context.Query.Text, s.topK)
 	if err != nil {
 		s.logger.Error("CRAG: web search fallback failed", err)
+		span.LogEvent("web_search_error", map[string]any{"error": err.Error()})
 		return nil // Non-fatal
 	}
+
+	span.LogEvent("web_search_completed", map[string]any{"count": len(webChunks)})
 
 	if evaluation.Label == core.CRAGIrrelevant {
 		// Replace all retrieved chunks
@@ -155,11 +179,13 @@ type Options struct {
 	webSearcher core.WebSearcher
 	docStore    store.DocStore
 	logger      logging.Logger
+	tracer      observability.Tracer
 }
 
 func defaultOptions() *Options {
 	return &Options{
-		topK: 5,
+		topK:   5,
+		tracer: observability.NewNoopTracer(),
 	}
 }
 
@@ -180,6 +206,12 @@ func WithWebSearcher(s core.WebSearcher) Option {
 func WithDocStore(s store.DocStore) Option {
 	return func(o *Options) {
 		o.docStore = s
+	}
+}
+
+func WithTracer(t observability.Tracer) Option {
+	return func(o *Options) {
+		o.tracer = t
 	}
 }
 

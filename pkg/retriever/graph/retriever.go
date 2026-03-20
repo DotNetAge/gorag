@@ -35,6 +35,7 @@ Answer:`
 
 type graphRetriever struct {
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
+	tracer   observability.Tracer
 }
 
 // NewRetriever creates a new GraphRAG retriever.
@@ -54,6 +55,10 @@ func NewRetriever(
 		options.logger = logging.NewNoopLogger()
 	}
 
+	if options.tracer == nil {
+		options.tracer = observability.NewNoopTracer()
+	}
+
 	p := pipeline.New[*core.RetrievalContext]()
 
 	// 1. Entity Extraction
@@ -69,6 +74,11 @@ func NewRetriever(
 		limit:  options.limit,
 		logger: options.logger,
 	})
+
+	// 2.5 Custom Steps (e.g. Cypher reasoning)
+	for _, step := range options.customSteps {
+		p.AddStep(step)
+	}
 
 	// 3. Vector Search (for hybrid retrieval)
 	p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
@@ -87,7 +97,10 @@ func NewRetriever(
 		logger:         options.logger,
 	})
 
-	return &graphRetriever{pipeline: p}
+	return &graphRetriever{
+		pipeline: p,
+		tracer:   options.tracer,
+	}
 }
 
 func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
@@ -95,10 +108,19 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 
 	for _, q := range queries {
 		retrievalCtx := core.NewRetrievalContext(ctx, q)
+		retrievalCtx.Tracer = r.tracer
 
-		if err := r.pipeline.Execute(ctx, retrievalCtx); err != nil {
+		// Start root span for retrieval
+		retrievalCtx.Ctx, retrievalCtx.Span = r.tracer.StartSpan(retrievalCtx.Ctx, "GraphRAG.Retrieve")
+		retrievalCtx.Span.SetTag("query", q)
+
+		if err := r.pipeline.Execute(retrievalCtx.Ctx, retrievalCtx); err != nil {
+			retrievalCtx.Span.LogEvent("error", map[string]any{"error": err.Error()})
+			retrievalCtx.Span.End()
 			return nil, err
 		}
+
+		retrievalCtx.Span.End()
 
 		var allChunks []*core.Chunk
 		for _, group := range retrievalCtx.RetrievedChunks {
@@ -127,12 +149,17 @@ func (s *entityExtractionStep) Name() string {
 }
 
 func (s *entityExtractionStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	_, span := context.Tracer.StartSpan(ctx, "GraphRAG.ExtractEntities")
+	defer span.End()
+
 	res, err := s.extractor.Extract(ctx, context.Query)
 	if err != nil {
 		s.logger.Error("failed to extract entities", err)
+		span.LogEvent("error", map[string]any{"error": err.Error()})
 		return nil // Non-fatal
 	}
 
+	span.LogEvent("entities_extracted", map[string]any{"count": len(res.Entities), "entities": res.Entities})
 	context.Custom["extracted_entities"] = res.Entities
 	return nil
 }
@@ -150,10 +177,16 @@ func (s *graphSearchStep) Name() string {
 }
 
 func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+	_, span := context.Tracer.StartSpan(ctx, "GraphRAG.GraphSearch")
+	defer span.End()
+
 	entities, ok := context.Custom["extracted_entities"].([]string)
 	if !ok || len(entities) == 0 {
+		span.LogEvent("no_entities_found", nil)
 		return nil
 	}
+
+	span.SetTag("entities_count", len(entities))
 
 	var graphContext strings.Builder
 	for _, entity := range entities {
@@ -163,10 +196,12 @@ func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalCo
 				"entity": entity,
 				"error":  err,
 			})
+			span.LogEvent("error_fetching_neighbors", map[string]any{"entity": entity, "error": err.Error()})
 			continue
 		}
 
 		if len(nodes) > 0 {
+			span.LogEvent("subgraph_found", map[string]any{"entity": entity, "nodes": len(nodes), "edges": len(edges)})
 			graphContext.WriteString(fmt.Sprintf("Entity: %s\n", entity))
 			for _, node := range nodes {
 				if node.ID != entity {
@@ -252,6 +287,8 @@ type Options struct {
 	promptTemplate string
 	docStore       store.DocStore
 	logger         logging.Logger
+	tracer         observability.Tracer
+	customSteps    []pipeline.Step[*core.RetrievalContext]
 }
 
 func defaultOptions() *Options {
@@ -260,6 +297,8 @@ func defaultOptions() *Options {
 		depth:          1,
 		limit:          10,
 		promptTemplate: defaultGraphRAGPrompt,
+		tracer:         observability.NewNoopTracer(),
+		customSteps:    make([]pipeline.Step[*core.RetrievalContext], 0),
 	}
 }
 
@@ -301,5 +340,19 @@ func WithPromptTemplate(t string) Option {
 func WithLogger(l logging.Logger) Option {
 	return func(o *Options) {
 		o.logger = l
+	}
+}
+
+func WithTracer(t observability.Tracer) Option {
+	return func(o *Options) {
+		o.tracer = t
+	}
+}
+
+func WithCustomStep(step pipeline.Step[*core.RetrievalContext]) Option {
+	return func(o *Options) {
+		if step != nil {
+			o.customSteps = append(o.customSteps, step)
+		}
 	}
 }

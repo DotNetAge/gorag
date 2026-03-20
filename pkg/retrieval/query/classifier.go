@@ -22,25 +22,23 @@ Your task is to classify the user's query into one of the following intents:
 1. **chat**: Casual conversation, greetings, simple factual questions that LLM can answer directly
    - Examples: "Hello", "How are you?", "What is 2+2?", "Tell me a joke"
 
-2. **domain_specific**: Complex questions requiring domain-specific knowledge retrieval
-   - Examples: "What is our company's refund policy?", "Explain the architecture of goRAG", "How does the semantic cache work?"
+2. **domain_specific**: Semantic search for concepts, policies, or topics (VectorRAG)
+   - Examples: "What is our company's refund policy?", "How does the semantic cache work?"
 
-3. **fact_check**: Questions about recent events, current facts, or external verification
-   - Examples: "What's the weather today?", "Who won the game last night?", "What's the latest news about AI?"
+3. **relational**: Questions about specific entities and their relationships (GraphRAG)
+   - Examples: "Who is the CEO of A company?", "How is X technology related to Y framework?"
 
-Analyze the query carefully and consider:
-- Does it require accessing our knowledge base? → domain_specific
-- Can it be answered with general knowledge? → chat
-- Does it need real-time or external information? → fact_check
+4. **global**: Broad, summary-level queries about the entire knowledge base
+   - Examples: "What are the core technologies used in this project?", "Summarize the history of our company."
 
-[Query]
-%s
+5. **fact_check**: Questions needing external verification or real-time data
+   - Examples: "What's the weather today?", "Who won the game last night?"
 
-Output your response as a valid JSON object with this exact structure:
+Analyze the query carefully and output your response as a valid JSON object:
 {
-  "intent": "chat|domain_specific|fact_check",
+  "intent": "chat|domain_specific|relational|global|fact_check",
   "confidence": 0.0-1.0,
-  "reason": "brief explanation of your reasoning"
+  "reason": "brief explanation"
 }`
 
 // intentRouter is the implementation of core.IntentClassifier.
