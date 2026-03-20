@@ -26,7 +26,7 @@ type sentenceWindowExpand struct {
 // Example:
 //
 //	p.AddStep(rerank.SentenceWindowExpand(expander, logger, metrics))
-func SentenceWindowExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.State] {
+func SentenceWindowExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -42,8 +42,8 @@ func (s *sentenceWindowExpand) Name() string {
 	return "SentenceWindowExpand"
 }
 
-// Execute enhances retrieval results by expanding chunks with sentence window context.
-func (s *sentenceWindowExpand) Execute(ctx context.Context, state *core.State) error {
+// Execute expands chunks to include surrounding sentences.
+func (s *sentenceWindowExpand) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("SentenceWindowExpand: 'query' not found in state")
 	}

@@ -5,7 +5,7 @@
 //
 // Example usage:
 //
-//	p := pipeline.New[*core.State]()
+//	p := pipeline.New[*core.RetrievalContext]()
 //	p.AddSteps(
 //	    fuse.RRF(fusionEngine, 10, logger, metrics),
 //	)

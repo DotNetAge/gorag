@@ -21,7 +21,7 @@ func Order(
 	enhancer core.ResultEnhancer,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -38,7 +38,7 @@ func (s *order) Name() string {
 }
 
 // Execute enhances retrieval results.
-func (s *order) Execute(ctx context.Context, state *core.State) error {
+func (s *order) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("Rerank: 'query' not found in state")
 	}

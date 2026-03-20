@@ -1,13 +1,14 @@
 package stepinx
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
 	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/pkg/core"
 )
 
 // multi parses documents using multiple parsers with intelligent routing.
@@ -23,7 +24,7 @@ type multi struct {
 // Example:
 //
 //	p.AddStep(indexing.Multi(parser1, parser2, parser3))
-func Multi(parsers ...core.Parser) pipeline.Step[*core.State] {
+func Multi(parsers ...core.Parser) pipeline.Step[*core.IndexingContext] {
 	return &multi{parsers: parsers}
 }
 
@@ -49,7 +50,7 @@ func (s *multi) selectParser(filePath string) (core.Parser, error) {
 }
 
 // Execute streams and parses documents from the file.
-func (s *multi) Execute(ctx context.Context, state *core.State) error {
+func (s *multi) Execute(ctx context.Context, state *core.IndexingContext) error {
 	if len(s.parsers) == 0 {
 		return fmt.Errorf("no parsers configured")
 	}

@@ -26,7 +26,7 @@ func MultiStore(
 	graphStore store.GraphStore,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -43,7 +43,7 @@ func (s *multiStore) Name() string {
 	return "MultiStore"
 }
 
-func (s *multiStore) Execute(ctx context.Context, state *core.State) error {
+func (s *multiStore) Execute(ctx context.Context, state *core.IndexingContext) error {
 	s.logger.Info("Starting MultiStore step", map[string]interface{}{
 		"vectors_count": len(state.Vectors),
 		"file_path":     state.FilePath,

@@ -31,7 +31,7 @@ func Evaluate(
 	evaluator core.CRAGEvaluator,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -48,7 +48,7 @@ func (s *evaluate) Name() string {
 }
 
 // Execute runs the CRAG evaluation on retrieved chunks.
-func (s *evaluate) Execute(ctx context.Context, state *core.State) error {
+func (s *evaluate) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	query := state.Query
 	if query == nil || query.Text == "" {
 		s.logger.Debug("CRAGEvaluate: no query available, skipping", map[string]interface{}{

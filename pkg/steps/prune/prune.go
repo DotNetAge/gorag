@@ -21,7 +21,7 @@ func Prune(
 	enhancer core.ResultEnhancer,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -38,7 +38,7 @@ func (s *prune) Name() string {
 }
 
 // Execute enhances retrieval results by pruning.
-func (s *prune) Execute(ctx context.Context, state *core.State) error {
+func (s *prune) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("Prune: 'query' not found in state")
 	}

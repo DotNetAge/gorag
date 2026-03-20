@@ -129,3 +129,27 @@ All notable changes to this project will be documented in this file.
 - Resolved integration test flakiness with Testcontainers for Milvus, Qdrant, and Weaviate.
 - Fixed `mockLLM` implementations in test suites to correctly emulate `gochat`'s new stream chunk structures (`gochatcore.StreamEvent`).
 - Fixed vector dimension mismatches and improved test coverage to reliably stay above 85%.
+
+
+
+1. GraphRAG 检索器实现 (pkg/retriever/graph)：
+    * 多路召回：实现了实体提取（Entity Extraction）和知识图谱遍历（Neighbors Search）。
+    * 混合检索：将图谱的结构化关系与向量库的非结构化分块相结合。
+    * 模版化生成：自定义了生成步骤，通过 text/template 将图谱上下文和文档分块精准喂给 LLM。
+    * 验证：已完成单元测试，确保了从查询到实体、再到图谱检索和生成的链路通畅。
+2. AgenticRAG 检索器实现 (pkg/retriever/agentic)：
+    * 自主推理：构建了基于 Agent 接口的检索器，支持 LLM 决定何时使用何种工具。
+    * 追踪能力：在检索结果中集成了“推理步骤”（Thought/Action/Observation）的追踪，方便调试和审计。
+    * 统一上下文：增强了核心 RetrievalContext，支持智能体在多轮迭代中保存中间状态。
+3. 基础设施建设
+   * 新增 Enrichment 步骤：在 pkg/steps/enrich/docstore.go 中实现了通用的 EnrichWithDocStore 插件。该步骤能自动识别检索到的 Chunk 及其关联的 DocumentID，并从 DocStore 中实时召回父文档全文。
+4. 高级检索器升级，我对以下三个核心检索器进行了改造，使其支持 WithDocStore 选项：
+   * GraphRAG：在图谱检索后，利用 DocStore 补全实体的原始文本背景，解决图谱节点描述过于抽象的问题。
+   * CRAG：当评估结果为“模糊（Ambiguous）”时，优先触发 DocStore 的深度证据挖掘，尝试在本域内解决语境缺失，减少昂贵的 Web 搜索调用。
+   * Self-RAG：在自我反思（Reflection）环节，若发现生成的回答不完整，会自动触发 DocStore 召回父文档，为 Refinement 循环提供更宏观的语义支持。
+
+---
+
+技术亮点：父子文档检索 (PDR)
+
+在本项目中，DocStore 不再仅仅是一个静态存储库，而是通过 Enrichment Step 变成了一个动态语境增强器。这解决了 RAG 的经典痛点：检索时需要小分块（精确），生成时需要大上下文（全面）。

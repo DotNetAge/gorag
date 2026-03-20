@@ -23,7 +23,7 @@ type entities struct {
 // Example:
 //
 //	p.AddStep(indexing.Entities(extractor, logger))
-func Entities(extractor core.EntityExtractor, logger logging.Logger) pipeline.Step[*core.State] {
+func Entities(extractor core.EntityExtractor, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -38,8 +38,8 @@ func (s *entities) Name() string {
 	return "ExtractEntities"
 }
 
-// Execute extracts entities from all chunks and builds graph nodes/edges.
-func (s *entities) Execute(ctx context.Context, state *core.State) error {
+// Execute extracts entities from all documents.
+func (s *entities) Execute(ctx context.Context, state *core.IndexingContext) error {
 	if s.extractor == nil {
 		return fmt.Errorf("entity extractor not configured")
 	}

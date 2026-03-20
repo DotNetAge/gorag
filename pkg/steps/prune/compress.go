@@ -30,7 +30,7 @@ type compress struct {
 // Example:
 //
 //	p.AddStep(prune.Compress(llm, logger, metrics, 300))
-func Compress(llm core.Client, logger logging.Logger, metrics core.Metrics, maxTokens int) pipeline.Step[*core.State] {
+func Compress(llm core.Client, logger logging.Logger, metrics core.Metrics, maxTokens int) pipeline.Step[*core.RetrievalContext] {
 	if maxTokens <= 0 {
 		maxTokens = 300
 	}
@@ -51,7 +51,7 @@ func (s *compress) Name() string {
 }
 
 // Execute compresses all retrieved chunks to extract only relevant information.
-func (s *compress) Execute(ctx context.Context, state *core.State) error {
+func (s *compress) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if len(state.RetrievedChunks) == 0 {
 		return nil
 	}

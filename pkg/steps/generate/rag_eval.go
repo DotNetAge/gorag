@@ -27,7 +27,7 @@ type ragEvaluator struct {
 // Example:
 //
 //	p.AddStep(generate.RAGEvaluation(evaluator, logger, metrics))
-func RAGEvaluation(evaluator core.RAGEvaluator, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.State] {
+func RAGEvaluation(evaluator core.RAGEvaluator, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -44,7 +44,7 @@ func (s *ragEvaluator) Name() string {
 }
 
 // Execute evaluates the generated answer using the RAG evaluator.
-func (s *ragEvaluator) Execute(ctx context.Context, state *core.State) error {
+func (s *ragEvaluator) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil || state.Query.Text == "" {
 		return fmt.Errorf("ragEvaluator: query required")
 	}

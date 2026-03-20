@@ -18,7 +18,7 @@ type crossEncoderRerank struct {
 }
 
 // CrossEncoderRerank creates a cross-encoder reranking step.
-func CrossEncoderRerank(reranker core.Reranker, topK int, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.State] {
+func CrossEncoderRerank(reranker core.Reranker, topK int, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -39,7 +39,7 @@ func (s *crossEncoderRerank) Name() string {
 }
 
 // Execute reranks retrieved chunks.
-func (s *crossEncoderRerank) Execute(ctx context.Context, state *core.State) error {
+func (s *crossEncoderRerank) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil || state.Query.Text == "" {
 		return fmt.Errorf("crossEncoderRerank: query required")
 	}

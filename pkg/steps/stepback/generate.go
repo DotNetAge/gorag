@@ -22,7 +22,7 @@ type generate struct {
 // Example:
 //
 //	p.AddStep(stepback.Generate(generator))
-func Generate(generator core.QueryDecomposer) pipeline.Step[*core.State] {
+func Generate(generator core.QueryDecomposer) pipeline.Step[*core.RetrievalContext] {
 	return &generate{generator: generator}
 }
 
@@ -32,7 +32,7 @@ func (s *generate) Name() string {
 }
 
 // Execute generates a step-back query that is more abstract and general.
-func (s *generate) Execute(ctx context.Context, state *core.State) error {
+func (s *generate) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("StepBackGenerate: 'query' not found in state")
 	}

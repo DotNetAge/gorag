@@ -54,6 +54,9 @@ type RetrievalContext struct {
 	// 最终产出
 	Answer *Result `json:"answer"`
 
+	// 扩展字段
+	Custom map[string]any `json:"custom,omitempty"`
+
 	// 指标
 	Metrics map[string]any `json:"metrics,omitempty"`
 }
@@ -67,13 +70,10 @@ func NewRetrievalContext(ctx context.Context, queryText string) *RetrievalContex
 		RetrievedChunks: make([][]*Chunk, 0),
 		ParallelResults: make(map[string][]*Chunk),
 		Filters:         make(map[string]any),
-		Agentic: &AgenticContext{
-			Metadata:   make(map[string]any),
-			SubQueries: make([]string, 0),
-			Custom:     make(map[string]any),
-		},
-		Answer:  &Result{},
-		Metrics: make(map[string]any),
+		Agentic:         NewAgenticState(),
+		Answer:          &Result{},
+		Custom:          make(map[string]any),
+		Metrics:         make(map[string]any),
 	}
 }
 
@@ -87,7 +87,18 @@ type AgenticContext struct {
 	HypotheticalDocument string         `json:"hypothetical_document,omitempty"`
 	HydeApplied          bool           `json:"hyde_applied,omitempty"`
 	StepBackQuery        string         `json:"step_back_query,omitempty"`
+	CacheHit             bool           `json:"cache_hit,omitempty"`
+	Filters              map[string]any `json:"filters,omitempty"`
 	Custom               map[string]any `json:"custom,omitempty"`
+}
+
+// NewAgenticState 创建新的代理状态
+func NewAgenticState() *AgenticContext {
+	return &AgenticContext{
+		Metadata:   make(map[string]any),
+		SubQueries: make([]string, 0),
+		Custom:     make(map[string]any),
+	}
 }
 
 // Metadata 文件元数据

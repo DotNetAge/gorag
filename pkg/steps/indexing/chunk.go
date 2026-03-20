@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
 )
 
@@ -20,7 +21,7 @@ type chunk struct {
 // Example:
 //
 //	p.AddStep(indexing.Chunk(chunker))
-func Chunk(chunker core.SemanticChunker) *chunk {
+func Chunk(chunker core.SemanticChunker) pipeline.Step[*core.IndexingContext] {
 	return &chunk{chunker: chunker}
 }
 
@@ -30,7 +31,7 @@ func (s *chunk) Name() string {
 }
 
 // Execute chunks all documents from state.Documents channel.
-func (s *chunk) Execute(ctx context.Context, state *core.State) error {
+func (s *chunk) Execute(ctx context.Context, state *core.IndexingContext) error {
 	if s.chunker == nil {
 		return fmt.Errorf("chunker not configured")
 	}

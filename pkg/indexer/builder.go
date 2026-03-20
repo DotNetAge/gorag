@@ -14,15 +14,15 @@ import (
 
 // Indexer is the unified interface for document indexing.
 type Indexer interface {
-	IndexFile(ctx context.Context, filePath string) (*core.State, error)
+	IndexFile(ctx context.Context, filePath string) (*core.IndexingContext, error)
 }
 
 type defaultIndexer struct {
-	pipeline *pipeline.Pipeline[*core.State]
+	pipeline *pipeline.Pipeline[*core.IndexingContext]
 }
 
-func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) (*core.State, error) {
-	state := core.DefaultState(ctx, filePath)
+func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) (*core.IndexingContext, error) {
+	state := core.NewIndexingContext(ctx, filePath)
 	err := idx.pipeline.Execute(ctx, state)
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) (*cor
 // NewVectorIndexer creates a simple text-vector pipeline.
 func NewVectorIndexer(
 	parsers []core.Parser,
-	chunker core.Chunker,
+	chunker core.SemanticChunker,
 	embedder embedding.Provider,
 	vectorStore core.VectorStore,
 	docStore store.DocStore,
@@ -44,25 +44,14 @@ func NewVectorIndexer(
 		logger = logging.NewNoopLogger()
 	}
 
-	p := pipeline.New[*core.State]()
+	p := pipeline.New[*core.IndexingContext]()
 	
-	// Create SemanticChunker wrapper or just handle standard chunker for text pipeline.
-	// For standard pipeline, we can assume standard chunking. The stepinx.Chunk actually 
-	// takes core.SemanticChunker currently, but we can pass an adapter or just use a concrete implementation.
-	// We will cast to SemanticChunker or update stepinx.Chunk. Assuming core.Chunker here won't compile directly
-	// without adapter, but let's cast to keep the code simple.
-	
-	var semChunker core.SemanticChunker
-	if sc, ok := chunker.(core.SemanticChunker); ok {
-		semChunker = sc
-	}
-
 	p.AddSteps(
 		stepinx.Discover(),
 		stepinx.Multi(parsers...),
-		stepinx.Chunk(semChunker), // uses standard or semantic chunking
-		stepinx.Batch(embedder, metrics), // text-only embedding
-		stepinx.MultiStore(vectorStore, docStore, nil, logger, metrics), // GraphStore is nil here
+		stepinx.Chunk(chunker), 
+		stepinx.Batch(embedder, metrics), 
+		stepinx.MultiStore(vectorStore, docStore, nil, logger, metrics), 
 	)
 
 	return &defaultIndexer{pipeline: p}
@@ -92,7 +81,7 @@ func NewMultimodalGraphIndexer(
 		return nil, fmt.Errorf("multimodal pipeline requires EntityExtractor to map entities to GraphStore")
 	}
 
-	p := pipeline.New[*core.State]()
+	p := pipeline.New[*core.IndexingContext]()
 	p.AddSteps(
 		stepinx.Discover(),
 		stepinx.Multi(parsers...),

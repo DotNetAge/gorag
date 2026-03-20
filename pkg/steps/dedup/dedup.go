@@ -14,7 +14,7 @@ type unique struct {
 	metrics   core.Metrics
 }
 
-func Unique(threshold float64, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.State] {
+func Unique(threshold float64, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if threshold <= 0 {
 		threshold = 0.95
 	}
@@ -26,7 +26,7 @@ func Unique(threshold float64, logger logging.Logger, metrics core.Metrics) pipe
 
 func (s *unique) Name() string { return "Unique" }
 
-func (s *unique) Execute(_ context.Context, state *core.State) error {
+func (s *unique) Execute(_ context.Context, state *core.RetrievalContext) error {
 	var allChunks []*core.Chunk
 	for _, chunkGroup := range state.RetrievedChunks {
 		allChunks = append(allChunks, chunkGroup...)

@@ -23,7 +23,7 @@ type batch struct {
 // Example:
 //
 //	p.AddStep(indexing.Batch(embedder, metrics))
-func Batch(embedder embedding.Provider, metrics core.Metrics) pipeline.Step[*core.State] {
+func Batch(embedder embedding.Provider, metrics core.Metrics) pipeline.Step[*core.IndexingContext] {
 	return &batch{
 		embedder: embedder,
 		metrics:  metrics,
@@ -36,7 +36,7 @@ func (s *batch) Name() string {
 }
 
 // Execute embeds all chunks from the channel into vectors.
-func (s *batch) Execute(ctx context.Context, state *core.State) error {
+func (s *batch) Execute(ctx context.Context, state *core.IndexingContext) error {
 	if s.embedder == nil {
 		return fmt.Errorf("embedder not configured")
 	}

@@ -24,6 +24,29 @@ func NewRRFFusionEngine() *RRFFusionEngine {
 	}
 }
 
+// Fuse performs a simple merge of multiple result sets.
+func (e *RRFFusionEngine) Fuse(ctx context.Context, resultSets [][]*core.Chunk, topK int) ([]*core.Chunk, error) {
+	if len(resultSets) == 0 {
+		return nil, nil
+	}
+	if len(resultSets) == 1 {
+		return e.limit(resultSets[0], topK), nil
+	}
+
+	seen := make(map[string]bool)
+	var merged []*core.Chunk
+	for _, resultSet := range resultSets {
+		for _, chunk := range resultSet {
+			if !seen[chunk.ID] {
+				merged = append(merged, chunk)
+				seen[chunk.ID] = true
+			}
+		}
+	}
+
+	return e.limit(merged, topK), nil
+}
+
 // ReciprocalRankFusion merges results from different modalities.
 func (e *RRFFusionEngine) ReciprocalRankFusion(ctx context.Context, resultSets [][]*core.Chunk, topK int) ([]*core.Chunk, error) {
 	if len(resultSets) == 0 {

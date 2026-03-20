@@ -34,7 +34,7 @@ func Score(
 	topK int,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if topK <= 0 {
 		topK = 5
 	}
@@ -55,7 +55,7 @@ func (s *score) Name() string {
 }
 
 // Execute re-scores and re-orders chunks retrieved in previous steps.
-func (s *score) Execute(ctx context.Context, state *core.State) error {
+func (s *score) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("Rerank: 'query' not found in state")
 	}

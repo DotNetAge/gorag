@@ -34,7 +34,7 @@ func Search(
 	topK int,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -56,7 +56,7 @@ func (s *search) Name() string {
 
 // Execute retrieves chunks using the image query vector.
 // It is a no-op when state.Agentic.Custom["image_vector"] is not set.
-func (s *search) Execute(ctx context.Context, state *core.State) error {
+func (s *search) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Agentic == nil {
 		s.logger.Debug("ImageSearch: no AgenticMetadata found, skipping", map[string]interface{}{
 			"step": "ImageSearch",

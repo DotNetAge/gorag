@@ -26,7 +26,7 @@ type parentDocExpand struct {
 // Example:
 //
 //	p.AddStep(rerank.ParentDocExpand(expander, logger, metrics))
-func ParentDocExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.State] {
+func ParentDocExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -42,8 +42,8 @@ func (s *parentDocExpand) Name() string {
 	return "ParentDocExpand"
 }
 
-// Execute enhances retrieval results by expanding child chunks to parent documents.
-func (s *parentDocExpand) Execute(ctx context.Context, state *core.State) error {
+// Execute expands chunks to their parent documents.
+func (s *parentDocExpand) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("ParentDocExpand: 'query' not found in state")
 	}

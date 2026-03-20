@@ -9,16 +9,20 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
+	"github.com/DotNetAge/gorag/pkg/retrieval/fusion"
+	"github.com/DotNetAge/gorag/pkg/retrieval/query"
+	"github.com/DotNetAge/gorag/pkg/steps/decompose"
+	"github.com/DotNetAge/gorag/pkg/steps/fuse"
 	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
-	"github.com/DotNetAge/gorag/pkg/steps/hyde"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
 
-type hydeRetriever struct {
+type fusionRetriever struct {
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
 }
 
-func NewHyDERetriever(
+// NewFusionRetriever creates a new FusionRetriever for multi-perspective search.
+func NewFusionRetriever(
 	vectorStore core.VectorStore,
 	embedder embedding.Provider,
 	llm chat.Client,
@@ -31,19 +35,28 @@ func NewHyDERetriever(
 
 	p := pipeline.New[*core.RetrievalContext]()
 	gen := answer.New(llm, answer.WithLogger(logger))
+	decomposer := query.NewDecomposer(llm, query.WithDecomposerLogger(logger))
+	fusionEngine := fusion.NewRRFFusionEngine()
 
-	p.AddStep(hyde.Generate(gen, logger))
+	// Step 1: Decompose query into sub-queries
+	p.AddStep(decompose.Decompose(decomposer, logger))
 
+	// Step 2: Multi-query search (implicitly handled by vector.Search if it supports sub-queries in context)
+	// We need to check if vector.Search handles sub-queries.
 	p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
 		TopK: topK,
 	}))
 
+	// Step 3: RRF Fusion
+	p.AddStep(fuse.RRF(fusionEngine, topK, logger))
+
+	// Step 4: Generate final answer
 	p.AddStep(stepgen.Generate(gen, logger, nil))
 
-	return &hydeRetriever{pipeline: p}
+	return &fusionRetriever{pipeline: p}
 }
 
-func (r *hydeRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
+func (r *fusionRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
 	results := make([]*core.RetrievalResult, 0, len(queries))
 
 	for _, q := range queries {

@@ -76,6 +76,11 @@ type CRAGEvaluator interface {
 	Evaluate(ctx context.Context, query *Query, chunks []*Chunk) (*CRAGEvaluation, error)
 }
 
+// WebSearcher defines the interface for external web search (used in CRAG).
+type WebSearcher interface {
+	Search(ctx context.Context, query string, topK int) ([]*Chunk, error)
+}
+
 // RAGEvaluator evaluates overall RAG quality.
 type RAGEvaluator interface {
 	Evaluate(ctx context.Context, query string, answer string, context string) (*RAGEvaluation, error)

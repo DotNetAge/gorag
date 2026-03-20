@@ -16,7 +16,7 @@ type multimodalEmbed struct {
 }
 
 // MultimodalEmbed creates a step for multimodal vector generation.
-func MultimodalEmbed(provider embedding.MultimodalProvider, metrics core.Metrics) pipeline.Step[*core.State] {
+func MultimodalEmbed(provider embedding.MultimodalProvider, metrics core.Metrics) pipeline.Step[*core.IndexingContext] {
 	return &multimodalEmbed{
 		provider: provider,
 		metrics:  metrics,
@@ -27,7 +27,7 @@ func (s *multimodalEmbed) Name() string {
 	return "MultimodalEmbed"
 }
 
-func (s *multimodalEmbed) Execute(ctx context.Context, state *core.State) error {
+func (s *multimodalEmbed) Execute(ctx context.Context, state *core.IndexingContext) error {
 	if s.provider == nil {
 		return fmt.Errorf("multimodal embedder not configured")
 	}

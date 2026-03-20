@@ -10,15 +10,16 @@ import (
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
-	"github.com/DotNetAge/gorag/pkg/steps/hyde"
+	"github.com/DotNetAge/gorag/pkg/steps/rewrite"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
 
-type hydeRetriever struct {
+type rewriteRetriever struct {
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
 }
 
-func NewHyDERetriever(
+// NewRewriteRetriever creates a new RewriteRetriever that clarifies ambiguous queries.
+func NewRewriteRetriever(
 	vectorStore core.VectorStore,
 	embedder embedding.Provider,
 	llm chat.Client,
@@ -32,18 +33,21 @@ func NewHyDERetriever(
 	p := pipeline.New[*core.RetrievalContext]()
 	gen := answer.New(llm, answer.WithLogger(logger))
 
-	p.AddStep(hyde.Generate(gen, logger))
+	// Step 1: Clarify/Rewrite the query
+	p.AddStep(rewrite.Rewrite(llm, logger, nil))
 
+	// Step 2: Search with the clarified query
 	p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
 		TopK: topK,
 	}))
 
+	// Step 3: Generate final answer
 	p.AddStep(stepgen.Generate(gen, logger, nil))
 
-	return &hydeRetriever{pipeline: p}
+	return &rewriteRetriever{pipeline: p}
 }
 
-func (r *hydeRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
+func (r *rewriteRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
 	results := make([]*core.RetrievalResult, 0, len(queries))
 
 	for _, q := range queries {

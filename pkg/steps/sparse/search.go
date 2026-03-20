@@ -44,7 +44,7 @@ func Search(
 	topK int,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -65,7 +65,7 @@ func (s *search) Name() string {
 }
 
 // Execute retrieves relevant chunks using BM25 algorithm.
-func (s *search) Execute(ctx context.Context, state *core.State) error {
+func (s *search) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("SparseSearch: 'query' not found in state")
 	}

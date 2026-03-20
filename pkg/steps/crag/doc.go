@@ -5,7 +5,7 @@
 //
 // Example usage:
 //
-//	p := pipeline.New[*core.State]()
+//	p := pipeline.New[*core.RetrievalContext]()
 //	p.AddSteps(
 //	    crag.Evaluate(cragEvaluator, logger, metrics),
 //	)

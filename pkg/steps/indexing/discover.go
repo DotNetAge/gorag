@@ -2,12 +2,13 @@
 package stepinx
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"github.com/DotNetAge/gochat/pkg/pipeline"
+	"github.com/DotNetAge/gorag/pkg/core"
 )
 
 // discover discovers and validates files for indexing.
@@ -18,7 +19,7 @@ type discover struct{}
 // Example:
 //
 //	p.AddStep(indexing.Discover())
-func Discover() pipeline.Step[*core.State] {
+func Discover() pipeline.Step[*core.IndexingContext] {
 	return &discover{}
 }
 
@@ -28,7 +29,7 @@ func (s *discover) Name() string {
 }
 
 // Execute discovers and validates the file, extracting metadata.
-func (s *discover) Execute(ctx context.Context, state *core.State) error {
+func (s *discover) Execute(ctx context.Context, state *core.IndexingContext) error {
 	// Check if file exists
 	info, err := os.Stat(state.FilePath)
 	if err != nil {

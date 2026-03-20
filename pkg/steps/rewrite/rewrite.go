@@ -32,7 +32,7 @@ func Rewrite(
 	llm core.Client,
 	logger logging.Logger,
 	metrics core.Metrics,
-) pipeline.Step[*core.State] {
+) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.NewNoopLogger()
 	}
@@ -49,7 +49,7 @@ func (s *rewrite) Name() string {
 }
 
 // Execute rewrites the query to eliminate ambiguity and improve clarity.
-func (s *rewrite) Execute(ctx context.Context, state *core.State) error {
+func (s *rewrite) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil || state.Query.Text == "" {
 		return nil
 	}

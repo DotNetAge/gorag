@@ -22,7 +22,7 @@ type fromQuery struct {
 // Example:
 //
 //	p.AddStep(filter.FromQuery(extractor))
-func FromQuery(extractor core.FilterExtractor) pipeline.Step[*core.State] {
+func FromQuery(extractor core.FilterExtractor) pipeline.Step[*core.RetrievalContext] {
 	return &fromQuery{extractor: extractor}
 }
 
@@ -32,7 +32,7 @@ func (s *fromQuery) Name() string {
 }
 
 // Execute extracts metadata filters from the query and stores them in state.Filters.
-func (s *fromQuery) Execute(ctx context.Context, state *core.State) error {
+func (s *fromQuery) Execute(ctx context.Context, state *core.RetrievalContext) error {
 	if state.Query == nil {
 		return fmt.Errorf("FilterFromQuery: 'query' not found in state")
 	}
