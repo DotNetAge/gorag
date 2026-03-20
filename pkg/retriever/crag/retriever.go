@@ -13,7 +13,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	"github.com/DotNetAge/gorag/pkg/steps/crag"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
-	"github.com/DotNetAge/gorag/pkg/steps/generate"
+	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
 
@@ -173,6 +173,7 @@ func (s *cragFallbackStep) Execute(ctx context.Context, context *core.RetrievalC
 
 	return nil
 }
+
 // Options for CRAG retriever
 type Options struct {
 	topK        int
@@ -216,7 +217,6 @@ func WithTracer(t observability.Tracer) Option {
 }
 
 func WithLogger(l logging.Logger) Option {
-...
 	return func(o *Options) {
 		o.logger = l
 	}

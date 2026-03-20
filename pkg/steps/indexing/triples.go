@@ -74,7 +74,7 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 
 		for _, t := range extracted {
 			// 1. Upsert Subject Node
-			subNode := &store.Node{
+			subNode := &core.Node{
 				ID:   t.Subject,
 				Type: t.SubjectType,
 				Properties: map[string]any{
@@ -82,13 +82,13 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 					"source_file":  state.FilePath,
 				},
 			}
-			if err := s.store.UpsertNode(ctx, subNode); err != nil {
+			if err := s.store.UpsertNodes(ctx, []*core.Node{subNode}); err != nil {
 				s.logger.Error("Failed to upsert subject node", err)
 				continue
 			}
 
 			// 2. Upsert Object Node
-			objNode := &store.Node{
+			objNode := &core.Node{
 				ID:   t.Object,
 				Type: t.ObjectType,
 				Properties: map[string]any{
@@ -96,13 +96,13 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 					"source_file":  state.FilePath,
 				},
 			}
-			if err := s.store.UpsertNode(ctx, objNode); err != nil {
+			if err := s.store.UpsertNodes(ctx, []*core.Node{objNode}); err != nil {
 				s.logger.Error("Failed to upsert object node", err)
 				continue
 			}
 
 			// 3. Upsert Edge
-			edge := &store.Edge{
+			edge := &core.Edge{
 				ID:     fmt.Sprintf("%s-%s-%s", t.Subject, t.Predicate, t.Object),
 				Type:   t.Predicate,
 				Source: t.Subject,
@@ -111,7 +111,7 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 					"source_chunk": chunk.ID,
 				},
 			}
-			if err := s.store.UpsertEdge(ctx, edge); err != nil {
+			if err := s.store.UpsertEdges(ctx, []*core.Edge{edge}); err != nil {
 				s.logger.Error("Failed to upsert edge", err)
 			}
 		}

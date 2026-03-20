@@ -87,14 +87,14 @@ func (r *nativeRetriever) Retrieve(ctx context.Context, queries []string, topK i
 		retrievalCtx.Span.End()
 
 		var allChunks []*core.Chunk
-		for _, group := range context.RetrievedChunks {
+		for _, group := range retrievalCtx.RetrievedChunks {
 			allChunks = append(allChunks, group...)
 		}
 
 		res := &core.RetrievalResult{
 			Query:  q,
 			Chunks: allChunks,
-			Answer: context.Answer.Answer,
+			Answer: retrievalCtx.Answer.Answer,
 		}
 		results = append(results, res)
 	}

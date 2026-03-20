@@ -13,6 +13,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
@@ -279,6 +280,7 @@ func (s *graphGenerationStep) Execute(ctx context.Context, context *core.Retriev
 
 	return nil
 }
+
 // Options for GraphRAG retriever
 type Options struct {
 	topK           int
@@ -329,7 +331,6 @@ func WithDocStore(s store.DocStore) Option {
 }
 
 func WithPromptTemplate(t string) Option {
-...
 	return func(o *Options) {
 		if t != "" {
 			o.promptTemplate = t

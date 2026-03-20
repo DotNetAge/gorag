@@ -38,14 +38,15 @@ func TestCitationGenerator_GenerateWithCitations(t *testing.T) {
 	// Create a mock LLM client that returns a specific response
 	mockLLM := &MockLLMClient{
 		chatFn: func(ctx context.Context, messages []chat.Message, options ...chat.Option) (*chat.Response, error) {
+			content := messages[0].Content[0].Text
 			// Verify that the prompt contains the expected structure
-			assert.Contains(t, messages[0].Content, "[Documents]")
-			assert.Contains(t, messages[0].Content, "[Question]")
-			assert.Contains(t, messages[0].Content, "[doc_1]")
-			assert.Contains(t, messages[0].Content, "[doc_2]")
-			assert.Contains(t, messages[0].Content, "Paris is the capital of France")
-			assert.Contains(t, messages[0].Content, "France is a country in Europe")
-			assert.Contains(t, messages[0].Content, "What is the capital of France?")
+			assert.Contains(t, content, "[Documents]")
+			assert.Contains(t, content, "[Question]")
+			assert.Contains(t, content, "[doc_1]")
+			assert.Contains(t, content, "[doc_2]")
+			assert.Contains(t, content, "Paris is the capital of France")
+			assert.Contains(t, content, "France is a country in Europe")
+			assert.Contains(t, content, "What is the capital of France?")
 			return &chat.Response{Content: "The capital of France is Paris [doc_1]"}, nil
 		},
 	}
@@ -81,10 +82,11 @@ func TestCitationGenerator_GenerateWithCitations_EmptyChunks(t *testing.T) {
 	// Create a mock LLM client
 	mockLLM := &MockLLMClient{
 		chatFn: func(ctx context.Context, messages []chat.Message, options ...chat.Option) (*chat.Response, error) {
+			content := messages[0].Content[0].Text
 			// Verify that the prompt contains the expected structure even with empty chunks
-			assert.Contains(t, messages[0].Content, "[Documents]")
-			assert.Contains(t, messages[0].Content, "[Question]")
-			assert.Contains(t, messages[0].Content, "What is the capital of France?")
+			assert.Contains(t, content, "[Documents]")
+			assert.Contains(t, content, "[Question]")
+			assert.Contains(t, content, "What is the capital of France?")
 			return &chat.Response{Content: "I don't have enough information."}, nil
 		},
 	}
@@ -111,8 +113,9 @@ func TestCitationGenerator_GenerateWithCitations_SingleChunk(t *testing.T) {
 	// Create a mock LLM client
 	mockLLM := &MockLLMClient{
 		chatFn: func(ctx context.Context, messages []chat.Message, options ...chat.Option) (*chat.Response, error) {
+			content := messages[0].Content[0].Text
 			// Verify that the prompt contains the expected structure with a single chunk
-			assert.Contains(t, messages[0].Content, "[doc_1]")
+			assert.Contains(t, content, "[doc_1]")
 			return &chat.Response{Content: "Paris is the capital of France [doc_1]"}, nil
 		},
 	}

@@ -184,7 +184,7 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 					r := relAny.(neo4j.Relationship)
 					edgeID, _ := r.Props["id"].(string)
 					if edgeID == "" {
-						edgeID = fmt.Sprintf("%d", r.ElementId)
+						edgeID = fmt.Sprintf("%s", r.ElementId)
 					}
 					
 					if _, exists := edgeMap[edgeID]; !exists {

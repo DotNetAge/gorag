@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core"
 )
 
 // Triple represents a relationship between two entities.
@@ -49,7 +48,7 @@ func NewTriplesExtractor(llm chat.Client) *TriplesExtractor {
 
 func (e *TriplesExtractor) Extract(ctx context.Context, text string) ([]Triple, error) {
 	prompt := strings.Replace(triplesExtractionPrompt, "{{.Text}}", text, 1)
-	
+
 	messages := []chat.Message{
 		chat.NewUserMessage(prompt),
 	}

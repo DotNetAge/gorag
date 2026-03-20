@@ -14,7 +14,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
-	"github.com/DotNetAge/gorag/pkg/steps/generate"
+	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
 
@@ -104,7 +104,7 @@ func (r *selfRAGRetriever) Retrieve(ctx context.Context, queries []string, topK 
 			Chunks: allChunks,
 			Answer: retrievalCtx.Answer.Answer,
 		}
-		
+
 		// Attach Self-RAG metrics to metadata
 		if eval, ok := retrievalCtx.Custom["self_rag_evaluation"].(*core.RAGEvaluation); ok {
 			if res.Metadata == nil {
@@ -160,9 +160,9 @@ func (s *refinementStep) Execute(ctx context.Context, context *core.RetrievalCon
 		lastEval = eval
 
 		span.LogEvent("critique", map[string]any{
-			"retry":   i,
-			"score":   eval.OverallScore,
-			"passed":  eval.Passed,
+			"retry":    i,
+			"score":    eval.OverallScore,
+			"passed":   eval.Passed,
 			"feedback": eval.Feedback,
 		})
 
@@ -216,6 +216,7 @@ New Answer:`, eval.Feedback, contextStr, context.Query.Text, context.Answer.Answ
 
 	return nil
 }
+
 // Options for Self-RAG retriever
 type Options struct {
 	topK       int
@@ -268,7 +269,6 @@ func WithTracer(t observability.Tracer) Option {
 }
 
 func WithLogger(l logging.Logger) Option {
-...
 	return func(o *Options) {
 		o.logger = l
 	}
