@@ -1,11 +1,10 @@
 <div align="center">
   <h1>🦖 GoRAG</h1>
-  <p><b>A Production-Ready, High-Performance Modular RAG Framework for Go</b></p>
+  <p><b>The Expert-Grade, High-Performance Modular RAG Framework for Go</b></p>
   
   [![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-  [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
   
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
@@ -13,41 +12,33 @@
 
 ---
 
-**GoRAG** is an enterprise-grade Retrieval-Augmented Generation (RAG) framework written entirely in Go. Designed for developers who are tired of Python dependency hell and slow async loops, GoRAG brings **high concurrency, memory efficiency, and static type safety** to the AI engineering world. 
+**GoRAG** is a production-ready Retrieval-Augmented Generation (RAG) framework built for high-scale AI engineering. Unlike complex "black-box" frameworks, GoRAG provides a **transparent, pipeline-based architecture** that combines Go's native concurrency with advanced RAG patterns.
 
-Whether you are building a simple document Q&A bot or a complex Agentic RAG system with multi-hop reasoning, GoRAG provides the foundational building blocks you need with zero bloat.
+From **GraphRAG** with automated triple extraction to **Agentic RAG** with self-correction, GoRAG is designed to move your AI applications from "prototype" to "production" with zero friction.
 
 ## ✨ Why GoRAG?
 
-- 🚀 **Blazing Fast**: Built-in concurrent workers (10+ goroutines by default) and streaming parsers with `O(1)` memory footprint. Effortlessly index 100M+ scale document repositories.
-- 🧩 **Lego-like Modularity**: Strictly follows Clean Architecture. Swap out LLMs, Vector Stores, or Document Parsers with a single line of code.
-- 🧠 **Advanced RAG Patterns Built-in**: Out-of-the-box support for HyDE, RAG-Fusion, Semantic Chunking, Cross-Encoder Reranking, and Context Pruning.
-- ☁️ **Cloud-Native & Production-Ready**: Compiles to a single binary. Features built-in circuit breakers, rate limiters, graceful degradation, and observability metrics.
-- 📦 **Zero-Dependency Quickstart**: Deeply integrated with `govector` (a pure-Go embedded vector database) and `gochat` (a unified LLM SDK). Run a 100% local, privacy-first RAG pipeline without deploying external databases like Milvus or Qdrant.
+- 🚀 **Performance First**: Built-in concurrent workers and streaming parsers with `O(1)` memory efficiency. Perfect for indexing TB-scale knowledge bases.
+- 🏗️ **Pipeline-Based Architecture**: Powered by `gochat/pkg/pipeline`. Every retrieval step is explicit, traceable, and pluggable. No more "hidden magic" or deep inheritance hell.
+- 🧠 **Smart Intent Routing**: Automatically dispatches queries to the most suitable retrieval strategy (Vector, Graph, or Global) based on user intent.
+- 🕸️ **Advanced GraphRAG**: Native support for **Neo4j**, **SQLite (Zero-CGO)**, and **BoltDB**. Includes automated LLM-driven knowledge graph construction.
+- 🔭 **Built-in Observability**: Comprehensive distributed tracing across all core retrievers and steps. See exactly where your time and tokens go.
+- 📊 **Enterprise-Grade Evaluation**: Built-in benchmarking protocol for **Faithfulness**, **Answer Relevance**, and **Context Precision** (RAGAS-style).
 
-## 🧰 Ecosystem & Integrations
+---
 
-### 🤖 LLM Providers (Powered by [`gochat`](https://github.com/DotNetAge/gochat))
-- **Global**: OpenAI, Anthropic (Claude 3), Azure OpenAI.
-- **Local/Open-Source**: Ollama (Llama 3, Qwen, Mistral, etc.).
-- **Chinese AI**: Kimi, DeepSeek, GLM-4, Minimax, Baichuan, etc.
+## 🧰 The RAG "Expert" Ecosystem
 
-### 🗄️ Vector Databases
-- **govector** 🌟 (Pure Go embedded vector store - Zero dependencies!)
-- **Milvus / Zilliz** (Enterprise standard)
-- **Qdrant** (High-performance Rust engine)
-- **Weaviate** (Leading semantic search)
-- **Pinecone** (Fully managed cloud DB)
+GoRAG doesn't just give you tools; it gives you **pre-optimized strategies** as first-class citizens:
 
-### 📄 Universal Parsers
-Native streaming support for **16+ formats** including: Text, PDF, DOCX, Markdown, HTML, CSV, JSON, and source code (Go, Python, Java, TS/JS).
-
-### 🧠 Agentic RAG Integration
-- **[GoReact](https://github.com/DotNetAge/goreact)** 🌟 - Advanced Agentic Framework for complex task reasoning and multi-tool orchestration
-  - Use GoRAG as a Tool within GoReact Agent
-  - Combine RAG with Calculator, WebSearch, CodeExecutor, and more
-  - Leverage ReAct Thinker for multi-hop reasoning over retrieved documents
-  - See: [GoRAG + GoReact Integration Guide](docs/GO_REACT_INTEGRATION_GUIDE.md)
+| Strategy | When to use | Key Features |
+|----------|-------------|--------------|
+| **Native RAG** | Standard semantic search | Vector-only, fast, low cost |
+| **Graph RAG** | Complex relationship reasoning | Entities, Triples, Multi-hop reasoning |
+| **Self-RAG** | High accuracy requirements | Self-reflection, Hallucination detection |
+| **CRAG** | Handling ambiguous queries | Quality evaluation, fallback to Web Search |
+| **Fusion RAG**| Multi-faceted queries | Query rewriting, RRF fusion |
+| **Smart Router**| Dynamic workloads | Intent-based automatic dispatching |
 
 ---
 
@@ -59,111 +50,74 @@ Native streaming support for **16+ formats** including: Text, PDF, DOCX, Markdow
 go get github.com/DotNetAge/gorag
 ```
 
-### 10 Lines to Your Private Knowledge Base
-Using `Ollama` and our built-in `govector` engine, you can build a 100% local, privacy-first RAG system without any API keys or external database deployments:
+### 1. The Smart Router: Intent-Based Retrieval
+Automatically choose between Vector Search for domain facts and Graph Search for relationship reasoning:
 
 ```go
 package main
 
 import (
     "context"
-    "fmt"
-    
-    "github.com/DotNetAge/gochat/pkg/client/base"
-    "github.com/DotNetAge/gochat/pkg/client/ollama"
-    "github.com/DotNetAge/gorag/rag"
-    "github.com/DotNetAge/gorag/vectorstore/govector"
+    "github.com/DotNetAge/gorag/pkg/retriever/agentic"
+    "github.com/DotNetAge/gorag/pkg/retriever/graph"
+    "github.com/DotNetAge/gorag/pkg/retriever/native"
 )
 
 func main() {
-    ctx := context.Background()
+    // 1. Setup retrievers
+    vectorRet := native.NewRetriever(vectorStore, embedder, llm)
+    graphRet := graph.NewRetriever(vectorStore, graphStore, embedder, llm)
 
-    // 1. Init LLM Client (via gochat)
-    llmClient, _ := ollama.New(ollama.Config{
-        Config: base.Config{Model: "qwen3.5:0.8b"},
-    })
-
-    // 2. Init Pure-Go Vector Store (Zero dependencies)
-    vectorStore, _ := govector.NewStore(govector.Config{
-        Dimension:  1536,
-        Collection: "my_knowledge",
-    })
-
-    // 3. Build RAG Engine
-    engine, _ := rag.New(
-        rag.WithLLM(llmClient),
-        rag.WithVectorStore(vectorStore),
+    // 2. Create a Smart Router
+    router := agentic.NewSmartRouter(
+        classifier, 
+        map[core.IntentType]core.Retriever{
+            core.IntentRelational: graphRet,  // Use Graph for relationship queries
+            core.IntentDomain:     vectorRet, // Use Vector for specific facts
+        },
+        vectorRet, // Default fallback
+        logger,
     )
 
-    // 4. Index your private data (Auto-chunking & vectorization)
-    engine.Index(ctx, rag.Source{
-        Type:    "text",
-        Content: "GoRAG is a high-performance RAG framework written in pure Go.",
-    })
-
-    // 5. Query
-    resp, _ := engine.Query(ctx, "What is GoRAG?", rag.QueryOptions{TopK: 3})
-    fmt.Println("Answer:", resp.Answer)
+    // 3. Just ask! The router handles the "how"
+    results, _ := router.Retrieve(ctx, []string{"How are Project X and Person Y related?"}, 5)
+    fmt.Println(results[0].Answer)
 }
 ```
 
-### High-Concurrency Directory Indexing
-Need to process a massive codebase or 50GB of company documents? GoRAG handles it concurrently:
+### 2. Automated Knowledge Graph Indexing
+Turn unstructured text into a queryable knowledge graph with one click:
 
 ```go
-// 🚀 One-click index an entire directory! 
-// Auto-detects .pdf, .go, .md, .docx, etc., and routes to the correct parser.
-err := engine.IndexDirectory(ctx, "./my-company-docs")
+// Initialize the triple-based indexing step
+triplesStep := indexing.NewTriplesStep(llm, graphStore)
 
-// Stream the response back (Typewriter effect for frontend UX)
-ch, _ := engine.QueryStream(ctx, "Summarize the Q3 financial report from the docs", rag.QueryOptions{
-    Stream: true,
-})
+// Process your documents - GoRAG extracts (S, P, O) automatically
+err := indexer.IndexDirectory(ctx, "./docs", true)
+```
 
-for resp := range ch {
-    fmt.Print(resp.Chunk)
-}
+### 3. Production Observability & Benchmarking
+Track every step and measure quality using built-in tools:
+
+```go
+// Run a benchmark against your dataset
+report, _ := evaluation.RunBenchmark(ctx, retriever, judge, testCases, 5)
+fmt.Println(report.Summary())
+// Output: Avg Faithfulness: 0.92, Avg Relevance: 0.88, Avg Precision: 0.85
 ```
 
 ---
 
-## ⚡ Advanced Capabilities
+## ⚡ Technical Integrity & Standards
 
-GoRAG is not just a glue framework; it implements cutting-edge retrieval paradigms natively:
-
-### 🔁 Built-in Agentic RAG Loop (No External Framework Required!)
-Unlike traditional RAG frameworks, GoRAG includes **native Agentic reasoning capabilities** for complex retrieval scenarios:
-
-- **Self-RAG** 🪞: Real-time hallucination detection and answer quality evaluation
-- **CRAG Evaluation** 📊: Automatic retrieval quality assessment with smart fallback to web search
-- **Iterative Retrieval** 🔄: Multi-round reasoning to decide "retrieve more" vs "generate answer"
-- **Termination Control** 🎯: Intelligent loop control based on confidence scores and context quality
-
-```go
-// ✅ GoRAG has built-in Agentic reasoning - no external framework needed!
-searcher := native.NewSearcher(
-    native.WithSelfRAG(true),        // Built-in quality checker
-    native.WithCRAGEvaluation(true), // Built-in retrieval quality eval
-)
-
-result := searcher.Search(ctx, query) // Automatically iterates until high-quality results
-fmt.Printf("Confidence: %f\n", result.SelfRagScore)
-```
-
-**Want More Advanced Agentic Workflows?** → Combine with [GoReact](https://github.com/DotNetAge/goreact) for multi-tool orchestration and complex task planning. See our [Integration Guide](docs/GO_REACT_INTEGRATION_GUIDE.md).
-
-### Other Advanced RAG Patterns
-- **RAG-Fusion & Multi-Query**: Rewrites user queries into multiple perspectives, retrieving and applying Reciprocal Rank Fusion (RRF) for higher accuracy.
-- **Context Pruning & Cross-Encoder**: Extracts only the most relevant sentences from chunks and reranks them, saving LLM tokens and reducing hallucinations.
-- **Graph RAG**: Native support for Neo4j and ArangoDB for cross-node multi-hop reasoning.
-
----
-
+- **Go 1.24+**: Leveraging the latest language features.
+- **Zero-CGO SQLite**: Using `modernc.org/sqlite` for painless cross-compilation.
+- **Clean Architecture**: Strict separation of interfaces (`pkg/core`) and implementations.
+- **Modular Steps**: Reuse `hyde`, `rerank`, `fuse`, or `prune` steps in any custom pipeline.
 
 ## 🤝 Contributing
-We welcome contributions! Whether it's adding a new vector store driver, improving the documentation, or fixing a bug, please check out our [Contributing Guidelines](CONTRIBUTING.md).
-
-Give us a ⭐️ if this project helped you build faster and safer AI applications!
+We aim to build the most robust AI infrastructure for the Go ecosystem. Whether it's a new `VectorStore` driver or an improved `Parser`, your PRs are welcome! 
+- Check our [Contributing Guidelines](CONTRIBUTING.md).
 
 ## 📄 License
-GoRAG is dual-licensed under the [MIT License](LICENSE).
+GoRAG is licensed under the [MIT License](LICENSE).
