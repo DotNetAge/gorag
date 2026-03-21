@@ -66,6 +66,9 @@ func (s *searchStep) Execute(ctx context.Context, context *core.RetrievalContext
 	}
 
 	for _, queryText := range queriesToSearch {
+		if s.embedder == nil {
+			return fmt.Errorf("embedder is not configured in vector search step")
+		}
 		// 生成查询嵌入向量
 		span.LogEvent("embedding_query", map[string]any{"text_len": len(queryText)})
 		embResults, err := s.embedder.Embed(ctx, []string{queryText})

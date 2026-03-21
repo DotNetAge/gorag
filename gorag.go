@@ -30,8 +30,11 @@ type RAGConfig struct {
 
 type RAGOption func(*RAGConfig)
 
-func WithWorkDir(path string) RAGOption { return func(c *RAGConfig) { c.WorkDir = path } }
-func WithAPIKey(key string) RAGOption   { return func(c *RAGConfig) { c.APIKey = key } }
+func WithWorkDir(path string) RAGOption   { return func(c *RAGConfig) { c.WorkDir = path } }
+func WithAPIKey(key string) RAGOption     { return func(c *RAGConfig) { c.APIKey = key } }
+func WithDimension(d int) RAGOption       { return func(c *RAGConfig) { c.Dimension = d } }
+func WithTopK(k int) RAGOption            { return func(c *RAGConfig) { c.TopK = k } }
+func WithVectorDBType(t string) RAGOption { return func(c *RAGConfig) { c.VectorDBType = t } }
 
 // RAG application interface
 type RAG interface {
@@ -62,35 +65,30 @@ func (r *defaultRAG) Search(ctx context.Context, query string, topK int) (*core.
 
 // --- The Industrial Presets ---
 
-// DefaultNativeRAG: The Agent/Local preset.
 func DefaultNativeRAG(opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{WorkDir: "./data", VectorDBType: "govector", Dimension: 1536, TopK: 5}
 	for _, opt := range opts { opt(cfg) }
 	return buildRAG(cfg, "native")
 }
 
-// DefaultAdvancedRAG: The Enterprise/Scale preset (RAG-Fusion).
 func DefaultAdvancedRAG(opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{WorkDir: "./data", VectorDBType: "govector", Dimension: 1536, TopK: 10}
 	for _, opt := range opts { opt(cfg) }
 	return buildRAG(cfg, "advanced")
 }
 
-// DefaultAgenticRAG: The Smart Intent-based Router (Vertical implementation).
 func DefaultAgenticRAG(opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{WorkDir: "./data", VectorDBType: "govector", Dimension: 1536, TopK: 5}
 	for _, opt := range opts { opt(cfg) }
 	return buildRAG(cfg, "agentic")
 }
 
-// DefaultGraphRAG: The Reasoning/Relational preset (Neo4j).
 func DefaultGraphRAG(opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{WorkDir: "./data", VectorDBType: "govector", Dimension: 1536, TopK: 5}
 	for _, opt := range opts { opt(cfg) }
 	return buildRAG(cfg, "graph")
 }
 
-// buildRAG factory
 func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 	var vStore core.VectorStore
 	var dStore store.DocStore
@@ -109,7 +107,6 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 		indexer.WithZapLogger(fmt.Sprintf("%s/gorag.log", cfg.WorkDir), 100, 30, 7, false),
 	}
 
-	// 2. Pair Builder
 	var idx indexer.Indexer
 	var ret core.Retriever
 
@@ -122,22 +119,15 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 		ret, _ = advanced.DefaultAdvancedRetriever(advanced.WithStore(vStore), advanced.WithTopK(cfg.TopK))
 	case "agentic":
 		idx, err = indexer.DefaultAdvancedIndexer(idxOpts...)
-		// Vertical orchestration of Native, Advanced, and Graph
 		natRet, _ := native.DefaultNativeRetriever(native.WithVectorStore(vStore), native.WithTopK(cfg.TopK))
 		advRet, _ := advanced.DefaultAdvancedRetriever(advanced.WithStore(vStore), advanced.WithTopK(cfg.TopK))
 		grpRet, _ := graph.DefaultGraphRetriever(graph.WithVectorStore(vStore), graph.WithTopK(cfg.TopK))
-		
-		ret = agentic.NewSmartRouter(
-			nil, // Classifier (nil = fallback to default classification)
-			map[core.IntentType]core.Retriever{
-				core.IntentChat:           natRet,
-				core.IntentFactCheck:      advRet,
-				core.IntentRelational:     grpRet,
-				core.IntentDomainSpecific: advRet,
-			},
-			natRet,
-			nil,
-		)
+		ret = agentic.NewSmartRouter(nil, map[core.IntentType]core.Retriever{
+			core.IntentChat:           natRet,
+			core.IntentFactCheck:      advRet,
+			core.IntentRelational:     grpRet,
+			core.IntentDomainSpecific: advRet,
+		}, natRet, nil)
 	case "graph":
 		idx, err = indexer.DefaultGraphIndexer(idxOpts...)
 		ret, _ = graph.DefaultGraphRetriever(graph.WithVectorStore(vStore), graph.WithTopK(cfg.TopK))

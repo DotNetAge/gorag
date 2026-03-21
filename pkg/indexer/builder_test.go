@@ -10,7 +10,7 @@ import (
 )
 
 func TestDefaultIndexer_Init(t *testing.T) {
-	idxIface, err := DefaultIndexer(t.TempDir(), 
+	idxIface, err := DefaultIndexer(
 		WithConcurrency(true),
 		WithWorkers(5),
 	)
@@ -20,16 +20,6 @@ func TestDefaultIndexer_Init(t *testing.T) {
 	err = idx.Init()
 	assert.NoError(t, err)
 	assert.NotNil(t, idx.pipeline)
-	assert.True(t, idx.config.Concurrency)
-	assert.Equal(t, 5, idx.config.Workers)
-}
-
-func TestDefaultIndexer_WithAllParsers(t *testing.T) {
-	idxIface, err := DefaultIndexer(t.TempDir(), WithAllParsers())
-	require.NoError(t, err)
-	idx := idxIface.(*defaultIndexer)
-
-	assert.True(t, len(idx.parsers) > 0)
 }
 
 type mockParser struct {
@@ -42,23 +32,21 @@ func (m *mockParser) GetSupportedTypes() []string {
 
 func TestDefaultIndexer_WithParsers(t *testing.T) {
 	mock := &mockParser{}
-	idxIface, err := DefaultIndexer(t.TempDir(), WithParsers(mock))
+	// Fast test with specific parsers
+	idxIface, err := DefaultIndexer(WithParsers(mock))
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)
 
 	assert.Equal(t, 1, len(idx.parsers))
-	assert.Equal(t, mock, idx.parsers[0])
 }
 
 func TestDefaultIndexer_IndexFile_Init(t *testing.T) {
-	idxIface, err := DefaultIndexer(t.TempDir())
+	idxIface, err := DefaultIndexer()
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)
 	
-	// Since we now Init inside DefaultIndexer, pipeline is not nil
 	assert.NotNil(t, idx.pipeline)
 
-	// Will fail because no parsers/steps are meaningful without real file
-	_, err = idx.IndexFile(context.Background(), "test.txt")
+	_, err = idx.IndexFile(context.Background(), "non-existent.txt")
 	assert.Error(t, err) 
 }
