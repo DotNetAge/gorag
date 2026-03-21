@@ -3,49 +3,75 @@ package gorag
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/DotNetAge/gochat/pkg/embedding"
+	gochat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
+	"github.com/DotNetAge/gorag/pkg/di"
 	"github.com/DotNetAge/gorag/pkg/indexer"
 	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
-	"github.com/DotNetAge/gorag/pkg/retriever/native"
 	"github.com/DotNetAge/gorag/pkg/retriever/advanced"
 	"github.com/DotNetAge/gorag/pkg/retriever/agentic"
 	"github.com/DotNetAge/gorag/pkg/retriever/graph"
+	"github.com/DotNetAge/gorag/pkg/retriever/native"
 )
 
-// RAGConfig is the flat, primitive config for the entire RAG app.
+// RAGConfig is the single source of truth for all RAG modes.
 type RAGConfig struct {
+	// 1. Persistence
 	WorkDir      string
 	VectorDBType string // "govector", "milvus"
-	GraphDBType  string // "neo4j", "sqlite"
-	EmbedderType string
-	LLMType      string
-	APIKey       string
-	Collection   string
 	Dimension    int
-	TopK         int
+
+	// 2. Model "Grounding" (Variable Name Driven)
+	EmbedderType string // "openai", "ollama", "local-onnx"
+	LLMType      string // "openai", "claude", "ollama"
+	ModelPath    string // Local model file path (.test/models/...)
+	ModelName    string // e.g., "qwen-turbo", "bge-small-zh-v1.5"
+	APIKeyEnv    string // Name of the env var, e.g., "DASHSCOPE_API_KEY"
+	BaseURL      string // e.g., "https://dashscope.aliyuncs.com/compatible-mode/"
+
+	// 3. Retrieval Tuning
+	TopK int
+
+	// 4. Internal Component Injection
+	embedder  embedding.Provider
+	llmClient gochat.Client
+	parsers   []core.Parser
+	container *di.Container
 }
 
 type RAGOption func(*RAGConfig)
 
 func WithWorkDir(path string) RAGOption   { return func(c *RAGConfig) { c.WorkDir = path } }
-func WithAPIKey(key string) RAGOption     { return func(c *RAGConfig) { c.APIKey = key } }
-func WithDimension(d int) RAGOption       { return func(c *RAGConfig) { c.Dimension = d } }
+func WithModelPath(path string) RAGOption { return func(c *RAGConfig) { c.ModelPath = path } }
+func WithAPIKeyEnv(name string) RAGOption { return func(c *RAGConfig) { c.APIKeyEnv = name } }
+func WithBaseURL(url string) RAGOption    { return func(c *RAGConfig) { c.BaseURL = url } }
+func WithModelName(name string) RAGOption { return func(c *RAGConfig) { c.ModelName = name } }
+func WithDimension(dim int) RAGOption     { return func(c *RAGConfig) { c.Dimension = dim } }
 func WithTopK(k int) RAGOption            { return func(c *RAGConfig) { c.TopK = k } }
-func WithVectorDBType(t string) RAGOption { return func(c *RAGConfig) { c.VectorDBType = t } }
+
+// Expert injection
+func WithEmbedder(e embedding.Provider) RAGOption { return func(c *RAGConfig) { c.embedder = e } }
+func WithLLM(l gochat.Client) RAGOption           { return func(c *RAGConfig) { c.llmClient = l } }
+func WithParsers(p ...core.Parser) RAGOption      { return func(c *RAGConfig) { c.parsers = p } }
+func WithContainer(ctr *di.Container) RAGOption   { return func(c *RAGConfig) { c.container = ctr } }
 
 // RAG application interface
 type RAG interface {
 	IndexFile(ctx context.Context, filePath string) error
 	IndexDirectory(ctx context.Context, dirPath string, recursive bool) error
 	Search(ctx context.Context, query string, topK int) (*core.RetrievalResult, error)
+	Container() *di.Container
 }
 
 type defaultRAG struct {
 	indexer   indexer.Indexer
 	retriever core.Retriever
+	container *di.Container
 }
 
 func (r *defaultRAG) IndexFile(ctx context.Context, filePath string) error {
@@ -62,8 +88,9 @@ func (r *defaultRAG) Search(ctx context.Context, query string, topK int) (*core.
 	}
 	return results[0], nil
 }
+func (r *defaultRAG) Container() *di.Container { return r.container }
 
-// --- The Industrial Presets ---
+// --- The Aligned Presets ---
 
 func DefaultNativeRAG(opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{WorkDir: "./data", VectorDBType: "govector", Dimension: 1536, TopK: 5}
@@ -89,26 +116,55 @@ func DefaultGraphRAG(opts ...RAGOption) (RAG, error) {
 	return buildRAG(cfg, "graph")
 }
 
+// buildRAG factory leveraging DI for resource pooling
 func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
-	var vStore core.VectorStore
-	var dStore store.DocStore
-	var err error
+	if cfg.container == nil {
+		cfg.container = di.New()
+	}
+	ctr := cfg.container
 
-	// 1. Singleton Resources
-	switch cfg.VectorDBType {
-	case "govector":
-		vStore, _ = govector.NewStore(govector.WithDBPath(fmt.Sprintf("%s/vectors.db", cfg.WorkDir)), govector.WithDimension(cfg.Dimension))
-		dStore, _ = sqlite.NewDocStore(fmt.Sprintf("%s/docs.db", cfg.WorkDir))
+	if err := os.MkdirAll(cfg.WorkDir, 0755); err != nil {
+		return nil, err
 	}
 
+	// 1. Resolve or Register Persistence Singleton Resources
+	var vStore core.VectorStore
+	var dStore store.DocStore
+
+	// Check if already registered (Pooling)
+	if ctr.IsRegistered((*core.VectorStore)(nil)) {
+		vStore = ctr.MustResolve((*core.VectorStore)(nil)).(core.VectorStore)
+	} else {
+		vStore, _ = govector.NewStore(govector.WithDBPath(fmt.Sprintf("%s/vectors.db", cfg.WorkDir)), govector.WithDimension(cfg.Dimension))
+		ctr.RegisterInstance((*core.VectorStore)(nil), vStore)
+	}
+
+	if ctr.IsRegistered((*store.DocStore)(nil)) {
+		dStore = ctr.MustResolve((*store.DocStore)(nil)).(store.DocStore)
+	} else {
+		dStore, _ = sqlite.NewDocStore(fmt.Sprintf("%s/docs.db", cfg.WorkDir))
+		ctr.RegisterInstance((*store.DocStore)(nil), dStore)
+	}
+
+	// 2. Indexer/Retriever Options
 	idxOpts := []indexer.IndexerOption{
 		indexer.WithVectorStore(vStore),
 		indexer.WithDocStore(dStore),
-		indexer.WithZapLogger(fmt.Sprintf("%s/gorag.log", cfg.WorkDir), 100, 30, 7, false),
+	}
+	
+	if cfg.embedder != nil {
+		idxOpts = append(idxOpts, indexer.WithEmbedding(cfg.embedder))
+	} else if ctr.IsRegistered((*embedding.Provider)(nil)) {
+		idxOpts = append(idxOpts, indexer.WithEmbedding(ctr.MustResolve((*embedding.Provider)(nil)).(embedding.Provider)))
+	}
+
+	if len(cfg.parsers) > 0 {
+		idxOpts = append(idxOpts, indexer.WithParsers(cfg.parsers...))
 	}
 
 	var idx indexer.Indexer
 	var ret core.Retriever
+	var err error
 
 	switch mode {
 	case "native":
@@ -122,7 +178,13 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 		natRet, _ := native.DefaultNativeRetriever(native.WithVectorStore(vStore), native.WithTopK(cfg.TopK))
 		advRet, _ := advanced.DefaultAdvancedRetriever(advanced.WithStore(vStore), advanced.WithTopK(cfg.TopK))
 		grpRet, _ := graph.DefaultGraphRetriever(graph.WithVectorStore(vStore), graph.WithTopK(cfg.TopK))
-		ret = agentic.NewSmartRouter(nil, map[core.IntentType]core.Retriever{
+		
+		llm := cfg.llmClient
+		if llm == nil && ctr.IsRegistered((*gochat.Client)(nil)) {
+			llm = ctr.MustResolve((*gochat.Client)(nil)).(gochat.Client)
+		}
+
+		ret = agentic.NewSmartRouter(agentic.NewLLMClassifier(llm), map[core.IntentType]core.Retriever{
 			core.IntentChat:           natRet,
 			core.IntentFactCheck:      advRet,
 			core.IntentRelational:     grpRet,
@@ -134,5 +196,5 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 	}
 
 	if err != nil { return nil, err }
-	return &defaultRAG{indexer: idx, retriever: ret}, nil
+	return &defaultRAG{indexer: idx, retriever: ret, container: ctr}, nil
 }

@@ -1,4 +1,4 @@
-.PHONY: test coverage lint build clean install help
+.PHONY: test coverage lint build clean install help models
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,9 +8,29 @@ help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
 
-## test: Run all tests
-test:
-	go test -v ./...
+## models: Sequentially download all required models
+models: model-text model-multimodal
+
+## model-text: Download the Chinese BGE text embedding model (Grounding)
+model-text:
+	@echo ">>> Queuing Text Model: bge-small-zh-v1.5..."
+	@mkdir -p .test/models
+	./bin/gorag download --model bge-small-zh-v1.5 --output .test/models
+
+## model-multimodal: Download the CLIP multimodal model (Grounding)
+model-multimodal:
+	@echo ">>> Queuing Multimodal Model: clip-vit-base-patch32..."
+	@mkdir -p .test/models
+	./bin/gorag download --model clip-vit-base-patch32 --output .test/models
+
+## check: Diagnose environment and models
+check:
+	./bin/gorag check
+
+## test: Run all tests with diagnostic timeout
+test: check
+	@# Setting a strict 120s timeout to catch hanging tests
+	go test -v -timeout 120s ./...
 
 ## test-short: Run tests without integration tests
 test-short:
@@ -49,6 +69,7 @@ install:
 clean:
 	rm -rf bin/
 	rm -f coverage.out coverage.html
+	rm -rf .models/
 
 ## bench: Run benchmarks
 bench:

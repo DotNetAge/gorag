@@ -1,6 +1,8 @@
 package types
 
 import (
+	"sync"
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/csv"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/dbschema"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/docx"
@@ -21,34 +23,82 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/tscode"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/xml"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/yaml"
-	"github.com/DotNetAge/gorag/pkg/core"
+)
+
+var (
+	DefaultRegistry = NewParserRegistry()
+	once            sync.Once
 )
 
 // ParserRegistry 解析器注册表
 type ParserRegistry struct {
 	parsers map[ParserType]core.Parser
+	lock    sync.RWMutex
 }
 
-// DefaultParserRegistry 创建新的解析器注册表
-func DefaultParserRegistry() *ParserRegistry {
+// NewParserRegistry 创建新的注册表
+func NewParserRegistry() *ParserRegistry {
 	return &ParserRegistry{
 		parsers: make(map[ParserType]core.Parser),
 	}
 }
 
+// DefaultParserRegistry 兼容性函数
+func DefaultParserRegistry() *ParserRegistry {
+	return DefaultRegistry
+}
+
+// EnsureInitialized 懒加载初始化
+func (r *ParserRegistry) EnsureInitialized() {
+	once.Do(func() {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		
+		r.parsers[TEXT] = text.DefaultTextStreamParser(1024)
+		r.parsers[MARKDOWN] = markdown.DefaultMarkdownStreamParser(1)
+		r.parsers[GOCODE] = gocode.DefaultGocodeStreamParser()
+		r.parsers[JAVACODE] = javacode.DefaultJavacodeStreamParser()
+		r.parsers[PYCODE] = pycode.DefaultPycodeStreamParser()
+		r.parsers[TSCODE] = tscode.DefaultParser()
+		r.parsers[JSCODE] = jscode.DefaultJscodeStreamParser()
+		r.parsers[PDF] = pdf.DefaultParser()
+		r.parsers[DOCX] = docx.DefaultParser()
+		r.parsers[EXCEL] = excel.DefaultExcelStreamParser()
+		r.parsers[CSV] = csv.DefaultCSVStreamParser(100, true)
+		r.parsers[JSON] = json.DefaultJsonStreamParser()
+		r.parsers[XML] = xml.DefaultParser()
+		r.parsers[YAML] = yaml.DefaultParser()
+		r.parsers[LOG] = log.DefaultParser()
+		r.parsers[HTML] = html.DefaultHtmlStreamParser()
+		r.parsers[IMAGE] = image.DefaultParser(nil)
+		r.parsers[EMAIL] = email.DefaultEmailStreamParser()
+		r.parsers[PPT] = ppt.DefaultParser()
+		r.parsers[DBSCHEMA] = dbschema.DefaultDBSchemaStreamParser()
+	})
+}
+
 // Register 注册一个解析器
 func (r *ParserRegistry) Register(parserType ParserType, parser core.Parser) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	r.parsers[parserType] = parser
 }
 
-// Get 获取指定类型的解析器
+// Get 获取解析器
 func (r *ParserRegistry) Get(parserType ParserType) (core.Parser, bool) {
-	parser, ok := r.parsers[parserType]
-	return parser, ok
+	r.EnsureInitialized()
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	p, ok := r.parsers[parserType]
+	return p, ok
 }
 
-// GetAll 获取所有已注册的解析器
+// GetAll 获取所有解析器
 func (r *ParserRegistry) GetAll() []core.Parser {
+	r.EnsureInitialized()
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	
 	result := make([]core.Parser, 0, len(r.parsers))
 	for _, parser := range r.parsers {
 		result = append(result, parser)
@@ -56,8 +106,12 @@ func (r *ParserRegistry) GetAll() []core.Parser {
 	return result
 }
 
-// GetByTypes 根据类型列表获取解析器
+// GetByTypes 根据类型获取
 func (r *ParserRegistry) GetByTypes(types ...ParserType) []core.Parser {
+	r.EnsureInitialized()
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	
 	result := make([]core.Parser, 0, len(types))
 	for _, t := range types {
 		if parser, ok := r.parsers[t]; ok {
@@ -67,49 +121,21 @@ func (r *ParserRegistry) GetByTypes(types ...ParserType) []core.Parser {
 	return result
 }
 
-// DefaultRegistry 默认注册表实例
-var DefaultRegistry = DefaultParserRegistry()
-
-// init 初始化默认注册表
-func init() {
-	// 注册所有内置解析器
-	DefaultRegistry.Register(TEXT, text.DefaultTextStreamParser(1024))
-	DefaultRegistry.Register(MARKDOWN, markdown.DefaultMarkdownStreamParser(1))
-	DefaultRegistry.Register(GOCODE, gocode.DefaultGocodeStreamParser())
-	DefaultRegistry.Register(JAVACODE, javacode.DefaultJavacodeStreamParser())
-	DefaultRegistry.Register(PYCODE, pycode.DefaultPycodeStreamParser())
-	DefaultRegistry.Register(TSCODE, tscode.DefaultParser())
-	DefaultRegistry.Register(JSCODE, jscode.DefaultJscodeStreamParser())
-	DefaultRegistry.Register(PDF, pdf.DefaultParser())
-	DefaultRegistry.Register(DOCX, docx.DefaultParser())
-	DefaultRegistry.Register(EXCEL, excel.DefaultExcelStreamParser())
-	DefaultRegistry.Register(CSV, csv.DefaultCSVStreamParser(100, true))
-	DefaultRegistry.Register(JSON, json.DefaultJsonStreamParser())
-	DefaultRegistry.Register(XML, xml.DefaultParser())
-	DefaultRegistry.Register(YAML, yaml.DefaultParser())
-	DefaultRegistry.Register(LOG, log.DefaultParser())
-	DefaultRegistry.Register(HTML, html.DefaultHtmlStreamParser())
-	DefaultRegistry.Register(IMAGE, image.DefaultParser(nil)) // LLM client can be injected later
-	DefaultRegistry.Register(EMAIL, email.DefaultEmailStreamParser())
-	DefaultRegistry.Register(PPT, ppt.DefaultParser())
-	DefaultRegistry.Register(DBSCHEMA, dbschema.DefaultDBSchemaStreamParser())
-}
-
-// Parsers 根据类型名称创建解析器列表
+// Parsers 导出函数
 func Parsers(parserTypes ...ParserType) []core.Parser {
 	return DefaultRegistry.GetByTypes(parserTypes...)
 }
 
-// AllParsers 加载所有已注册的解析器 (20+)
+// AllParsers 导出函数
 func AllParsers() []core.Parser {
 	return DefaultRegistry.GetAll()
 }
 
-// DefaultParser 创建单个解析器实例
+// DefaultParser 导出函数
 func DefaultParser(parserType ParserType) (core.Parser, error) {
-	parser, ok := DefaultRegistry.Get(parserType)
+	p, ok := DefaultRegistry.Get(parserType)
 	if !ok {
 		return nil, ErrParserNotFound
 	}
-	return parser, nil
+	return p, nil
 }

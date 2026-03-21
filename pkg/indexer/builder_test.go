@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"testing"
+	"path/filepath"
 
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/stretchr/testify/assert"
@@ -10,9 +11,12 @@ import (
 )
 
 func TestDefaultIndexer_Init(t *testing.T) {
+	tmpDir := t.TempDir()
 	idxIface, err := DefaultIndexer(
 		WithConcurrency(true),
 		WithWorkers(5),
+		WithGoVector("test", filepath.Join(tmpDir, "vectors.db"), 1536),
+		WithSQLDoc(filepath.Join(tmpDir, "docs.db")),
 	)
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)
@@ -30,10 +34,17 @@ func (m *mockParser) GetSupportedTypes() []string {
 	return []string{".mock"}
 }
 
+func (m *mockParser) Parse(ctx context.Context, data []byte, metadata map[string]interface{}) (*core.Document, error) {
+	return &core.Document{Content: string(data)}, nil
+}
+
 func TestDefaultIndexer_WithParsers(t *testing.T) {
+	tmpDir := t.TempDir()
 	mock := &mockParser{}
-	// Fast test with specific parsers
-	idxIface, err := DefaultIndexer(WithParsers(mock))
+	idxIface, err := DefaultIndexer(
+		WithParsers(mock),
+		WithGoVector("test", filepath.Join(tmpDir, "vectors.db"), 1536),
+	)
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)
 
@@ -41,7 +52,11 @@ func TestDefaultIndexer_WithParsers(t *testing.T) {
 }
 
 func TestDefaultIndexer_IndexFile_Init(t *testing.T) {
-	idxIface, err := DefaultIndexer()
+	tmpDir := t.TempDir()
+	idxIface, err := DefaultIndexer(
+		WithParsers(&mockParser{}),
+		WithGoVector("test", filepath.Join(tmpDir, "vectors.db"), 1536),
+	)
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)
 	
