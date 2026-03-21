@@ -62,8 +62,13 @@ func DefaultNativeRetriever(opts ...Option) (core.Retriever, error) {
 	vStore := options.VectorStore
 	if vStore == nil {
 		vecPath := filepath.Join(options.WorkDir, "gorag_vectors.db")
+		dimension := 1536
+		if options.Embedder != nil {
+			dimension = options.Embedder.Dimension()
+		}
+
 		var err error
-		vStore, err = govector.NewStore(govector.WithDBPath(vecPath), govector.WithDimension(1536))
+		vStore, err = govector.NewStore(govector.WithDBPath(vecPath), govector.WithDimension(dimension))
 		if err != nil {
 			return nil, fmt.Errorf("failed to init default vector store: %w", err)
 		}

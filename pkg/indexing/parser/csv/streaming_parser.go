@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"github.com/DotNetAge/gorag/pkg/indexing/parser/base"
+
 	"github.com/google/uuid"
 )
 
-var _ base.Parser = (*CSVStreamParser)(nil)
+var _ core.Parser = (*CSVStreamParser)(nil)
 
 // CSVStreamParser reads CSV files and streams them out.
 // It bundles N rows into a single Document to balance chunking granularity.

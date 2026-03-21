@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
@@ -43,8 +44,13 @@ func (s *searchStep) Execute(ctx context.Context, context *core.RetrievalContext
 		concurrency = 1 
 	}
 
+	if context.ParallelResults == nil {
+		context.ParallelResults = make(map[string][]*core.Chunk)
+	}
+
 	g, gctx := errgroup.WithContext(ctx)
 	sem := make(chan struct{}, concurrency)
+	var mu sync.Mutex
 
 	for _, qText := range queries {
 		q := qText // capture
@@ -86,7 +92,9 @@ func (s *searchStep) Execute(ctx context.Context, context *core.RetrievalContext
 				chunks = append(chunks, chunk)
 			}
 
+			mu.Lock()
 			context.ParallelResults[q] = chunks
+			mu.Unlock()
 			return nil
 		})
 	}

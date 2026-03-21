@@ -41,7 +41,7 @@ type defaultIndexer struct {
 	pipeline    *pipeline.Pipeline[*core.IndexingContext]
 	config      Config
 	logger      logging.Logger
-	parsers     []core.Parser
+	registry    *types.ParserRegistry
 	watchDirs   []string
 	vectorStore core.VectorStore
 	docStore    store.DocStore
@@ -67,8 +67,8 @@ func (idx *defaultIndexer) Init() error {
 	p := pipeline.New[*core.IndexingContext]()
 	p.AddSteps(stepinx.Discover())
 
-	if len(idx.parsers) > 0 {
-		p.AddSteps(stepinx.Multi(idx.parsers...))
+	if idx.registry != nil {
+		p.AddSteps(stepinx.MultiFactory(idx.registry))
 	}
 
 	if idx.chunker != nil {
@@ -233,9 +233,15 @@ func NewVectorIndexer(
 		logger = logging.DefaultNoopLogger()
 	}
 
+	registry := types.NewParserRegistry()
+	for _, p := range parsers {
+		parser := p // capture
+		registry.Register(func() core.Parser { return parser })
+	}
+
 	idx := &defaultIndexer{
 		logger:      logger,
-		parsers:     parsers,
+		registry:    registry,
 		chunker:     chunker,
 		embedder:    embedder,
 		vectorStore: vectorStore,
@@ -292,9 +298,15 @@ func NewMultimodalGraphIndexer(
 		return nil, fmt.Errorf("multimodal pipeline requires EntityExtractor to map entities to GraphStore")
 	}
 
+	registry := types.NewParserRegistry()
+	for _, p := range parsers {
+		parser := p // capture
+		registry.Register(func() core.Parser { return parser })
+	}
+
 	idx := &defaultIndexer{
 		logger:      logger,
-		parsers:     parsers,
+		registry:    registry,
 		chunker:     chunker,
 		embedder:    embedder,
 		extractor:   entityExtractor,
@@ -322,7 +334,7 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	// 1. Set default internal state
 	idx := &defaultIndexer{
 		logger:  logging.DefaultNoopLogger(),
-		parsers: types.AllParsers(),
+		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
 			Workers:     10,
@@ -351,9 +363,14 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 
 	if idx.vectorStore == nil {
 		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		dimension := 1536
+		if idx.embedder != nil {
+			dimension = idx.embedder.Dimension()
+		}
+
 		vStore, err := govector.NewStore(
 			govector.WithDBPath(vecPath),
-			govector.WithDimension(1536),
+			govector.WithDimension(dimension),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default vector store: %w", err)
@@ -382,7 +399,7 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
 		logger:  logging.DefaultNoopLogger(),
-		parsers: types.AllParsers(),
+		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
 			Workers:     20, // Enterprise default
@@ -421,7 +438,7 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
 		logger:  logging.DefaultNoopLogger(),
-		parsers: types.AllParsers(),
+		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
 			Workers:     10,

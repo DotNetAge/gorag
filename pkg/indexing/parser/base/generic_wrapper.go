@@ -1,14 +1,16 @@
 package base
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
+	"bytes"
 	"context"
 	"io"
+
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/google/uuid"
 )
 
 // ensure interface implementation
-var _ Parser = (*GenericStreamWrapper)(nil)
+var _ core.Parser = (*GenericStreamWrapper)(nil)
 
 // ContentExtractor is a simple function signature that takes an io.Reader and returns the full text.
 // This is used for legacy parsers or file types that cannot be easily streamed (like Docx/PDF).
@@ -32,6 +34,31 @@ func NewGenericStreamWrapper(name string, types []string, extractor ContentExtra
 
 func (w *GenericStreamWrapper) GetSupportedTypes() []string {
 	return w.supportedTypes
+}
+
+// Supports checks if the content type is supported.
+func (w *GenericStreamWrapper) Supports(contentType string) bool {
+	for _, t := range w.supportedTypes {
+		if t == contentType {
+			return true
+		}
+	}
+	return false
+}
+
+// Parse implements core.Parser using the stream parser internally.
+func (w *GenericStreamWrapper) Parse(ctx context.Context, content []byte, metadata map[string]any) (*core.Document, error) {
+	reader := bytes.NewReader(content)
+	docChan, err := w.ParseStream(ctx, reader, metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, ok := <-docChan
+	if !ok {
+		return nil, io.EOF // Or some other appropriate error for "no document generated"
+	}
+	return doc, nil
 }
 
 func (w *GenericStreamWrapper) ParseStream(ctx context.Context, r io.Reader, metadata map[string]any) (<-chan *core.Document, error) {

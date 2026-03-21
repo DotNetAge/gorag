@@ -37,24 +37,31 @@ func WithWorkers(workers int) IndexerOption {
 	}
 }
 
-// WithParsers adds the parsers to use.
+// WithParsers adds custom parsers to the registry.
 func WithParsers(parsers ...core.Parser) IndexerOption {
 	return func(idx *defaultIndexer) {
-		idx.parsers = append(idx.parsers, parsers...)
+		if idx.registry == nil {
+			idx.registry = types.NewParserRegistry()
+		}
+		for _, parser := range parsers {
+			p := parser // capture
+			// Register custom parser dynamically
+			idx.registry.Register(func() core.Parser { return p })
+		}
 	}
 }
 
-// WithAllParsers enables all available builtin parsers.
+// WithAllParsers enables all available builtin parsers using the global factory registry.
 func WithAllParsers() IndexerOption {
 	return func(idx *defaultIndexer) {
-		idx.parsers = append(idx.parsers, types.AllParsers()...)
+		idx.registry = types.DefaultRegistry
 	}
 }
 
-// ClearParsers removes all currently configured parsers.
+// ClearParsers clears the current parser registry.
 func ClearParsers() IndexerOption {
 	return func(idx *defaultIndexer) {
-		idx.parsers = []core.Parser{}
+		idx.registry = types.NewParserRegistry()
 	}
 }
 // WithVectorStore sets a custom vector store.

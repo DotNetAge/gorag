@@ -2,8 +2,16 @@ package types
 
 import (
 	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
+
+// TestMain initializes the default registry before running tests
+func TestMain(m *testing.M) {
+	// Ensure DefaultRegistry is initialized before any tests run
+	DefaultRegistry.EnsureInitialized()
+	m.Run()
+}
 
 func TestParserTypeString(t *testing.T) {
 	tests := []struct {
@@ -39,15 +47,20 @@ func TestParserTypeString(t *testing.T) {
 }
 
 func TestParserRegistry(t *testing.T) {
-	registry := DefaultParserRegistry()
+	// Create a new empty registry for testing (not initialized)
+	// This tests the registry behavior before initialization
+	registry := NewParserRegistry()
 
-	// Test empty registry
+	// Manually ensure it's initialized to test normal behavior
+	registry.EnsureInitialized()
+
+	// Test initialized registry should have parsers
 	allParsers := registry.GetAll()
-	assert.Empty(t, allParsers)
+	assert.NotEmpty(t, allParsers)
 
-	// Test GetByTypes with empty registry
+	// Test GetByTypes with initialized registry
 	parsers := registry.GetByTypes(TEXT, MARKDOWN)
-	assert.Empty(t, parsers)
+	assert.Len(t, parsers, 2)
 }
 
 func TestDefaultRegistry(t *testing.T) {

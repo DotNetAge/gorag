@@ -235,6 +235,19 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 	}
 	_ = os.Remove(testFile)
 
+	// 0. Resolve or Register Embedding Provider first to align Dimension
+	var embedder embedding.Provider
+	if cfg.embedder != nil {
+		embedder = cfg.embedder
+	} else if ctr.IsRegistered((*embedding.Provider)(nil)) {
+		embedder = ctr.MustResolve((*embedding.Provider)(nil)).(embedding.Provider)
+	}
+
+	// Align Dimension with Embedder if possible
+	if embedder != nil && cfg.Dimension == 1536 {
+		cfg.Dimension = embedder.Dimension()
+	}
+
 	// 1. Resolve or Register Persistence Singleton Resources
 	var vStore core.VectorStore
 	var dStore store.DocStore
@@ -267,10 +280,8 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 		indexer.WithDocStore(dStore),
 	}
 
-	if cfg.embedder != nil {
-		idxOpts = append(idxOpts, indexer.WithEmbedding(cfg.embedder))
-	} else if ctr.IsRegistered((*embedding.Provider)(nil)) {
-		idxOpts = append(idxOpts, indexer.WithEmbedding(ctr.MustResolve((*embedding.Provider)(nil)).(embedding.Provider)))
+	if embedder != nil {
+		idxOpts = append(idxOpts, indexer.WithEmbedding(embedder))
 	}
 
 	if len(cfg.parsers) > 0 {

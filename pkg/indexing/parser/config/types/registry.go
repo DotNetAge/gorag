@@ -1,7 +1,9 @@
 package types
 
 import (
+	"strings"
 	"sync"
+
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/csv"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/dbschema"
@@ -27,19 +29,22 @@ import (
 
 var (
 	DefaultRegistry = NewParserRegistry()
-	once            sync.Once
 )
 
-// ParserRegistry 解析器注册表
+// ParserFactory 定义了创建 Parser 实例的工厂函数
+type ParserFactory func() core.Parser
+
+// ParserRegistry 解析器工厂注册表, 按文件扩展名注册
 type ParserRegistry struct {
-	parsers map[ParserType]core.Parser
-	lock    sync.RWMutex
+	factories map[string]ParserFactory
+	lock      sync.RWMutex
+	once      sync.Once
 }
 
-// NewParserRegistry 创建新的注册表
+// NewParserRegistry 创建新的按扩展名注册的注册表
 func NewParserRegistry() *ParserRegistry {
 	return &ParserRegistry{
-		parsers: make(map[ParserType]core.Parser),
+		factories: make(map[string]ParserFactory),
 	}
 }
 
@@ -48,74 +53,141 @@ func DefaultParserRegistry() *ParserRegistry {
 	return DefaultRegistry
 }
 
-// EnsureInitialized 懒加载初始化
+// EnsureInitialized 懒加载初始化内置工厂，按所有支持的扩展名注册
 func (r *ParserRegistry) EnsureInitialized() {
-	once.Do(func() {
+	r.once.Do(func() {
+		builtins := []ParserFactory{
+			func() core.Parser { return text.DefaultTextStreamParser(1024) },
+			func() core.Parser { return markdown.DefaultMarkdownStreamParser(1) },
+			func() core.Parser { return gocode.DefaultGocodeStreamParser() },
+			func() core.Parser { return javacode.DefaultJavacodeStreamParser() },
+			func() core.Parser { return pycode.DefaultPycodeStreamParser() },
+			func() core.Parser { return tscode.DefaultParser() },
+			func() core.Parser { return jscode.DefaultJscodeStreamParser() },
+			func() core.Parser { return pdf.DefaultParser() },
+			func() core.Parser { return docx.DefaultParser() },
+			func() core.Parser { return excel.DefaultExcelStreamParser() },
+			func() core.Parser { return csv.DefaultCSVStreamParser(100, true) },
+			func() core.Parser { return json.DefaultJsonStreamParser() },
+			func() core.Parser { return xml.DefaultParser() },
+			func() core.Parser { return yaml.DefaultParser() },
+			func() core.Parser { return log.DefaultParser() },
+			func() core.Parser { return html.DefaultHtmlStreamParser() },
+			func() core.Parser { return image.DefaultParser(nil) },
+			func() core.Parser { return email.DefaultEmailStreamParser() },
+			func() core.Parser { return ppt.DefaultParser() },
+			func() core.Parser { return dbschema.DefaultDBSchemaStreamParser() },
+		}
+
 		r.lock.Lock()
 		defer r.lock.Unlock()
-		
-		r.parsers[TEXT] = text.DefaultTextStreamParser(1024)
-		r.parsers[MARKDOWN] = markdown.DefaultMarkdownStreamParser(1)
-		r.parsers[GOCODE] = gocode.DefaultGocodeStreamParser()
-		r.parsers[JAVACODE] = javacode.DefaultJavacodeStreamParser()
-		r.parsers[PYCODE] = pycode.DefaultPycodeStreamParser()
-		r.parsers[TSCODE] = tscode.DefaultParser()
-		r.parsers[JSCODE] = jscode.DefaultJscodeStreamParser()
-		r.parsers[PDF] = pdf.DefaultParser()
-		r.parsers[DOCX] = docx.DefaultParser()
-		r.parsers[EXCEL] = excel.DefaultExcelStreamParser()
-		r.parsers[CSV] = csv.DefaultCSVStreamParser(100, true)
-		r.parsers[JSON] = json.DefaultJsonStreamParser()
-		r.parsers[XML] = xml.DefaultParser()
-		r.parsers[YAML] = yaml.DefaultParser()
-		r.parsers[LOG] = log.DefaultParser()
-		r.parsers[HTML] = html.DefaultHtmlStreamParser()
-		r.parsers[IMAGE] = image.DefaultParser(nil)
-		r.parsers[EMAIL] = email.DefaultEmailStreamParser()
-		r.parsers[PPT] = ppt.DefaultParser()
-		r.parsers[DBSCHEMA] = dbschema.DefaultDBSchemaStreamParser()
+		for _, factory := range builtins {
+			// Get temporary instance to check supported extensions
+			tempParser := factory()
+			for _, ext := range tempParser.GetSupportedTypes() {
+				extStr := strings.ToLower(ext)
+				r.factories[extStr] = factory
+			}
+		}
 	})
 }
 
-// Register 注册一个解析器
-func (r *ParserRegistry) Register(parserType ParserType, parser core.Parser) {
+// RegisterByExtension 显式为一个或多个扩展名注册工厂
+func (r *ParserRegistry) RegisterByExtension(factory ParserFactory, extensions ...string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
-	r.parsers[parserType] = parser
+	for _, ext := range extensions {
+		r.factories[strings.ToLower(ext)] = factory
+	}
 }
 
-// Get 获取解析器
-func (r *ParserRegistry) Get(parserType ParserType) (core.Parser, bool) {
-	r.EnsureInitialized()
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-	p, ok := r.parsers[parserType]
-	return p, ok
-}
-
-// GetAll 获取所有解析器
-func (r *ParserRegistry) GetAll() []core.Parser {
-	r.EnsureInitialized()
-	r.lock.RLock()
-	defer r.lock.RUnlock()
+// Register 自动提取工厂支持的扩展名并注册
+func (r *ParserRegistry) Register(factory ParserFactory) {
+	tempParser := factory()
+	exts := tempParser.GetSupportedTypes()
 	
-	result := make([]core.Parser, 0, len(r.parsers))
-	for _, parser := range r.parsers {
-		result = append(result, parser)
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	for _, ext := range exts {
+		r.factories[strings.ToLower(ext)] = factory
+	}
+}
+
+// CreateByExtension 根据文件扩展名动态创建一个对应的 Parser 实例 (O(1) 查找)
+func (r *ParserRegistry) CreateByExtension(ext string) (core.Parser, bool) {
+	r.EnsureInitialized()
+	
+	ext = strings.ToLower(ext)
+	r.lock.RLock()
+	factory, ok := r.factories[ext]
+	r.lock.RUnlock()
+	
+	if !ok {
+		return nil, false
+	}
+	return factory(), true
+}
+
+// GetAllFactories 获取所有去重后的工厂函数
+func (r *ParserRegistry) GetAllFactories() []ParserFactory {
+	r.EnsureInitialized()
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	// Use pointer addresses or a set logic to deduplicate, 
+	// but simply creating an instance and collecting is fine for legacy AllParsers
+	unique := make(map[string]ParserFactory)
+	for _, f := range r.factories {
+		// Just a simple way to get one factory per distinct parser logic
+		// We use the first extension as a deduplication key
+		temp := f()
+		exts := temp.GetSupportedTypes()
+		if len(exts) > 0 {
+			unique[exts[0]] = f
+		}
+	}
+
+	var result []ParserFactory
+	for _, f := range unique {
+		result = append(result, f)
 	}
 	return result
 }
 
-// GetByTypes 根据类型获取
+// --- Legacy Compatibility Functions (Optional, but kept to prevent breaking other code) ---
+
+// Get 获取解析器 (Deprecated: use CreateByExtension)
+func (r *ParserRegistry) Get(parserType ParserType) (core.Parser, bool) {
+	// Simple mapping for legacy support
+	str := strings.ToLower(parserType.String())
+	ext := "." + str
+	if str == "text" {
+		ext = ".txt"
+	}
+	return r.CreateByExtension(ext)
+}
+
+// GetAll 获取所有解析器的新实例
+func (r *ParserRegistry) GetAll() []core.Parser {
+	factories := r.GetAllFactories()
+	var result []core.Parser
+	for _, f := range factories {
+		result = append(result, f())
+	}
+	return result
+}
+
+// GetByTypes 根据类型获取新实例
 func (r *ParserRegistry) GetByTypes(types ...ParserType) []core.Parser {
-	r.EnsureInitialized()
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-	
-	result := make([]core.Parser, 0, len(types))
+	var result []core.Parser
 	for _, t := range types {
-		if parser, ok := r.parsers[t]; ok {
-			result = append(result, parser)
+		str := strings.ToLower(t.String())
+		ext := "." + str
+		if str == "text" {
+			ext = ".txt"
+		}
+		if p, ok := r.CreateByExtension(ext); ok {
+			result = append(result, p)
 		}
 	}
 	return result

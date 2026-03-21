@@ -67,10 +67,15 @@ func DefaultAdvancedRetriever(opts ...Option) (core.Retriever, error) {
 	if vStore == nil {
 		workDir := "./data"
 		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		dimension := 1536
+		if options.Embedder != nil {
+			dimension = options.Embedder.Dimension()
+		}
+
 		var err error
 		vStore, err = govector.NewStore(
 			govector.WithDBPath(vecPath),
-			govector.WithDimension(1536),
+			govector.WithDimension(dimension),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to init fallback vector store: %w", err)

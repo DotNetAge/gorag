@@ -9,21 +9,70 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
+	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
 )
 
-// multi parses documents using multiple parsers with intelligent routing.
+// multiFactory parses documents using a dynamic factory registry to ensure thread-safety
+type multiFactory struct {
+	registry *types.ParserRegistry
+}
+
+// MultiFactory creates a new multi-parser step that dynamically spawns parsers.
+func MultiFactory(registry *types.ParserRegistry) pipeline.Step[*core.IndexingContext] {
+	return &multiFactory{registry: registry}
+}
+
+// Name returns the step name
+func (s *multiFactory) Name() string {
+	return "ParseFactory"
+}
+
+// Execute streams and parses documents from the file.
+func (s *multiFactory) Execute(ctx context.Context, state *core.IndexingContext) error {
+	if s.registry == nil {
+		return fmt.Errorf("no parser registry configured")
+	}
+
+	ext := strings.ToLower(filepath.Ext(state.FilePath))
+	parser, ok := s.registry.CreateByExtension(ext)
+	if !ok {
+		return fmt.Errorf("no parser factory found for file extension: %s", ext)
+	}
+
+	// Open file for streaming parse
+	file, err := os.Open(state.FilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Build metadata map
+	metadataMap := map[string]any{
+		"source":   state.Metadata.Source,
+		"filename": state.Metadata.FileName,
+		"size":     state.Metadata.Size,
+		"mod_time": state.Metadata.ModTime,
+	}
+
+	// Stream parse the file using the thread-safe, newly created parser instance
+	docChan, err := parser.ParseStream(ctx, file, metadataMap)
+	if err != nil {
+		return fmt.Errorf("failed to parse file: %w", err)
+	}
+
+	// Pass parsed documents to next step via channel
+	state.Documents = docChan
+
+	return nil
+}
+
+// legacy multi parses documents using multiple instances (deprecated, use MultiFactory)
 type multi struct {
 	parsers []core.Parser
 }
 
 // Multi creates a new multi-parser step supporting multiple parsers.
-//
-// Parameters:
-//   - parsers: variadic list of parsers to use
-//
-// Example:
-//
-//	p.AddStep(indexing.Multi(parser1, parser2, parser3))
+// Deprecated: Use MultiFactory to prevent concurrency and state-sharing bugs.
 func Multi(parsers ...core.Parser) pipeline.Step[*core.IndexingContext] {
 	return &multi{parsers: parsers}
 }

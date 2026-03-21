@@ -53,9 +53,14 @@ func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 	if options.vectorStore == nil {
 		workDir := "./data"
 		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		dimension := 1536
+		if options.embedder != nil {
+			dimension = options.embedder.Dimension()
+		}
+
 		options.vectorStore, _ = govector.NewStore(
 			govector.WithDBPath(vecPath),
-			govector.WithDimension(1536),
+			govector.WithDimension(dimension),
 		)
 	}
 
