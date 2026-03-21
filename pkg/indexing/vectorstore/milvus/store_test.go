@@ -45,7 +45,7 @@ func TestStore_Add_Search_Delete(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store, err := NewStore(endpoint)
+	store, err := NewStore(endpoint, WithDimension(4))
 	require.NoError(t, err)
 	defer store.Close(ctx)
 

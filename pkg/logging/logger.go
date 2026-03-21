@@ -1,11 +1,35 @@
 package logging
 
 import (
+	"fmt"
 	"log"
 	"os"
 )
 
-// Logger 通用日志接口
+type Level int
+
+const (
+	DEBUG Level = iota
+	INFO
+	WARN
+	ERROR
+)
+
+func (l Level) String() string {
+	switch l {
+	case DEBUG:
+		return "DEBUG"
+	case INFO:
+		return "INFO"
+	case WARN:
+		return "WARN"
+	case ERROR:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type Logger interface {
 	Info(msg string, fields ...map[string]any)
 	Error(msg string, err error, fields ...map[string]any)
@@ -13,65 +37,109 @@ type Logger interface {
 	Warn(msg string, fields ...map[string]any)
 }
 
-// defaultLogger 默认日志实现，将日志写入文件
 type defaultLogger struct {
 	filePath string
 	file     *os.File
 	logger   *log.Logger
+	level    Level
 }
 
-// DefaultConsoleLogger creates a default logger that writes to standard output.
-func DefaultConsoleLogger() Logger {
-	return &defaultLogger{
-		file:   os.Stdout,
-		logger: log.New(os.Stdout, "", log.LstdFlags),
+type Option func(*defaultLogger)
+
+func WithLevel(level Level) Option {
+	return func(l *defaultLogger) {
+		l.level = level
 	}
 }
 
-// DefaultFileLogger 创建默认日志记录器，写入指定文件
-func DefaultFileLogger(filePath string) (Logger, error) {
+func DefaultConsoleLogger() Logger {
+	return &defaultLogger{
+		file:   os.Stdout,
+		logger: log.New(os.Stdout, "", 0),
+		level:  INFO,
+	}
+}
+
+func DefaultFileLogger(filePath string, opts ...Option) (Logger, error) {
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	return &defaultLogger{
+	l := &defaultLogger{
 		filePath: filePath,
 		file:     file,
-		logger:   log.New(file, "", log.LstdFlags),
-	}, nil
+		logger:   log.New(file, "", 0),
+		level:    INFO,
+	}
+
+	for _, opt := range opts {
+		opt(l)
+	}
+
+	return l, nil
 }
 
-// Info 输出信息日志
+func (l *defaultLogger) log(level Level, msg string, fields map[string]any) {
+	if level < l.level {
+		return
+	}
+
+	if fields == nil {
+		fields = make(map[string]any)
+	}
+
+	var fieldStr string
+	for k, v := range fields {
+		fieldStr += fmt.Sprintf(" %s=%v", k, v)
+	}
+
+	l.logger.Printf("[%s] %s%s", level.String(), msg, fieldStr)
+}
+
 func (l *defaultLogger) Info(msg string, fields ...map[string]any) {
-	l.logger.Printf("[INFO] %s - %v", msg, fields)
+	var f map[string]any
+	if len(fields) > 0 {
+		f = fields[0]
+	}
+	l.log(INFO, msg, f)
 }
 
-// Error 输出错误日志
 func (l *defaultLogger) Error(msg string, err error, fields ...map[string]any) {
-	l.logger.Printf("[ERROR] %s - %v - error: %v", msg, fields, err)
+	f := make(map[string]any)
+	if err != nil {
+		f["error"] = err.Error()
+	}
+	if len(fields) > 0 {
+		for k, v := range fields[0] {
+			f[k] = v
+		}
+	}
+	l.log(ERROR, msg, f)
 }
 
-// Debug 输出调试日志
 func (l *defaultLogger) Debug(msg string, fields ...map[string]any) {
-	l.logger.Printf("[DEBUG] %s - %v", msg, fields)
+	var f map[string]any
+	if len(fields) > 0 {
+		f = fields[0]
+	}
+	l.log(DEBUG, msg, f)
 }
 
-// Warn 输出警告日志
 func (l *defaultLogger) Warn(msg string, fields ...map[string]any) {
-	l.logger.Printf("[WARN] %s - %v", msg, fields)
+	var f map[string]any
+	if len(fields) > 0 {
+		f = fields[0]
+	}
+	l.log(WARN, msg, f)
 }
 
-// Close 关闭底层文件句柄，释放资源。
-// 调用方可通过类型断言 io.Closer 来调用此方法。
 func (l *defaultLogger) Close() error {
 	return l.file.Close()
 }
 
-// noopLogger 是一个空的日志记录器，用于测试或不需要日志的场景
 type noopLogger struct{}
 
-// DefaultNoopLogger 创建一个空的日志记录器
 func DefaultNoopLogger() Logger {
 	return &noopLogger{}
 }

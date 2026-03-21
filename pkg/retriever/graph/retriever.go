@@ -181,6 +181,15 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 type entityExtractionStep struct {
 	extractor core.EntityExtractor
 	logger    logging.Logger
+	failOnError bool
+}
+
+type EntityExtractionOption func(*entityExtractionStep)
+
+func WithFailOnError(fail bool) EntityExtractionOption {
+	return func(s *entityExtractionStep) {
+		s.failOnError = fail
+	}
 }
 
 func (s *entityExtractionStep) Name() string {
@@ -195,7 +204,10 @@ func (s *entityExtractionStep) Execute(ctx context.Context, context *core.Retrie
 	if err != nil {
 		s.logger.Error("failed to extract entities", err)
 		span.LogEvent("error", map[string]any{"error": err.Error()})
-		return nil // Non-fatal
+		if s.failOnError {
+			return err
+		}
+		return nil
 	}
 
 	span.LogEvent("entities_extracted", map[string]any{"count": len(res.Entities), "entities": res.Entities})

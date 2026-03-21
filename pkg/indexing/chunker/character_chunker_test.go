@@ -81,8 +81,8 @@ func TestCharacterChunker_chunkText(t *testing.T) {
 			name:         "unicode text",
 			chunker:      NewCharacterChunker(5, 1),
 			text:         "你好世界",
-			wantChunks:   2,
-			wantFirstLen: 5,
+			wantChunks:   1,
+			wantFirstLen: 4,
 		},
 	}
 

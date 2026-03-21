@@ -45,7 +45,7 @@ func TestStore_Add_Search_Delete(t *testing.T) {
 
 	ctx := context.Background()
 	// Create a 4-dimensional collection
-	store, err := NewStore("gorag", 1536, endpoint, 6334)
+	store, err := NewStore("gorag", 4, endpoint, 6334)
 	require.NoError(t, err)
 	defer store.Close(ctx)
 
