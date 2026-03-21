@@ -15,7 +15,14 @@ type Document struct {
 	ContentType string         `json:"content_type"` // Type of content (e.g., text, pdf, markdown)
 }
 
-// NewDocument creates a new document 
+// NewDocument creates a new Document instance with the specified parameters.
+//
+// Parameters:
+//   - id: unique identifier for the document
+//   - content: text content of the document
+//   - source: source location or origin of the document (file path, URL, etc.)
+//   - contentType: MIME type or format indicator (e.g., "text/plain", "application/pdf")
+//   - metadata: additional metadata (can be nil)
 func NewDocument(id, content, source, contentType string, metadata map[string]any) *Document {
 	now := time.Now()
 	return &Document{
@@ -30,10 +37,9 @@ func NewDocument(id, content, source, contentType string, metadata map[string]an
 }
 
 // Update updates the document content and metadata.
+// It also refreshes the UpdatedAt timestamp to track modification time.
 func (d *Document) Update(content string, metadata map[string]any) {
 	d.Content = content
 	d.Metadata = metadata
 	d.UpdatedAt = time.Now()
 }
-
-// Parser defines the interface for document parsing.

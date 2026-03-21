@@ -1,3 +1,20 @@
+// Package di provides a lightweight dependency injection container for managing component lifecycle.
+//
+// This package supports:
+//   - Singleton and transient service lifecycles
+//   - Interface-based registration and resolution
+//   - Thread-safe concurrent access
+//   - Factory functions and instance registration
+//   - Automatic cleanup of closable services
+//
+// Example usage:
+//
+//	container := di.New()
+//	container.Register((*MyInterface)(nil), func(c *di.Container) (any, error) {
+//	    return NewMyService(), nil
+//	}, true) // true = singleton
+//
+//	service, err := container.Resolve((*MyInterface)(nil))
 package di
 
 import (
@@ -10,13 +27,15 @@ import (
 var defaultContainer *Container
 var once sync.Once
 
-// Container represents a dependency injection container
+// Container represents a dependency injection container.
+// It manages service registration, lifecycle, and resolution with thread-safe access.
 type Container struct {
 	services map[reflect.Type]service
 	lock     sync.RWMutex
 }
 
-// service represents a registered service
+// service represents a registered service within the container.
+// It holds the service instance, factory function, and lifecycle metadata.
 type service struct {
 	instance      any
 	factory       func(*Container) (any, error)
@@ -24,14 +43,22 @@ type service struct {
 	isInitialized bool
 }
 
-// New creates a new dependency injection container
+// New creates a new dependency injection container.
+// The container starts empty and requires explicit service registration before use.
 func New() *Container {
 	return &Container{
 		services: make(map[reflect.Type]service),
 	}
 }
 
-// Register registers a service with the container
+// Register registers a service with the container.
+//
+// Parameters:
+//   - iface: pointer to interface type (e.g., (*MyInterface)(nil))
+//   - factory: function that creates the service instance
+//   - isSingleton: if true, only one instance is created and reused; if false, new instance each time
+//
+// Returns the container for method chaining.
 func (c *Container) Register(iface any, factory func(*Container) (any, error), isSingleton bool) *Container {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -58,7 +85,14 @@ func (c *Container) Register(iface any, factory func(*Container) (any, error), i
 	return c
 }
 
-// RegisterInstance registers an existing instance with the container
+// RegisterInstance registers an existing instance with the container.
+// The instance is treated as a singleton and returned as-is on resolution.
+//
+// Parameters:
+//   - iface: pointer to interface type
+//   - instance: the concrete instance to register
+//
+// Returns the container for method chaining.
 func (c *Container) RegisterInstance(iface any, instance any) *Container {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -90,17 +124,21 @@ func (c *Container) RegisterInstance(iface any, instance any) *Container {
 	return c
 }
 
-// RegisterSingleton registers a singleton service
+// RegisterSingleton registers a singleton service with the container.
+// The service factory will be called only once, and the same instance is returned on every resolution.
 func (c *Container) RegisterSingleton(iface any, factory func(*Container) (any, error)) *Container {
 	return c.Register(iface, factory, true)
 }
 
-// RegisterTransient registers a transient service
+// RegisterTransient registers a transient service with the container.
+// A new instance is created every time the service is resolved.
 func (c *Container) RegisterTransient(iface any, factory func(*Container) (any, error)) *Container {
 	return c.Register(iface, factory, false)
 }
 
-// Resolve resolves a service from the container
+// Resolve resolves a service from the container.
+// It returns the service instance or an error if the service is not registered or initialization fails.
+// For singletons, the instance is created only once and cached for subsequent calls.
 func (c *Container) Resolve(iface any) (any, error) {
 	c.lock.RLock()
 	ifaceType := reflect.TypeOf(iface)

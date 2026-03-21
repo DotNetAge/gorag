@@ -2,7 +2,8 @@ package core
 
 import "context"
 
-// Embedder defines the interface for generating vector embeddings.
+// Embedder defines the interface for generating vector embeddings from text.
+// It provides both single and batch embedding capabilities for document vectorization.
 type Embedder interface {
 	// Embed encodes a text string into a vector.
 	Embed(ctx context.Context, text string) ([]float32, error)
@@ -14,7 +15,8 @@ type Embedder interface {
 	Dimension() int
 }
 
-// MultimodalEmbedder encodes text and image inputs into a shared vector space,
+// MultimodalEmbedder extends Embedder to support multi-modal inputs (text and images).
+// It encodes both text and image inputs into a shared vector space for cross-modal retrieval.
 type MultimodalEmbedder interface {
 	Embedder
 	// EmbedImage encodes raw image bytes (JPEG/PNG) into a vector in the shared embedding space.

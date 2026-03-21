@@ -1,3 +1,11 @@
+// Package indexer provides high-level indexers for building RAG pipelines.
+//
+// This package offers pre-configured indexer implementations:
+//   - DefaultNativeIndexer: Lightweight, local-first indexer for prototyping
+//   - DefaultAdvancedIndexer: High-performance indexer for production use
+//   - DefaultGraphIndexer: Knowledge graph-enhanced indexer
+//   - NewVectorIndexer: Custom vector-based indexer
+//   - NewMultimodalGraphIndexer: Multimodal and graph-capable indexer
 package indexer
 
 import (
@@ -22,6 +30,7 @@ import (
 )
 
 // Indexer is the unified interface for document indexing.
+// It provides methods for processing files and directories into vector/graph stores.
 type Indexer interface {
 	indexing.Indexer
 	Init() error
@@ -44,6 +53,7 @@ type defaultIndexer struct {
 }
 
 // Config defines the configuration for the indexer.
+// It controls concurrency and worker pool settings for parallel document processing.
 type Config struct {
 	Concurrency bool
 	Workers     int
@@ -199,7 +209,16 @@ func (idx *defaultIndexer) IndexDirectory(ctx context.Context, dirPath string, r
 	return g.Wait()
 }
 
-// NewVectorIndexer creates a simple text-vector pipeline.
+// NewVectorIndexer creates a simple text-vector pipeline for basic RAG setups.
+//
+// Parameters:
+//   - parsers: list of document parsers
+//   - chunker: semantic chunker for splitting documents
+//   - embedder: embedding provider for vectorization
+//   - vectorStore: vector storage backend
+//   - docStore: document metadata storage
+//   - logger: logging service
+//   - metrics: observability metrics service
 func NewVectorIndexer(
 	parsers []core.Parser,
 	chunker core.SemanticChunker,
@@ -237,6 +256,18 @@ func NewVectorIndexer(
 }
 
 // NewMultimodalGraphIndexer creates an advanced multimodal and graph pipeline.
+// It supports both text and image inputs, with knowledge graph extraction capabilities.
+//
+// Parameters:
+//   - parsers: list of document parsers
+//   - chunker: semantic chunker for splitting documents
+//   - embedder: multimodal embedding provider
+//   - entityExtractor: entity extractor for graph construction
+//   - vectorStore: vector storage backend
+//   - docStore: document metadata storage
+//   - graphStore: knowledge graph storage
+//   - logger: logging service
+//   - metrics: observability metrics service
 func NewMultimodalGraphIndexer(
 	parsers []core.Parser,
 	chunker core.SemanticChunker,
@@ -286,7 +317,7 @@ func NewMultimodalGraphIndexer(
 }
 
 // DefaultNativeIndexer creates a light-weight, local-first Indexer.
-// It uses default TokenChunker, local SQLite and GoVector stores.
+// It uses default TokenChunker, local SQLite and GoVector stores, suitable for quick prototyping and testing.
 func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	// 1. Set default internal state
 	idx := &defaultIndexer{
@@ -305,7 +336,7 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 
 	// 3. Fallback to defaults for missing components
 	workDir := "./data"
-	
+
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create default work directory: %w", err)
 	}
@@ -346,7 +377,8 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	return idx, nil
 }
 
-// DefaultAdvancedIndexer creates a high-performance Indexer preset for production.
+// DefaultAdvancedIndexer creates a high-performance Indexer preset for production use.
+// It features increased worker concurrency and optimized defaults for enterprise workloads.
 func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
 		logger:  logging.DefaultNoopLogger(),
@@ -364,12 +396,16 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 	// Fallback logic
 	if idx.vectorStore == nil {
 		vStore, err := govector.DefaultStore()
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
 		dStore, err := sqlite.DefaultDocStore()
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		idx.docStore = dStore
 	}
 
@@ -381,6 +417,7 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 }
 
 // DefaultGraphIndexer creates a Knowledge-Graph enabled Indexer preset.
+// It integrates graph-based entity relationship extraction for complex query understanding.
 func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
 		logger:  logging.DefaultNoopLogger(),
@@ -397,12 +434,16 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 
 	if idx.vectorStore == nil {
 		vStore, err := govector.DefaultStore()
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
 		dStore, err := sqlite.DefaultDocStore()
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		idx.docStore = dStore
 	}
 
@@ -413,7 +454,7 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	return idx, nil
 }
 
-// DefaultIndexer is an alias for DefaultNativeIndexer.
+// DefaultIndexer is an alias for DefaultNativeIndexer, provided for backward compatibility.
 func DefaultIndexer(opts ...IndexerOption) (Indexer, error) {
 	return DefaultNativeIndexer(opts...)
 }

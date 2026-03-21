@@ -18,7 +18,8 @@ type Edge struct {
 	Properties map[string]any `json:"properties"` // Properties of the edge
 }
 
-// GraphExtractor is responsible for LLM-based Entity and Relationship extraction.
+// GraphExtractor defines the interface for extracting graph structures from text chunks.
+// It uses LLM-based entity and relationship extraction to build knowledge graphs.
 type GraphExtractor interface {
 	// Extract parses a chunk and returns a list of Nodes (Entities) and Edges (Relationships).
 	Extract(ctx context.Context, chunk *Chunk) ([]Node, []Edge, error)
