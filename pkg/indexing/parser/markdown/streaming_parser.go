@@ -18,7 +18,7 @@ type MarkdownStreamParser struct {
 	splitOnHeaderLevel int // e.g. 1 means split on "# ", 2 means split on "## "
 }
 
-func NewMarkdownStreamParser(splitLevel int) *MarkdownStreamParser {
+func DefaultMarkdownStreamParser(splitLevel int) *MarkdownStreamParser {
 	if splitLevel <= 0 || splitLevel > 6 {
 		splitLevel = 1 // Default to H1
 	}

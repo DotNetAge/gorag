@@ -24,6 +24,11 @@ type boltGraphStore struct {
 	db *bolt.DB
 }
 
+// DefaultGraphStore creates a Bolt GraphStore using a default local file "gorag_graph.bolt".
+func DefaultGraphStore() (store.GraphStore, error) {
+	return NewGraphStore("gorag_graph.bolt")
+}
+
 // NewGraphStore creates a new BoltDB based graph store.
 func NewGraphStore(path string) (store.GraphStore, error) {
 	// Ensure directory exists

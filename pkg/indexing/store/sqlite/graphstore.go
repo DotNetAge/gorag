@@ -18,6 +18,11 @@ type sqliteGraphStore struct {
 }
 
 // NewGraphStore creates a new SQLite based graph store.
+// DefaultGraphStore creates a SQLite GraphStore using a default local file "gorag_graph.db".
+func DefaultGraphStore() (store.GraphStore, error) {
+	return NewGraphStore("gorag_graph.db")
+}
+
 func NewGraphStore(path string) (store.GraphStore, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(path)

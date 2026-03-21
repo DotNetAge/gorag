@@ -36,11 +36,11 @@ func NewRetriever(
 	}
 
 	if options.logger == nil {
-		options.logger = logging.NewNoopLogger()
+		options.logger = logging.DefaultNoopLogger()
 	}
 
 	if options.tracer == nil {
-		options.tracer = observability.NewNoopTracer()
+		options.tracer = observability.DefaultNoopTracer()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()
@@ -186,7 +186,7 @@ type Options struct {
 func defaultOptions() *Options {
 	return &Options{
 		topK:   5,
-		tracer: observability.NewNoopTracer(),
+		tracer: observability.DefaultNoopTracer(),
 	}
 }
 

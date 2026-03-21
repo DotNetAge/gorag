@@ -104,8 +104,8 @@ func NewIntentRouter(llm chat.Client, opts ...IntentRouterOption) *intentRouter 
 		promptTemplate: defaultIntentPrompt,
 		defaultIntent:  core.IntentDomainSpecific,
 		minConfidence:  0.7,
-		logger:         logging.NewNoopLogger(),
-		collector:      observability.NewNoopCollector(),
+		logger:         logging.DefaultNoopLogger(),
+		collector:      observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(r)

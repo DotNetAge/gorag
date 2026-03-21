@@ -21,7 +21,7 @@ type CypherStep struct {
 // NewCypherStep creates a new step for Cypher-based graph retrieval.
 func NewCypherStep(store store.GraphStore, template string, logger logging.Logger) *CypherStep {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &CypherStep{
 		store:    store,

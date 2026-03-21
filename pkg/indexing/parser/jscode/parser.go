@@ -20,8 +20,8 @@ type Parser struct {
 	extractComments  bool
 }
 
-// NewParser creates a new JavaScript parser
-func NewParser() *Parser {
+// DefaultParser creates a new JavaScript parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:        500,
 		chunkOverlap:     50,

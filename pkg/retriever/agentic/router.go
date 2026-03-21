@@ -24,7 +24,7 @@ func NewSmartRouter(
 	logger logging.Logger,
 ) core.Retriever {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &routerRetriever{
 		classifier: classifier,

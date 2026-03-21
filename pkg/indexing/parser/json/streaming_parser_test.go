@@ -15,7 +15,7 @@ import (
 )
 
 func TestJsonStreamParser_ParseStream(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -45,7 +45,7 @@ func TestJsonStreamParser_ParseStream(t *testing.T) {
 }
 
 func TestJsonStreamParser_EmptyJSON(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	ctx := context.Background()
 
 	// Empty object
@@ -68,7 +68,7 @@ func TestJsonStreamParser_EmptyJSON(t *testing.T) {
 }
 
 func TestJsonStreamParser_LargeArray(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	parser.SetChunkSize(100)
 	ctx := context.Background()
 
@@ -101,7 +101,7 @@ func TestJsonStreamParser_LargeArray(t *testing.T) {
 }
 
 func TestJsonStreamParser_ChunkConfiguration(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	parser.SetChunkSize(200)
 	parser.SetChunkOverlap(20)
 
@@ -113,7 +113,7 @@ func TestJsonStreamParser_ChunkConfiguration(t *testing.T) {
 }
 
 func TestJsonStreamParser_SupportedFormats(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 1)
 	assert.Equal(t, ".json", formats[0])
@@ -126,7 +126,7 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory
@@ -183,7 +183,7 @@ func TestJsonStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 
 // TestJsonStreamParser_ParseStream_WithContextFilePath tests parsing with file path in context
 func TestJsonStreamParser_ParseStream_WithContextFilePath(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	ctx := context.Background()
 
 	// Add file path to context
@@ -211,7 +211,7 @@ func TestJsonStreamParser_ParseStream_WithContextFilePath(t *testing.T) {
 
 // TestJsonStreamParser_ParseStream_WithMetadata tests parsing with metadata
 func TestJsonStreamParser_ParseStream_WithMetadata(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	ctx := context.Background()
 
 	jsonContent := []byte(`{
@@ -243,7 +243,7 @@ func TestJsonStreamParser_ParseStream_WithMetadata(t *testing.T) {
 
 // TestJsonStreamParser_ParseStream_WithContextCancel tests parsing with context cancellation
 func TestJsonStreamParser_ParseStream_WithContextCancel(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Cancel context immediately
@@ -268,7 +268,7 @@ func TestJsonStreamParser_ParseStream_WithContextCancel(t *testing.T) {
 
 // TestJsonStreamParser_ParseStream_NestedJSON tests parsing nested JSON structures
 func TestJsonStreamParser_ParseStream_NestedJSON(t *testing.T) {
-	parser := NewJsonStreamParser()
+	parser := DefaultJsonStreamParser()
 	parser.SetChunkSize(100) // Small chunk size to test chunking
 	ctx := context.Background()
 

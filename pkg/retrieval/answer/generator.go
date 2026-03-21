@@ -71,8 +71,8 @@ func New(llm chat.Client, opts ...Option) *Generator {
 	g := &Generator{
 		llm:            llm,
 		promptTemplate: defaultGenerationPrompt,
-		logger:         logging.NewNoopLogger(),
-		collector:      observability.NewNoopCollector(),
+		logger:         logging.DefaultNoopLogger(),
+		collector:      observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(g)

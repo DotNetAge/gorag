@@ -58,8 +58,8 @@ func New(vectorStore core.VectorStore, embedder core.Embedder, opts ...Option) c
 		vectorStore: vectorStore,
 		embedder:    embedder,
 		defaultTopK: 5,
-		logger:      logging.NewNoopLogger(),
-		collector:   observability.NewNoopCollector(),
+		logger:      logging.DefaultNoopLogger(),
+		collector:   observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(r)

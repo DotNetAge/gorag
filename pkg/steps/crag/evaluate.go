@@ -33,7 +33,7 @@ func Evaluate(
 	metrics core.Metrics,
 ) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &evaluate{
 		evaluator: evaluator,

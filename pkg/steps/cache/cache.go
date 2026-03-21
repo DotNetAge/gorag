@@ -27,7 +27,7 @@ type check struct {
 
 func Check(cache SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &check{cache: cache, logger: logger, metrics: metrics}
 }
@@ -62,7 +62,7 @@ type store struct {
 
 func Store(cache SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &store{cache: cache, logger: logger, metrics: metrics}
 }

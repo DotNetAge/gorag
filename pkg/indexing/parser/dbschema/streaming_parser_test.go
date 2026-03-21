@@ -15,7 +15,7 @@ import (
 )
 
 func TestDBSchemaStreamParser_ParseStream(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -37,7 +37,7 @@ func TestDBSchemaStreamParser_ParseStream(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_TableAndIndexExtraction(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	ctx := context.Background()
 
 	sqlContent := []byte(`CREATE TABLE products (
@@ -73,7 +73,7 @@ CREATE INDEX idx_name ON products(name);`)
 }
 
 func TestDBSchemaStreamParser_TableExtraction(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	parser.extractTables = true
 	ctx := context.Background()
 
@@ -100,7 +100,7 @@ func TestDBSchemaStreamParser_TableExtraction(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_IndexExtraction(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	parser.extractIndexes = true
 	ctx := context.Background()
 
@@ -123,7 +123,7 @@ func TestDBSchemaStreamParser_IndexExtraction(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_EmptySQL(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	ctx := context.Background()
 
 	sqlContent := []byte(``)
@@ -139,7 +139,7 @@ func TestDBSchemaStreamParser_EmptySQL(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_LargeSQL(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	parser.chunkSize = 100
 	ctx := context.Background()
 
@@ -160,7 +160,7 @@ func TestDBSchemaStreamParser_LargeSQL(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_ContextCancellation(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var sb strings.Builder
@@ -181,7 +181,7 @@ func TestDBSchemaStreamParser_ContextCancellation(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_ChunkConfiguration(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	parser.chunkSize = 400
 	parser.chunkOverlap = 40
 
@@ -190,7 +190,7 @@ func TestDBSchemaStreamParser_ChunkConfiguration(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_ConfigurationOptions(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 
 	parser.extractTables = false
 	parser.extractColumns = false
@@ -202,7 +202,7 @@ func TestDBSchemaStreamParser_ConfigurationOptions(t *testing.T) {
 }
 
 func TestDBSchemaStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 1)
 	assert.Equal(t, ".sql", formats[0])
@@ -215,7 +215,7 @@ func TestDBSchemaStreamParser_Parse_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewDBSchemaStreamParser()
+	parser := DefaultDBSchemaStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

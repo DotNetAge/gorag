@@ -21,8 +21,8 @@ type Parser struct {
 	extractComments   bool
 }
 
-// NewParser creates a new TypeScript parser
-func NewParser() *Parser {
+// DefaultParser creates a new TypeScript parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:         500,
 		chunkOverlap:      50,

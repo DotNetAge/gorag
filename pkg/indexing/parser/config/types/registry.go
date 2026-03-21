@@ -29,8 +29,8 @@ type ParserRegistry struct {
 	parsers map[ParserType]core.Parser
 }
 
-// NewParserRegistry 创建新的解析器注册表
-func NewParserRegistry() *ParserRegistry {
+// DefaultParserRegistry 创建新的解析器注册表
+func DefaultParserRegistry() *ParserRegistry {
 	return &ParserRegistry{
 		parsers: make(map[ParserType]core.Parser),
 	}
@@ -68,31 +68,31 @@ func (r *ParserRegistry) GetByTypes(types ...ParserType) []core.Parser {
 }
 
 // DefaultRegistry 默认注册表实例
-var DefaultRegistry = NewParserRegistry()
+var DefaultRegistry = DefaultParserRegistry()
 
 // init 初始化默认注册表
 func init() {
 	// 注册所有内置解析器
-	DefaultRegistry.Register(TEXT, text.NewTextStreamParser(1024))
-	DefaultRegistry.Register(MARKDOWN, markdown.NewMarkdownStreamParser(1))
-	DefaultRegistry.Register(GOCODE, gocode.NewGocodeStreamParser())
-	DefaultRegistry.Register(JAVACODE, javacode.NewJavacodeStreamParser())
-	DefaultRegistry.Register(PYCODE, pycode.NewPycodeStreamParser())
-	DefaultRegistry.Register(TSCODE, tscode.NewParser())
-	DefaultRegistry.Register(JSCODE, jscode.NewJscodeStreamParser())
-	DefaultRegistry.Register(PDF, pdf.NewParser())
-	DefaultRegistry.Register(DOCX, docx.NewParser())
-	DefaultRegistry.Register(EXCEL, excel.NewExcelStreamParser())
-	DefaultRegistry.Register(CSV, csv.NewCSVStreamParser(100, true))
-	DefaultRegistry.Register(JSON, json.NewJsonStreamParser())
-	DefaultRegistry.Register(XML, xml.NewParser())
-	DefaultRegistry.Register(YAML, yaml.NewParser())
-	DefaultRegistry.Register(LOG, log.NewParser())
-	DefaultRegistry.Register(HTML, html.NewHtmlStreamParser())
-	DefaultRegistry.Register(IMAGE, image.NewParser(nil)) // LLM client can be injected later
-	DefaultRegistry.Register(EMAIL, email.NewEmailStreamParser())
-	DefaultRegistry.Register(PPT, ppt.NewParser())
-	DefaultRegistry.Register(DBSCHEMA, dbschema.NewDBSchemaStreamParser())
+	DefaultRegistry.Register(TEXT, text.DefaultTextStreamParser(1024))
+	DefaultRegistry.Register(MARKDOWN, markdown.DefaultMarkdownStreamParser(1))
+	DefaultRegistry.Register(GOCODE, gocode.DefaultGocodeStreamParser())
+	DefaultRegistry.Register(JAVACODE, javacode.DefaultJavacodeStreamParser())
+	DefaultRegistry.Register(PYCODE, pycode.DefaultPycodeStreamParser())
+	DefaultRegistry.Register(TSCODE, tscode.DefaultParser())
+	DefaultRegistry.Register(JSCODE, jscode.DefaultJscodeStreamParser())
+	DefaultRegistry.Register(PDF, pdf.DefaultParser())
+	DefaultRegistry.Register(DOCX, docx.DefaultParser())
+	DefaultRegistry.Register(EXCEL, excel.DefaultExcelStreamParser())
+	DefaultRegistry.Register(CSV, csv.DefaultCSVStreamParser(100, true))
+	DefaultRegistry.Register(JSON, json.DefaultJsonStreamParser())
+	DefaultRegistry.Register(XML, xml.DefaultParser())
+	DefaultRegistry.Register(YAML, yaml.DefaultParser())
+	DefaultRegistry.Register(LOG, log.DefaultParser())
+	DefaultRegistry.Register(HTML, html.DefaultHtmlStreamParser())
+	DefaultRegistry.Register(IMAGE, image.DefaultParser(nil)) // LLM client can be injected later
+	DefaultRegistry.Register(EMAIL, email.DefaultEmailStreamParser())
+	DefaultRegistry.Register(PPT, ppt.DefaultParser())
+	DefaultRegistry.Register(DBSCHEMA, dbschema.DefaultDBSchemaStreamParser())
 }
 
 // Parsers 根据类型名称创建解析器列表
@@ -105,8 +105,8 @@ func AllParsers() []core.Parser {
 	return DefaultRegistry.GetAll()
 }
 
-// NewParser 创建单个解析器实例
-func NewParser(parserType ParserType) (core.Parser, error) {
+// DefaultParser 创建单个解析器实例
+func DefaultParser(parserType ParserType) (core.Parser, error) {
 	parser, ok := DefaultRegistry.Get(parserType)
 	if !ok {
 		return nil, ErrParserNotFound

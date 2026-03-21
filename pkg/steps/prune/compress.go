@@ -35,7 +35,7 @@ func Compress(llm core.Client, logger logging.Logger, metrics core.Metrics, maxT
 		maxTokens = 300
 	}
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &compress{
 		llm:       llm,

@@ -25,7 +25,7 @@ func createTestEmail(from, to, subject, body string) []byte {
 }
 
 func TestEmailStreamParser_ParseStream(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -47,7 +47,7 @@ func TestEmailStreamParser_ParseStream(t *testing.T) {
 }
 
 func TestEmailStreamParser_ParseStream_WithContent(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	parser.chunkSize = 50 // Small chunk size to trigger multiple documents
 	ctx := context.Background()
 
@@ -78,7 +78,7 @@ func TestEmailStreamParser_ParseStream_WithContent(t *testing.T) {
 }
 
 func TestEmailStreamParser_HeaderExtraction(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	parser.chunkSize = 50 // Small chunk size to trigger callback
 	parser.extractHeaders = true
 	parser.extractBody = false
@@ -116,7 +116,7 @@ func TestEmailStreamParser_HeaderExtraction(t *testing.T) {
 }
 
 func TestEmailStreamParser_BodyExtraction(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	parser.extractHeaders = false
 	parser.extractBody = true
 	ctx := context.Background()
@@ -142,7 +142,7 @@ func TestEmailStreamParser_BodyExtraction(t *testing.T) {
 }
 
 func TestEmailStreamParser_EmptyEmail(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	ctx := context.Background()
 
 	emailContent := []byte(``)
@@ -158,7 +158,7 @@ func TestEmailStreamParser_EmptyEmail(t *testing.T) {
 }
 
 func TestEmailStreamParser_LargeEmail(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	parser.chunkSize = 100
 	ctx := context.Background()
 
@@ -185,7 +185,7 @@ func TestEmailStreamParser_LargeEmail(t *testing.T) {
 }
 
 func TestEmailStreamParser_ContextCancellation(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var body strings.Builder
@@ -212,7 +212,7 @@ func TestEmailStreamParser_ContextCancellation(t *testing.T) {
 }
 
 func TestEmailStreamParser_ChunkConfiguration(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	parser.chunkSize = 300
 	parser.chunkOverlap = 30
 
@@ -221,7 +221,7 @@ func TestEmailStreamParser_ChunkConfiguration(t *testing.T) {
 }
 
 func TestEmailStreamParser_ConfigurationOptions(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 
 	parser.extractHeaders = false
 	parser.extractBody = false
@@ -231,7 +231,7 @@ func TestEmailStreamParser_ConfigurationOptions(t *testing.T) {
 }
 
 func TestEmailStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 1)
 	assert.Equal(t, ".eml", formats[0])
@@ -244,7 +244,7 @@ func TestEmailStreamParser_Parse_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewEmailStreamParser()
+	parser := DefaultEmailStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

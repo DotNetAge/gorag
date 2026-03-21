@@ -28,7 +28,7 @@ func NewRetriever(
 	}
 
 	if options.logger == nil {
-		options.logger = logging.NewNoopLogger()
+		options.logger = logging.DefaultNoopLogger()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()

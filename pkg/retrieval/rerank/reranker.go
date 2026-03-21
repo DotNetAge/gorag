@@ -79,8 +79,8 @@ func NewCrossEncoder(llm chat.Client, opts ...CrossEncoderOption) *CrossEncoder 
 	r := &CrossEncoder{
 		llm:       llm,
 		topK:      10,
-		logger:    logging.NewNoopLogger(),
-		collector: observability.NewNoopCollector(),
+		logger:    logging.DefaultNoopLogger(),
+		collector: observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(r)

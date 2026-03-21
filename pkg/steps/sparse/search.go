@@ -49,7 +49,7 @@ func Search(
 		topK = 10
 	}
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &search{
 		searcher: searcher,

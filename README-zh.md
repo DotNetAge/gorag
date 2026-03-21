@@ -42,69 +42,83 @@ GoRAG 不仅仅提供工具，更将**最佳实践**固化为标准组件：
 
 ---
 
-## 🚀 快速开始
+## 🚀 快速开始：1 分钟构建工业级 RAG
 
-### 安装
+GoRAG 针对不同的工业应用规模，提供了 **成对 (Paired)** 且经过优化的预设方案。无需手动组装复杂的 Pipeline，只需选择适合你的层级即可。
 
-```bash
-go get github.com/DotNetAge/gorag
-```
-
-### 1. 智能路由：基于意图的自动调度
-针对领域事实使用向量检索，针对关系推理自动切换至图检索：
+### 1. NativeRAG (最适合 AI Agent & 本地知识库)
+*纯 Go 实现，零依赖 (SQLite + GoVector)。支持一键开启多模态能力。*
 
 ```go
-package main
-
 import (
-    "context"
-    "github.com/DotNetAge/gorag/pkg/retriever/agentic"
-    "github.com/DotNetAge/gorag/pkg/retriever/graph"
+    "github.com/DotNetAge/gorag/pkg/indexer"
     "github.com/DotNetAge/gorag/pkg/retriever/native"
 )
 
-func main() {
-    // 1. 初始化不同的检索器
-    vectorRet := native.NewRetriever(vectorStore, embedder, llm)
-    graphRet := graph.NewRetriever(vectorStore, graphStore, embedder, llm)
+// 1. 索引文档 (Native 模式使用本地 SQLite/GoVector)
+idx, _ := indexer.DefaultNativeIndexer("./data", false) 
+idx.IndexDirectory(ctx, "./docs", true)
 
-    // 2. 创建智能路由器
-    router := agentic.NewSmartRouter(
-        classifier, 
-        map[core.IntentType]core.Retriever{
-            core.IntentRelational: graphRet,  // 关系类问题使用 GraphRAG
-            core.IntentDomain:     vectorRet, // 事实类问题使用向量检索
-        },
-        vectorRet, // 默认回退
-        logger,
-    )
-
-    // 3. 直接提问，路由器会处理“如何检索”
-    results, _ := router.Retrieve(ctx, []string{"项目 X 与人员 Y 之间有什么关系？"}, 5)
-    fmt.Println(results[0].Answer)
-}
+// 2. 与你的知识库对话
+r, _ := native.DefaultNativeRetriever("./data", embedder, llm)
+results, _ := r.Retrieve(ctx, []string{"什么是 GoRAG?"}, 5)
+fmt.Println(results[0].Answer)
 ```
 
-### 2. 自动化知识图谱索引
-一键将非结构化文本转化为可查询的知识图谱：
+### 2. AdvancedRAG (企业级 / 高召回率)
+*面向分布式架构 (Milvus/Qdrant)。内置 **RAG-Fusion** 最佳实践。*
 
 ```go
-// 初始化三元组提取索引步骤
-triplesStep := indexing.NewTriplesStep(llm, graphStore)
+import (
+    "github.com/DotNetAge/gorag/pkg/indexer"
+    "github.com/DotNetAge/gorag/pkg/retriever/advanced"
+)
 
-// 处理文档 - GoRAG 自动提取 (主体, 谓语, 客体) 并写入图数据库
-err := indexer.IndexDirectory(ctx, "./docs", true)
+// 1. 并发索引至生产级向量库 (如 Milvus)
+idx, _ := indexer.DefaultAdvancedIndexer(milvusStore, sqliteDocStore)
+idx.IndexDirectory(ctx, "./kb/enterprise", true)
+
+// 2. 使用 RAG-Fusion + RRF 算法进行高精度检索
+r := advanced.DefaultAdvancedRetriever(milvusStore, embedder, llm)
+results, _ := r.Retrieve(ctx, []string{"对比架构 A 与架构 B 的优劣"}, 10)
 ```
 
-### 3. 生产级观测与评测
-利用内置工具监控每一步并量化检索质量：
+### 3. GraphRAG (深度推理 / 复杂关系)
+*自动构建知识图谱 (Neo4j)，支持向量与图谱的混合检索。*
 
 ```go
-// 对检索器运行基准测试
-report, _ := evaluation.RunBenchmark(ctx, retriever, judge, testCases, 5)
-fmt.Println(report.Summary())
-// 输出: 平均忠实度: 0.92, 答案相关性: 0.88, 上下文精准度: 0.85
+import (
+    "github.com/DotNetAge/gorag/pkg/indexer"
+    "github.com/DotNetAge/gorag/pkg/retriever/graph"
+)
+
+// 1. 索引并自动提取 (主体, 谓语, 客体) 三元组
+idx, _ := indexer.DefaultGraphIndexer(vStore, docStore, neo4jStore, extractor)
+idx.IndexFile(ctx, "financial_report.pdf")
+
+// 2. 混合检索 (相似度检索 + 图谱多跳关联)
+r := graph.DefaultGraphRetriever(vStore, neo4jStore, embedder, llm)
+results, _ := r.Retrieve(ctx, []string{"实体 X 与实体 Y 之间有什么关联？"}, 5)
 ```
+
+---
+
+## 🔭 内置工业级可观测性
+
+拒绝“盲飞”。GoRAG 原生支持 **Prometheus** 和 **OpenTelemetry**，助你实时监控生产环境中的 RAG 性能。
+
+```go
+idx, _ := indexer.DefaultAdvancedIndexer(vStore, dStore, 
+    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true), // 工业级日志
+    indexer.WithPrometheusMetrics(":8080"),                   // 监控指标
+    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),// 链路追踪
+)
+```
+
+---
+
+## ⚡ 技术规范与标准
+...
 
 ---
 

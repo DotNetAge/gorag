@@ -20,10 +20,10 @@ type JavacodeStreamParser struct {
 	legacyParser *Parser
 }
 
-// NewJavacodeStreamParser creates a new Java code stream parser
-func NewJavacodeStreamParser() *JavacodeStreamParser {
+// DefaultJavacodeStreamParser creates a new Java code stream parser
+func DefaultJavacodeStreamParser() *JavacodeStreamParser {
 	return &JavacodeStreamParser{
-		legacyParser: NewParser(),
+		legacyParser: DefaultParser(),
 	}
 }
 

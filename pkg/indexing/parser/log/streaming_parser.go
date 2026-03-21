@@ -30,8 +30,8 @@ type Parser struct {
 	pattern      *regexp.Regexp
 }
 
-// NewParser creates a new log parser
-func NewParser() *Parser {
+// DefaultParser creates a new log parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:    500,
 		chunkOverlap: 50,

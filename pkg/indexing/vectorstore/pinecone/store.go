@@ -46,7 +46,12 @@ func WithNamespace(ns string) Option {
 	}
 }
 
-func NewStore(apiKey string, opts ...Option) (*Store, error) {
+// DefaultStore creates a Pinecone store using the provided API key with a default index "gorag" and dimension 1536.
+func DefaultStore(apiKey string) (core.VectorStore, error) {
+	return NewStore(apiKey)
+}
+
+func NewStore(apiKey string, opts ...Option) (core.VectorStore, error) {
 	client, err := pinecone.NewClient(pinecone.NewClientParams{
 		ApiKey: apiKey,
 	})
@@ -84,11 +89,7 @@ func NewStore(apiKey string, opts ...Option) (*Store, error) {
 	return store, nil
 }
 
-func (s *Store) Add(ctx context.Context, vector *core.Vector) error {
-	return s.AddBatch(ctx, []*core.Vector{vector})
-}
-
-func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
+func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -111,15 +112,15 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 	return err
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
 	if topK <= 0 {
 		topK = 5
 	}
 
 	var pbFilter *structpb.Struct
 	var err error
-	if len(filter) > 0 {
-		pbFilter, err = structpb.NewStruct(filter)
+	if len(filters) > 0 {
+		pbFilter, err = structpb.NewStruct(filters)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid filter: %w", err)
 		}
@@ -140,14 +141,10 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	return s.DeleteBatch(ctx, []string{id})
-}
-
-func (s *Store) DeleteBatch(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
+	if id == "" {
 		return nil
 	}
-	return s.index.DeleteVectorsById(ctx, ids)
+	return s.index.DeleteVectorsById(ctx, []string{id})
 }
 
 func (s *Store) Close(ctx context.Context) error {
@@ -199,5 +196,3 @@ func (s *Store) parseMatches(matches []*pinecone.ScoredVector) ([]*core.Vector, 
 	}
 	return outVectors, outScores, nil
 }
-
-func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error { return s.AddBatch(ctx, vectors) }

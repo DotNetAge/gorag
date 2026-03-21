@@ -25,7 +25,7 @@ type entities struct {
 //	p.AddStep(indexing.Entities(extractor, logger))
 func Entities(extractor core.EntityExtractor, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &entities{
 		extractor: extractor,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -12,13 +13,13 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
+	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
-
 const defaultGraphRAGPrompt = `You are a helpful and professional AI assistant.
 Please answer the user's question based on the provided reference documents and knowledge graph context.
 If the information do not contain the answer, say "I don't know based on the provided context."
@@ -39,6 +40,28 @@ type graphRetriever struct {
 	tracer   observability.Tracer
 }
 
+// DefaultGraphRetriever creates a Knowledge-Graph enabled retriever.
+// It implements hybrid search combining vector similarity and graph neighbor traversal.
+func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// 1. Fallback to default vector store if none provided
+	if options.vectorStore == nil {
+		workDir := "./data"
+		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		options.vectorStore, _ = govector.NewStore(
+			govector.WithDBPath(vecPath),
+			govector.WithDimension(1536),
+		)
+	}
+
+	// 2. Initialize the retriever using the expanded Options
+	return NewRetriever(options.vectorStore, options.graphStore, options.embedder, options.llm, opts...), nil
+}
+
 // NewRetriever creates a new GraphRAG retriever.
 func NewRetriever(
 	vectorStore core.VectorStore,
@@ -48,25 +71,31 @@ func NewRetriever(
 	opts ...Option,
 ) core.Retriever {
 	options := defaultOptions()
+	options.embedder = embedder
+	options.llm = llm
+	options.vectorStore = vectorStore
+	options.graphStore = graphStore
 	for _, opt := range opts {
 		opt(options)
 	}
 
 	if options.logger == nil {
-		options.logger = logging.NewNoopLogger()
+		options.logger = logging.DefaultNoopLogger()
 	}
 
 	if options.tracer == nil {
-		options.tracer = observability.NewNoopTracer()
+		options.tracer = observability.DefaultNoopTracer()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()
 
 	// 1. Entity Extraction
-	p.AddStep(&entityExtractionStep{
-		extractor: query.NewEntityExtractor(llm),
-		logger:    options.logger,
-	})
+	if options.llm != nil {
+		p.AddStep(&entityExtractionStep{
+			extractor: query.NewEntityExtractor(options.llm),
+			logger:    options.logger,
+		})
+	}
 
 	// 2. Graph Search
 	p.AddStep(&graphSearchStep{
@@ -82,9 +111,11 @@ func NewRetriever(
 	}
 
 	// 3. Vector Search (for hybrid retrieval)
-	p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
-		TopK: options.topK,
-	}))
+	if options.embedder != nil {
+		p.AddStep(vector.Search(vectorStore, options.embedder, vector.SearchOptions{
+			TopK: options.topK,
+		}))
+	}
 
 	// 3.5 DocStore Enrichment (PDR)
 	if options.docStore != nil {
@@ -92,18 +123,19 @@ func NewRetriever(
 	}
 
 	// 4. Generation
-	p.AddStep(&graphGenerationStep{
-		llm:            llm,
-		promptTemplate: options.promptTemplate,
-		logger:         options.logger,
-	})
+	if options.llm != nil {
+		p.AddStep(&graphGenerationStep{
+			llm:            options.llm,
+			promptTemplate: options.promptTemplate,
+			logger:         options.logger,
+		})
+	}
 
 	return &graphRetriever{
 		pipeline: p,
 		tracer:   options.tracer,
 	}
 }
-
 func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
 	results := make([]*core.RetrievalResult, 0, len(queries))
 
@@ -178,7 +210,12 @@ func (s *graphSearchStep) Name() string {
 }
 
 func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
-	_, span := context.Tracer.StartSpan(ctx, "GraphRAG.GraphSearch")
+	if s.store == nil {
+		s.logger.Warn("GraphStore is nil, skipping graph search step", nil)
+		return nil
+	}
+
+	_, span := context.Tracer.StartSpan(ctx, "GraphSearch")
 	defer span.End()
 
 	entities, ok := context.Custom["extracted_entities"].([]string)
@@ -290,21 +327,44 @@ type Options struct {
 	docStore       store.DocStore
 	logger         logging.Logger
 	tracer         observability.Tracer
+	embedder       embedding.Provider
+	llm            chat.Client
+	vectorStore    core.VectorStore
+	graphStore     store.GraphStore
 	customSteps    []pipeline.Step[*core.RetrievalContext]
 }
 
+func WithVectorStore(s core.VectorStore) Option {
+	return func(o *Options) { o.vectorStore = s }
+}
+
+func WithGraphStore(s store.GraphStore) Option {
+	return func(o *Options) { o.graphStore = s }
+}
 func defaultOptions() *Options {
 	return &Options{
 		topK:           5,
 		depth:          1,
 		limit:          10,
 		promptTemplate: defaultGraphRAGPrompt,
-		tracer:         observability.NewNoopTracer(),
+		tracer:         observability.DefaultNoopTracer(),
 		customSteps:    make([]pipeline.Step[*core.RetrievalContext], 0),
 	}
 }
 
 type Option func(*Options)
+
+func WithEmbedder(e embedding.Provider) Option {
+	return func(o *Options) {
+		o.embedder = e
+	}
+}
+
+func WithLLM(l chat.Client) Option {
+	return func(o *Options) {
+		o.llm = l
+	}
+}
 
 func WithTopK(k int) Option {
 	return func(o *Options) {

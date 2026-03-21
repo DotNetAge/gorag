@@ -23,8 +23,8 @@ type TextStreamParser struct {
 	maxReadBytes int 
 }
 
-// NewTextStreamParser creates a new parser optimized for raw text.
-func NewTextStreamParser(maxReadBytes int) *TextStreamParser {
+// DefaultTextStreamParser creates a new parser optimized for raw text.
+func DefaultTextStreamParser(maxReadBytes int) *TextStreamParser {
 	if maxReadBytes <= 0 {
 		maxReadBytes = 10 * 1024 * 1024 // Default to 10MB parts
 	}

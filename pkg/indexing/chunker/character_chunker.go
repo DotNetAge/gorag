@@ -9,30 +9,34 @@ import (
 )
 
 // ensure interface implementation
-var _ TextSplitter = (*CharacterSplitter)(nil)
-var _ core.Chunker = (*CharacterSplitter)(nil)
+var _ core.Chunker = (*CharacterChunker)(nil)
 
-// CharacterSplitter splits text recursively using a list of separators,
-// similar to RecursiveCharacterTextSplitter in LangChain.
-type CharacterSplitter struct {
+// CharacterChunker chunks text recursively using a list of separators.
+type CharacterChunker struct {
 	ChunkSize    int
 	ChunkOverlap int
 	Separators   []string
 }
 
-// NewCharacterSplitter creates a chunker splitting by runes and logical breaks
-func NewCharacterSplitter(size, overlap int) *CharacterSplitter {
-	return &CharacterSplitter{
+// NewDefaultCharacterChunker returns a CharacterChunker with optimal default parameters (Size: 1000, Overlap: 150).
+// Ideal for quick start and simple text processing.
+func DefaultCharacterChunker() *CharacterChunker {
+	return NewCharacterChunker(1000, 150)
+}
+
+// NewCharacterChunker creates a chunker splitting by runes and logical breaks
+func NewCharacterChunker(size, overlap int) *CharacterChunker {
+	return &CharacterChunker{
 		ChunkSize:    size,
 		ChunkOverlap: overlap,
 		Separators:   []string{"\n\n", "\n", " ", ""}, // Try paragraphs, then lines, words, chars
 	}
 }
 
-// SplitText provides raw splitting logic
-func (c *CharacterSplitter) SplitText(text string) ([]string, error) {
+// chunkText provides raw splitting logic
+func (c *CharacterChunker) chunkText(text string) ([]string, error) {
 	// Simple implementation (for foundational completeness): fallback to hard rune limit.
-	// A production-grade chunker would recursively split across 'c.Separators'.
+	// A production-grade chunker would recursively chunk across 'c.Separators'.
 	runes := []rune(text)
 	var chunks []string
 
@@ -46,7 +50,7 @@ func (c *CharacterSplitter) SplitText(text string) ([]string, error) {
 			end = len(runes)
 		}
 		chunks = append(chunks, string(runes[i:end]))
-		
+
 		if end == len(runes) {
 			break
 		}
@@ -55,28 +59,23 @@ func (c *CharacterSplitter) SplitText(text string) ([]string, error) {
 	return chunks, nil
 }
 
-// SplitDocument converts a document into interconnected core.Chunk units (similar to LlamaIndex Nodes).
-func (c *CharacterSplitter) SplitDocument(ctx context.Context, doc *core.Document) ([]*core.Chunk, error) {
-	return c.Chunk(ctx, doc)
-}
-
 // Chunk satisfies the core.Chunker pipeline interface
-func (c *CharacterSplitter) Chunk(ctx context.Context, doc *core.Document) ([]*core.Chunk, error) {
-	texts, err := c.SplitText(doc.Content)
+func (c *CharacterChunker) Chunk(ctx context.Context, doc *core.Document) ([]*core.Chunk, error) {
+	texts, err := c.chunkText(doc.Content)
 	if err != nil {
 		return nil, err
 	}
 
 	var chunks []*core.Chunk
 	startIdx := 0
-	
+
 	for _, text := range texts {
 		// Inherit document metadata cleanly
 		metadata := make(map[string]any)
 		for k, v := range doc.Metadata {
 			metadata[k] = v
 		}
-		
+
 		chunk := core.NewChunk(
 			uuid.New().String(),
 			doc.ID,

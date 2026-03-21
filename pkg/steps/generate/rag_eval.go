@@ -29,7 +29,7 @@ type ragEvaluator struct {
 //	p.AddStep(generate.RAGEvaluation(evaluator, logger, metrics))
 func RAGEvaluation(evaluator core.RAGEvaluator, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &ragEvaluator{
 		evaluator: evaluator,

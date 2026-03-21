@@ -18,7 +18,7 @@ type rrfStep struct {
 // RRF 创建一个基于 Reciprocal Rank Fusion 的融合步骤
 func RRF(fusion core.FusionEngine, topK int, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &rrfStep{
 		fusion:  fusion,

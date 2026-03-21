@@ -89,8 +89,8 @@ func NewDecomposer(llm chat.Client, opts ...DecomposerOption) *Decomposer {
 		llm:            llm,
 		promptTemplate: defaultDecompositionPrompt,
 		maxSubQueries:  5,
-		logger:         logging.NewNoopLogger(),
-		collector:      observability.NewNoopCollector(),
+		logger:         logging.DefaultNoopLogger(),
+		collector:      observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(d)

@@ -14,8 +14,8 @@ import (
 // Parser implements a PPT/PPTX document parser using unidoc/unioffice.
 type Parser struct{}
 
-// NewParser creates a new PPT parser instance.
-func NewParser() *Parser {
+// DefaultParser creates a new PPT parser instance.
+func DefaultParser() *Parser {
 	return &Parser{}
 }
 

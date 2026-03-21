@@ -21,7 +21,7 @@ type triples struct {
 // It extracts triples (Subject-Predicate-Object) from chunks and upserts them into the GraphStore.
 func ExtractTriples(extractor *base.TriplesExtractor, graphStore store.GraphStore, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &triples{
 		extractor: extractor,

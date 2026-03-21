@@ -27,7 +27,7 @@ func NewRewriteRetriever(
 	logger logging.Logger,
 ) core.Retriever {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 
 	p := pipeline.New[*core.RetrievalContext]()

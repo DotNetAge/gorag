@@ -42,68 +42,67 @@ GoRAG doesn't just give you tools; it gives you **pre-optimized strategies** as 
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start: Build Industrial RAG in 1 Minute
 
-### Installation
+GoRAG provides a unified **`RAG` application interface** that bundles Indexing and Retrieval into one seamless entity. Choose your preset and start building.
 
-```bash
-go get github.com/DotNetAge/gorag
-```
-
-### 1. The Smart Router: Intent-Based Retrieval
-Automatically choose between Vector Search for domain facts and Graph Search for relationship reasoning:
+### 1. NativeRAG (Perfect for AI Agents & Local Knowledge Bases)
+*Pure Go, zero-dependencies (SQLite + GoVector). One-line setup.*
 
 ```go
-package main
+import "github.com/DotNetAge/gorag"
 
-import (
-    "context"
-    "github.com/DotNetAge/gorag/pkg/retriever/agentic"
-    "github.com/DotNetAge/gorag/pkg/retriever/graph"
-    "github.com/DotNetAge/gorag/pkg/retriever/native"
+// 1. One line to create a complete local RAG app
+app, _ := gorag.DefaultNativeRAG(gorag.WithWorkDir("./my_kb"))
+
+// 2. Feed it documents
+app.IndexDirectory(ctx, "./docs", true)
+
+// 3. Ask questions!
+res, _ := app.Search(ctx, "What is GoRAG?", 5)
+fmt.Println(res.Answer)
+```
+
+### 2. AdvancedRAG (Enterprise-Grade / High Recall)
+*Designed for distributed scale. Bundles RAG-Fusion + RRF best practices.*
+
+```go
+// Connect to enterprise Milvus and start an Advanced RAG app
+app, _ := gorag.DefaultAdvancedRAG(
+    gorag.WithMilvus("milvus:19530", "kb_collection"),
+    gorag.WithOpenAI("sk-xxxx"),
 )
 
-func main() {
-    // 1. Setup retrievers
-    vectorRet := native.NewRetriever(vectorStore, embedder, llm)
-    graphRet := graph.NewRetriever(vectorStore, graphStore, embedder, llm)
-
-    // 2. Create a Smart Router
-    router := agentic.NewSmartRouter(
-        classifier, 
-        map[core.IntentType]core.Retriever{
-            core.IntentRelational: graphRet,  // Use Graph for relationship queries
-            core.IntentDomain:     vectorRet, // Use Vector for specific facts
-        },
-        vectorRet, // Default fallback
-        logger,
-    )
-
-    // 3. Just ask! The router handles the "how"
-    results, _ := router.Retrieve(ctx, []string{"How are Project X and Person Y related?"}, 5)
-    fmt.Println(results[0].Answer)
-}
+app.IndexDirectory(ctx, "./enterprise_docs", true)
+res, _ := app.Search(ctx, "Compare architecture A vs B", 10)
 ```
 
-### 2. Automated Knowledge Graph Indexing
-Turn unstructured text into a queryable knowledge graph with one click:
+### 3. GraphRAG (Deep Reasoning / Relational)
+*Automated Knowledge Graph construction with hybrid vector-graph search.*
 
 ```go
-// Initialize the triple-based indexing step
-triplesStep := indexing.NewTriplesStep(llm, graphStore)
+// Bundles Neo4j relationship reasoning with Vector search
+app, _ := gorag.DefaultGraphRAG(
+    gorag.WithMilvus("milvus:19530", "kb_collection"),
+    gorag.WithNeo4j("neo4j://localhost", "user", "pass"),
+)
 
-// Process your documents - GoRAG extracts (S, P, O) automatically
-err := indexer.IndexDirectory(ctx, "./docs", true)
+app.IndexFile(ctx, "corporate_report.pdf")
+res, _ := app.Search(ctx, "How are entity X and Y related?", 5)
 ```
 
-### 3. Production Observability & Benchmarking
-Track every step and measure quality using built-in tools:
+---
+
+## 🔭 Built-in Industrial Observability
+
+Stop flying blind. GoRAG natively supports **Prometheus** and **OpenTelemetry** to monitor your RAG pipelines in production.
 
 ```go
-// Run a benchmark against your dataset
-report, _ := evaluation.RunBenchmark(ctx, retriever, judge, testCases, 5)
-fmt.Println(report.Summary())
-// Output: Avg Faithfulness: 0.92, Avg Relevance: 0.88, Avg Precision: 0.85
+idx, _ := indexer.DefaultAdvancedIndexer(vStore, dStore, 
+    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true), // Industrial Logging
+    indexer.WithPrometheusMetrics(":8080"),                   // Metrics
+    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),// Distributed Tracing
+)
 ```
 
 ---

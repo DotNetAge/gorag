@@ -19,8 +19,8 @@ type Parser struct {
 	extractLinks bool // Extract links
 }
 
-// NewParser creates a new HTML parser
-func NewParser() *Parser {
+// DefaultParser creates a new HTML parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:    500,
 		chunkOverlap: 50,

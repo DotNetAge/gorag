@@ -20,10 +20,10 @@ type GocodeStreamParser struct {
 	legacyParser *Parser
 }
 
-// NewGocodeStreamParser creates a new Go code stream parser
-func NewGocodeStreamParser() *GocodeStreamParser {
+// DefaultGocodeStreamParser creates a new Go code stream parser
+func DefaultGocodeStreamParser() *GocodeStreamParser {
 	return &GocodeStreamParser{
-		legacyParser: NewParser(),
+		legacyParser: DefaultParser(),
 	}
 }
 

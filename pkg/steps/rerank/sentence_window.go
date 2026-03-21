@@ -28,7 +28,7 @@ type sentenceWindowExpand struct {
 //	p.AddStep(rerank.SentenceWindowExpand(expander, logger, metrics))
 func SentenceWindowExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &sentenceWindowExpand{
 		expander: expander,

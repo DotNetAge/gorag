@@ -15,7 +15,7 @@ import (
 )
 
 func TestParser_ParseStream(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -44,7 +44,7 @@ description: A test YAML file`)
 }
 
 func TestParser_EmptyYAML(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx := context.Background()
 
 	// Empty YAML
@@ -61,7 +61,7 @@ func TestParser_EmptyYAML(t *testing.T) {
 }
 
 func TestParser_LargeYAML(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(100)
 	ctx := context.Background()
 
@@ -84,7 +84,7 @@ func TestParser_LargeYAML(t *testing.T) {
 }
 
 func TestParser_ContextCancellation(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create large YAML
@@ -108,7 +108,7 @@ func TestParser_ContextCancellation(t *testing.T) {
 }
 
 func TestParser_ChunkConfiguration(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(200)
 	parser.SetChunkOverlap(20)
 
@@ -117,7 +117,7 @@ func TestParser_ChunkConfiguration(t *testing.T) {
 }
 
 func TestParser_GetSupportedTypes(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 2)
 	assert.Contains(t, formats, ".yaml")
@@ -131,7 +131,7 @@ func TestParser_ParseStream_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

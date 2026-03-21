@@ -23,8 +23,8 @@ type EmailStreamParser struct {
 	extractBody    bool
 }
 
-// NewEmailStreamParser creates a new email parser
-func NewEmailStreamParser() *EmailStreamParser {
+// DefaultEmailStreamParser creates a new email parser
+func DefaultEmailStreamParser() *EmailStreamParser {
 	return &EmailStreamParser{
 		chunkSize:      500,
 		chunkOverlap:   50,

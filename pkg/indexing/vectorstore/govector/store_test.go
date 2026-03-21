@@ -18,7 +18,7 @@ func TestGoVectorStore(t *testing.T) {
 	ctx := context.Background()
 
 	// Initialize the store
-	store, err := NewStore(ctx,
+	store, err := NewStore(
 		WithDBPath(dbPath),
 		WithDimension(3),
 		WithCollection("test_col"),
@@ -33,7 +33,7 @@ func TestGoVectorStore(t *testing.T) {
 		core.NewVector("2", []float32{0.0, 1.0, 0.0}, "chunk2", map[string]any{"source": "doc2"}),
 	}
 
-	err = store.AddBatch(ctx, vectors)
+	err = store.Upsert(ctx, vectors)
 	assert.NoError(t, err)
 
 	// 2. Search

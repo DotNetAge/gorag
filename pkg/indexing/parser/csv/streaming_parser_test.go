@@ -11,26 +11,26 @@ import (
 
 func TestCSVStreamParser_New(t *testing.T) {
 	// Test with custom rows per document
-	parser := NewCSVStreamParser(50, true)
+	parser := DefaultCSVStreamParser(50, true)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 50, parser.rowsPerDocument)
 	assert.True(t, parser.hasHeader)
 
 	// Test with default rows per document (negative value)
-	parser = NewCSVStreamParser(-1, false)
+	parser = DefaultCSVStreamParser(-1, false)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 100, parser.rowsPerDocument) // Default value
 	assert.False(t, parser.hasHeader)
 
 	// Test with default rows per document (zero value)
-	parser = NewCSVStreamParser(0, true)
+	parser = DefaultCSVStreamParser(0, true)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 100, parser.rowsPerDocument) // Default value
 	assert.True(t, parser.hasHeader)
 }
 
 func TestCSVStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewCSVStreamParser(100, true)
+	parser := DefaultCSVStreamParser(100, true)
 	supportedTypes := parser.GetSupportedTypes()
 	assert.Equal(t, []string{".csv", "text/csv"}, supportedTypes)
 }
@@ -41,7 +41,7 @@ func TestCSVStreamParser_ParseStream_WithHeader(t *testing.T) {
 	reader := strings.NewReader(csvContent)
 
 	// Create parser with header
-	parser := NewCSVStreamParser(100, true)
+	parser := DefaultCSVStreamParser(100, true)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -75,7 +75,7 @@ func TestCSVStreamParser_ParseStream_WithoutHeader(t *testing.T) {
 	reader := strings.NewReader(csvContent)
 
 	// Create parser without header
-	parser := NewCSVStreamParser(100, false)
+	parser := DefaultCSVStreamParser(100, false)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -110,7 +110,7 @@ func TestCSVStreamParser_ParseStream_MultipleDocuments(t *testing.T) {
 	reader := strings.NewReader(csvContent.String())
 
 	// Create parser with small rows per document
-	parser := NewCSVStreamParser(2, true)
+	parser := DefaultCSVStreamParser(2, true)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -148,7 +148,7 @@ func TestCSVStreamParser_ParseStream_EmptyFile(t *testing.T) {
 	reader := strings.NewReader(csvContent)
 
 	// Create parser
-	parser := NewCSVStreamParser(100, true)
+	parser := DefaultCSVStreamParser(100, true)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -172,7 +172,7 @@ func TestCSVStreamParser_ParseStream_WithMetadata(t *testing.T) {
 	}
 
 	// Create parser
-	parser := NewCSVStreamParser(100, true)
+	parser := DefaultCSVStreamParser(100, true)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -200,7 +200,7 @@ func TestCSVStreamParser_ParseStream_ContextCanceled(t *testing.T) {
 	reader := strings.NewReader(csvContent)
 
 	// Create parser
-	parser := NewCSVStreamParser(100, true)
+	parser := DefaultCSVStreamParser(100, true)
 
 	// Create a context that can be canceled
 	ctx, cancel := context.WithCancel(context.Background())

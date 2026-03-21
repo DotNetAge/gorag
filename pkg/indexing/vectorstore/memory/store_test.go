@@ -9,14 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewStore(t *testing.T) {
-	store := NewStore()
-	require.NotNil(t, store)
-	assert.NotNil(t, store.vectors)
-	assert.NotNil(t, store.norms)
-}
-
-func TestStore_AddBatch(t *testing.T) {
+func TestStore_Upsert(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
@@ -25,17 +18,15 @@ func TestStore_AddBatch(t *testing.T) {
 		core.NewVector(uuid.New().String(), []float32{0.4, 0.5, 0.6}, "chunk2", map[string]any{"source": "test2"}),
 	}
 
-	err := store.AddBatch(ctx, vectors)
+	err := store.Upsert(ctx, vectors)
 	require.NoError(t, err)
 
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
+	// Verify using Search
 	for _, v := range vectors {
-		assert.Contains(t, store.vectors, v.ID)
-		assert.Equal(t, v, store.vectors[v.ID])
-		assert.Contains(t, store.norms, v.ID)
-		assert.Greater(t, store.norms[v.ID], float32(0))
+		results, _, err := store.Search(ctx, v.Values, 1, map[string]any{"source": v.Metadata["source"]})
+		require.NoError(t, err)
+		assert.NotEmpty(t, results)
+		assert.Equal(t, v.ID, results[0].ID)
 	}
 }
 
@@ -49,7 +40,7 @@ func TestStore_Search(t *testing.T) {
 		core.NewVector("3", []float32{0.0, 1.0, 0.0}, "chunk3", map[string]any{"category": "animal"}),
 	}
 
-	err := store.AddBatch(ctx, vectors)
+	err := store.Upsert(ctx, vectors)
 	require.NoError(t, err)
 
 	// 1. Basic Similarity Search
@@ -82,25 +73,19 @@ func TestStore_Delete(t *testing.T) {
 		core.NewVector("3", []float32{0.7, 0.8}, "c3", nil),
 	}
 
-	err := store.AddBatch(ctx, vectors)
+	err := store.Upsert(ctx, vectors)
 	require.NoError(t, err)
 
 	// Delete single
 	err = store.Delete(ctx, "2")
 	require.NoError(t, err)
 
-	store.mu.RLock()
-	assert.Len(t, store.vectors, 2)
-	assert.NotContains(t, store.vectors, "2")
-	store.mu.RUnlock()
-
-	// Delete batch
-	err = store.DeleteBatch(ctx, []string{"1", "3"})
+	// Verify deletion via search
+	results, _, err := store.Search(ctx, []float32{0.4, 0.5}, 10, nil)
 	require.NoError(t, err)
-
-	store.mu.RLock()
-	assert.Empty(t, store.vectors)
-	store.mu.RUnlock()
+	for _, res := range results {
+		assert.NotEqual(t, "2", res.ID)
+	}
 }
 
 func TestComputeNorm(t *testing.T) {

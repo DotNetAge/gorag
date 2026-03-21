@@ -22,8 +22,8 @@ type Parser struct {
 	extractComments  bool
 }
 
-// NewParser creates a new Go code parser (streaming by default)
-func NewParser() *Parser {
+// DefaultParser creates a new Go code parser (streaming by default)
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:        500,
 		chunkOverlap:     50,

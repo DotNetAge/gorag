@@ -21,8 +21,8 @@ type PycodeStreamParser struct {
 	extractComments  bool
 }
 
-// NewPycodeStreamParser creates a new Python code stream parser
-func NewPycodeStreamParser() *PycodeStreamParser {
+// DefaultPycodeStreamParser creates a new Python code stream parser
+func DefaultPycodeStreamParser() *PycodeStreamParser {
 	return &PycodeStreamParser{
 		chunkSize:        500,
 		chunkOverlap:     50,

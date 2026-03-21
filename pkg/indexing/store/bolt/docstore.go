@@ -21,6 +21,11 @@ type boltDocStore struct {
 	db *bolt.DB
 }
 
+// DefaultDocStore creates a Bolt DocStore using a default local file "gorag_docs.bolt".
+func DefaultDocStore() (store.DocStore, error) {
+	return NewDocStore("gorag_docs.bolt")
+}
+
 // NewDocStore creates a new BoltDB based document store.
 func NewDocStore(path string) (store.DocStore, error) {
 	// Ensure directory exists

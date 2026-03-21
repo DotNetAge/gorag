@@ -24,30 +24,15 @@ type Store struct {
 }
 
 // NewStore creates a new in-memory store
-func NewStore() *Store {
+func NewStore() core.VectorStore {
 	return &Store{
 		vectors: make(map[string]*core.Vector),
 		norms:   make(map[string]float32),
 	}
 }
 
-// Add adds a single vector to the store.
-func (s *Store) Add(ctx context.Context, vector *core.Vector) error {
-	if vector == nil || len(vector.Values) == 0 {
-		return nil
-	}
-	
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.vectors[vector.ID] = vector
-	s.norms[vector.ID] = computeNorm(vector.Values)
-
-	return nil
-}
-
-// AddBatch adds multiple vectors to the store in batch.
-func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
+// Upsert adds multiple vectors to the store in batch.
+func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -67,7 +52,7 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 }
 
 // Search searches for similar vectors based on the query vector.
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -81,8 +66,8 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 	var results []scoredVector
 
 	for id, vec := range s.vectors {
-		// Apply metadata filter if provided
-		if !s.matchesMetadata(vec.Metadata, filter) {
+		// Apply metadata filters if provided
+		if !s.matchesMetadata(vec.Metadata, filters) {
 			continue
 		}
 
@@ -107,16 +92,16 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 	return outVectors, outScores, nil
 }
 
-// matchesMetadata checks if vector metadata matches the filter
-func (s *Store) matchesMetadata(vectorMeta map[string]any, filter map[string]any) bool {
-	if len(filter) == 0 {
+// matchesMetadata checks if vector metadata matches the filters
+func (s *Store) matchesMetadata(vectorMeta map[string]any, filters map[string]any) bool {
+	if len(filters) == 0 {
 		return true
 	}
 	if len(vectorMeta) == 0 {
 		return false
 	}
 
-	for key, filterVal := range filter {
+	for key, filterVal := range filters {
 		vecVal, exists := vectorMeta[key]
 		if !exists || vecVal != filterVal {
 			return false
@@ -133,19 +118,6 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 
 	delete(s.vectors, id)
 	delete(s.norms, id)
-
-	return nil
-}
-
-// DeleteBatch deletes multiple vectors from the store in batch.
-func (s *Store) DeleteBatch(ctx context.Context, ids []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, id := range ids {
-		delete(s.vectors, id)
-		delete(s.norms, id)
-	}
 
 	return nil
 }
@@ -227,5 +199,3 @@ func quickSelect(results []scoredVector, low, high, k int) {
 		}
 	}
 }
-
-func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error { return s.AddBatch(ctx, vectors) }

@@ -18,8 +18,8 @@ type Parser struct {
 	llm chat.Client
 }
 
-// NewParser creates a new Visual RAG image parser.
-func NewParser(llm chat.Client) *Parser {
+// DefaultParser creates a new Visual RAG image parser.
+func DefaultParser(llm chat.Client) *Parser {
 	return &Parser{
 		llm: llm,
 	}

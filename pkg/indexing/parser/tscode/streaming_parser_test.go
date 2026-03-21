@@ -9,7 +9,7 @@ import (
 )
 
 func TestParser_New(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	assert.NotNil(t, parser)
 	assert.Equal(t, 500, parser.chunkSize)
 	assert.Equal(t, 50, parser.chunkOverlap)
@@ -20,14 +20,14 @@ func TestParser_New(t *testing.T) {
 }
 
 func TestParser_GetSupportedTypes(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	supported := parser.GetSupportedTypes()
 	assert.Contains(t, supported, ".ts")
 	assert.Contains(t, supported, ".tsx")
 }
 
 func TestParser_ParseStream_Basic(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	tsCode := `function testFunction(): string {
 	return "Hello World";
@@ -94,7 +94,7 @@ type TestType = {
 }
 
 func TestParser_ParseStream_WithComments(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	tsCode := `// This is a function comment
 function testFunction(): string {
@@ -144,7 +144,7 @@ class TestClass {
 }
 
 func TestParser_ParseStream_EmptyFile(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	reader := strings.NewReader("")
 
 	ctx := context.Background()
@@ -160,7 +160,7 @@ func TestParser_ParseStream_EmptyFile(t *testing.T) {
 }
 
 func TestParser_ParseStream_Cancellation(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	tsCode := `function testFunction(): string {
 	return "Hello World";
@@ -190,43 +190,43 @@ class TestClass {
 }
 
 func TestParser_SetChunkSize(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(1000)
 	assert.Equal(t, 1000, parser.chunkSize)
 }
 
 func TestParser_SetChunkOverlap(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkOverlap(100)
 	assert.Equal(t, 100, parser.chunkOverlap)
 }
 
 func TestParser_SetExtractFunctions(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractFunctions(false)
 	assert.False(t, parser.extractFunctions)
 }
 
 func TestParser_SetExtractClasses(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractClasses(false)
 	assert.False(t, parser.extractClasses)
 }
 
 func TestParser_SetExtractInterfaces(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractInterfaces(false)
 	assert.False(t, parser.extractInterfaces)
 }
 
 func TestParser_SetExtractComments(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractComments(false)
 	assert.False(t, parser.extractComments)
 }
 
 func TestParser_ParseStream_WithoutFunctions(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractFunctions(false)
 
 	tsCode := `function testFunction(): string {
@@ -261,7 +261,7 @@ class TestClass {
 }
 
 func TestParser_ParseStream_WithoutClasses(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractClasses(false)
 
 	tsCode := `function testFunction(): string {
@@ -296,7 +296,7 @@ class TestClass {
 }
 
 func TestParser_ParseStream_WithoutInterfaces(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetExtractInterfaces(false)
 
 	tsCode := `interface TestInterface {
@@ -322,7 +322,7 @@ type TestType = {
 }
 
 func TestParser_ParseStream_ArrowFunctions(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	tsCode := `const arrowFunction: () => string = () => {
 	return "Arrow function";

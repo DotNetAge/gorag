@@ -24,8 +24,8 @@ type DBSchemaStreamParser struct {
 	extractIndexes bool
 }
 
-// NewDBSchemaStreamParser creates a new database schema parser
-func NewDBSchemaStreamParser() *DBSchemaStreamParser {
+// DefaultDBSchemaStreamParser creates a new database schema parser
+func DefaultDBSchemaStreamParser() *DBSchemaStreamParser {
 	return &DBSchemaStreamParser{
 		chunkSize:      500,
 		chunkOverlap:   50,

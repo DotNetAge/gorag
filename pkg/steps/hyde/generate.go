@@ -17,7 +17,7 @@ type hydeStep struct {
 // Generate 创建一个 HyDE 生成步骤
 func Generate(generator core.Generator, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &hydeStep{
 		generator: generator,

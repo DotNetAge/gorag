@@ -55,8 +55,8 @@ func New(cache SemanticCache, opts ...Option) *Cache {
 	s := &Cache{
 		cache:     cache,
 		threshold: 0.98,
-		logger:    logging.NewNoopLogger(),
-		collector: observability.NewNoopCollector(),
+		logger:    logging.DefaultNoopLogger(),
+		collector: observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(s)

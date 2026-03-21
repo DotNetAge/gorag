@@ -20,8 +20,8 @@ type ExcelStreamParser struct {
 	chunkOverlap int
 }
 
-// NewExcelStreamParser creates a new Excel parser
-func NewExcelStreamParser() *ExcelStreamParser {
+// DefaultExcelStreamParser creates a new Excel parser
+func DefaultExcelStreamParser() *ExcelStreamParser {
 	return &ExcelStreamParser{
 		chunkSize:    500,
 		chunkOverlap: 50,

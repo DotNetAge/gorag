@@ -18,8 +18,8 @@ type Parser struct {
 	chunkOverlap int
 }
 
-// NewParser creates a new YAML parser
-func NewParser() *Parser {
+// DefaultParser creates a new YAML parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:    500,
 		chunkOverlap: 50,

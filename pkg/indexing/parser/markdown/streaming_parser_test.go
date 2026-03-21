@@ -10,33 +10,33 @@ import (
 
 func TestMarkdownStreamParser_New(t *testing.T) {
 	// Test with valid split level
-	parser := NewMarkdownStreamParser(2)
+	parser := DefaultMarkdownStreamParser(2)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 2, parser.splitOnHeaderLevel)
 
 	// Test with negative split level (should default to 1)
-	parser = NewMarkdownStreamParser(-1)
+	parser = DefaultMarkdownStreamParser(-1)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 1, parser.splitOnHeaderLevel)
 
 	// Test with zero split level (should default to 1)
-	parser = NewMarkdownStreamParser(0)
+	parser = DefaultMarkdownStreamParser(0)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 1, parser.splitOnHeaderLevel)
 
 	// Test with split level greater than 6 (should default to 1)
-	parser = NewMarkdownStreamParser(7)
+	parser = DefaultMarkdownStreamParser(7)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 1, parser.splitOnHeaderLevel)
 
 	// Test with maximum valid split level
-	parser = NewMarkdownStreamParser(6)
+	parser = DefaultMarkdownStreamParser(6)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 6, parser.splitOnHeaderLevel)
 }
 
 func TestMarkdownStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 	supportedTypes := parser.GetSupportedTypes()
 	expectedTypes := []string{".md", ".markdown", "text/markdown"}
 	assert.Equal(t, expectedTypes, supportedTypes)
@@ -53,7 +53,7 @@ This is the content of section 2.
 	reader := strings.NewReader(markdownContent)
 
 	// Create parser with split level 1 (H1)
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -97,7 +97,7 @@ This is the content of section 2.
 	reader := strings.NewReader(markdownContent)
 
 	// Create parser with split level 2 (H2)
-	parser := NewMarkdownStreamParser(2)
+	parser := DefaultMarkdownStreamParser(2)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -140,7 +140,7 @@ It has multiple lines of text.
 	reader := strings.NewReader(markdownContent)
 
 	// Create parser with split level 1
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -165,7 +165,7 @@ func TestMarkdownStreamParser_ParseStream_EmptyFile(t *testing.T) {
 	reader := strings.NewReader(markdownContent)
 
 	// Create parser
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -191,7 +191,7 @@ This is the content of section 1.
 	}
 
 	// Create parser
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -227,7 +227,7 @@ This is the content of section 2.
 	reader := strings.NewReader(markdownContent)
 
 	// Create parser
-	parser := NewMarkdownStreamParser(1)
+	parser := DefaultMarkdownStreamParser(1)
 
 	// Create a context that can be canceled
 	ctx, cancel := context.WithCancel(context.Background())

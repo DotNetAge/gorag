@@ -49,8 +49,8 @@ func WithParentDocCollector(collector observability.Collector) ParentDocOption {
 func NewParentDoc(docStore DocumentStore, opts ...ParentDocOption) *ParentDoc {
 	e := &ParentDoc{
 		docStore:  docStore,
-		logger:    logging.NewNoopLogger(),
-		collector: observability.NewNoopCollector(),
+		logger:    logging.DefaultNoopLogger(),
+		collector: observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(e)

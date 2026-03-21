@@ -19,7 +19,7 @@ func Unique(threshold float64, logger logging.Logger, metrics core.Metrics) pipe
 		threshold = 0.95
 	}
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &unique{threshold: threshold, logger: logger, metrics: metrics}
 }

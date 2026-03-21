@@ -23,7 +23,7 @@ func Order(
 	metrics core.Metrics,
 ) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &order{
 		enhancer: enhancer,

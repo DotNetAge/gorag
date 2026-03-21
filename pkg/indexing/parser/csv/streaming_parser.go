@@ -21,7 +21,7 @@ type CSVStreamParser struct {
 	hasHeader       bool
 }
 
-func NewCSVStreamParser(rowsPerDocument int, hasHeader bool) *CSVStreamParser {
+func DefaultCSVStreamParser(rowsPerDocument int, hasHeader bool) *CSVStreamParser {
 	if rowsPerDocument <= 0 {
 		rowsPerDocument = 100 // Default: 100 rows per Document chunk
 	}

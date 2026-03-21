@@ -14,7 +14,7 @@ import (
 )
 
 func TestGocodeStreamParser_BasicFunction(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	parser.SetChunkSize(500)
 
 	content := `package main
@@ -54,7 +54,7 @@ func main() {
 }
 
 func TestGocodeStreamParser_TypeExtraction(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	parser.SetExtractTypes(true)
 
 	content := `package main
@@ -87,7 +87,7 @@ type Manager interface {
 }
 
 func TestGocodeStreamParser_CommentExtraction(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	parser.SetExtractComments(true)
 
 	content := `package main
@@ -120,7 +120,7 @@ func Hello(name string) string {
 }
 
 func TestGocodeStreamParser_LargeFile(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	parser.SetChunkSize(500)
 
 	// Create a large Go file with many functions
@@ -155,7 +155,7 @@ func TestGocodeStreamParser_LargeFile(t *testing.T) {
 }
 
 func TestGocodeStreamParser_ContextCancellation(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	parser.SetChunkSize(50)
 
 	var builder strings.Builder
@@ -182,7 +182,7 @@ func TestGocodeStreamParser_ContextCancellation(t *testing.T) {
 }
 
 func TestGocodeStreamParser_EmptyContent(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 
 	ctx := context.Background()
 	metadata := make(map[string]any)
@@ -202,7 +202,7 @@ func TestGocodeStreamParser_EmptyContent(t *testing.T) {
 }
 
 func TestGocodeStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	formats := parser.GetSupportedTypes()
 
 	expectedFormat := ".go"
@@ -226,7 +226,7 @@ func TestGocodeStreamParser_Parse_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewGocodeStreamParser()
+	parser := DefaultGocodeStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

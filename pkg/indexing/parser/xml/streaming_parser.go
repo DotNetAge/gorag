@@ -17,8 +17,8 @@ type Parser struct {
 	preserveComments bool
 }
 
-// NewParser creates a new XML parser
-func NewParser() *Parser {
+// DefaultParser creates a new XML parser
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize:        500,
 		chunkOverlap:     50,

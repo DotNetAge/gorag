@@ -17,8 +17,8 @@ type Parser struct {
 	chunkSize    int // characters per document chunk in the stream
 }
 
-// NewParser creates a new PDF parser instance.
-func NewParser() *Parser {
+// DefaultParser creates a new PDF parser instance.
+func DefaultParser() *Parser {
 	return &Parser{
 		chunkSize: 2000, // Reasonable text block size before streaming
 	}

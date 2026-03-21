@@ -16,18 +16,18 @@ type Store struct {
 	port       int
 }
 
-type Option func(*Store)
+// type Option func(*Store)
+// func WithCollection(name string) Option { return func(s *Store) { s.collection = name } }
+// func WithDimension(dim int) Option      { return func(s *Store) { s.dimension = dim } }
+// func WithPort(port int) Option          { return func(s *Store) { s.port = port } }
 
-func WithCollection(name string) Option { return func(s *Store) { s.collection = name } }
-func WithDimension(dim int)     Option { return func(s *Store) { s.dimension = dim } }
-func WithPort(port int)         Option { return func(s *Store) { s.port = port } }
+// DefaultStore creates a Qdrant store pointing to localhost:6334 with a default collection "gorag" and dimension 1536.
+func DefaultStore() (core.VectorStore, error) {
+	return NewStore("gorag", 1536, "localhost", 6334)
+}
 
-func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) {
-	store := &Store{collection: "gorag", dimension: 1536, port: 6334}
-	for _, opt := range opts {
-		opt(store)
-	}
-	host := addr
+func NewStore(collection string, dimension int, host string, port int) (core.VectorStore, error) {
+	store := &Store{collection: collection, dimension: dimension, port: port}
 	client, err := qdrant.NewClient(&qdrant.Config{Host: host, Port: store.port})
 	if err != nil {
 		return nil, err
@@ -62,13 +62,33 @@ func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	return err
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
 	limit := uint64(topK)
+
+	var qFilter *qdrant.Filter
+	if len(filters) > 0 {
+		var must []*qdrant.Condition
+		for k, v := range filters {
+			switch val := v.(type) {
+			case string:
+				must = append(must, qdrant.NewMatch(k, val))
+			case int:
+				must = append(must, qdrant.NewMatchInt(k, int64(val)))
+			case int64:
+				must = append(must, qdrant.NewMatchInt(k, val))
+			case bool:
+				must = append(must, qdrant.NewMatchBool(k, val))
+			}
+		}
+		qFilter = &qdrant.Filter{Must: must}
+	}
+
 	req := &qdrant.QueryPoints{
 		CollectionName: s.collection,
 		Query:          qdrant.NewQuery(query...),
 		Limit:          &limit,
 		WithPayload:    qdrant.NewWithPayload(true),
+		Filter:         qFilter,
 	}
 	res, err := s.client.Query(ctx, req)
 	if err != nil {
@@ -77,13 +97,38 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 	var outV []*core.Vector
 	var outS []float32
 	for _, hit := range res {
-		outV = append(outV, core.NewVector(hit.Id.String(), nil, "", nil))
+		metadata := make(map[string]any)
+		chunkID := ""
+		if hit.Payload != nil {
+			for k, v := range hit.Payload {
+				if k == "chunk_id" {
+					chunkID = v.GetStringValue()
+				} else {
+					// Extract value based on type
+					switch x := v.GetKind().(type) {
+					case *qdrant.Value_StringValue:
+						metadata[k] = x.StringValue
+					case *qdrant.Value_IntegerValue:
+						metadata[k] = x.IntegerValue
+					case *qdrant.Value_DoubleValue:
+						metadata[k] = x.DoubleValue
+					case *qdrant.Value_BoolValue:
+						metadata[k] = x.BoolValue
+					}
+				}
+			}
+		}
+
+		outV = append(outV, core.NewVector(hit.Id.String(), nil, chunkID, metadata))
 		outS = append(outS, float32(hit.Score))
 	}
 	return outV, outS, nil
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
 	_, err := s.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: s.collection,
 		Points: &qdrant.PointsSelector{

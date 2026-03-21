@@ -35,7 +35,7 @@ func NewIndexingContext(ctx context.Context, filePath string) *IndexingContext {
 		Ctx:      ctx,
 		FilePath: filePath,
 		Metadata: Metadata{Source: filePath, FileName: filePath},
-		Tracer:   observability.NewNoopTracer(),
+		Tracer:   observability.DefaultNoopTracer(),
 		Custom:   make(map[string]any),
 	}
 }
@@ -77,7 +77,7 @@ func NewRetrievalContext(ctx context.Context, queryText string) *RetrievalContex
 		Ctx:             ctx,
 		OriginalQuery:   queryText,
 		Query:           &Query{Text: queryText},
-		Tracer:          observability.NewNoopTracer(),
+		Tracer:          observability.DefaultNoopTracer(),
 		RetrievedChunks: make([][]*Chunk, 0),
 		ParallelResults: make(map[string][]*Chunk),
 		Filters:         make(map[string]any),

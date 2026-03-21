@@ -1,11 +1,12 @@
 package milvus
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	milvusEntity "github.com/milvus-io/milvus-sdk-go/v2/entity"
 )
@@ -35,11 +36,16 @@ func WithDimension(dim int) Option {
 	}
 }
 
-func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) {
+// DefaultStore creates a Milvus store pointing to localhost:19530 with a default collection "gorag" and dimension 1536.
+func DefaultStore() (core.VectorStore, error) {
+	return NewStore("localhost:19530")
+}
+
+func NewStore(addr string, opts ...Option) (core.VectorStore, error) {
 	// Create client with retry
 	var c client.Client
 	var err error
-
+	ctx := context.Background()
 	// Retry for up to 30 seconds
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -114,11 +120,7 @@ func NewStore(ctx context.Context, addr string, opts ...Option) (*Store, error) 
 	return store, nil
 }
 
-func (s *Store) Add(ctx context.Context, vector *core.Vector) error {
-	return s.AddBatch(ctx, []*core.Vector{vector})
-}
-
-func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
+func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -169,7 +171,7 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 	return s.client.LoadCollection(ctx, s.collection, false)
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
 	if topK <= 0 {
 		topK = 5
 	}
@@ -181,8 +183,8 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 
 	// Build expression for metadata search
 	expr := ""
-	if len(filter) > 0 {
-		for key, value := range filter {
+	if len(filters) > 0 {
+		for key, value := range filters {
 			if expr != "" {
 				expr += " and "
 			}
@@ -202,21 +204,11 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	return s.DeleteBatch(ctx, []string{id})
-}
-
-func (s *Store) DeleteBatch(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
+	if id == "" {
 		return nil
 	}
 
-	// Because we use VarChar as PK now, format the expr properly
-	idsStr := "'" + ids[0] + "'"
-	for i := 1; i < len(ids); i++ {
-		idsStr += ", '" + ids[i] + "'"
-	}
-
-	expr := fmt.Sprintf("id in [%s]", idsStr)
+	expr := fmt.Sprintf("id in ['%s']", id)
 	return s.client.Delete(ctx, s.collection, "", expr)
 }
 
@@ -275,5 +267,3 @@ func (s *Store) parseResults(results []client.SearchResult) ([]*core.Vector, []f
 	}
 	return outVectors, outScores, nil
 }
-
-func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error { return s.AddBatch(ctx, vectors) }

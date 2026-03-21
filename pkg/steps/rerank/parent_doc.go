@@ -28,7 +28,7 @@ type parentDocExpand struct {
 //	p.AddStep(rerank.ParentDocExpand(expander, logger, metrics))
 func ParentDocExpand(expander core.ResultEnhancer, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &parentDocExpand{
 		expander: expander,

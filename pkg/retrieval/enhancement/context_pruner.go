@@ -85,8 +85,8 @@ func NewContextPruner(llm chat.Client, opts ...ContextPrunerOption) *ContextPrun
 	p := &ContextPruner{
 		llm:       llm,
 		maxTokens: 2000,
-		logger:    logging.NewNoopLogger(),
-		collector: observability.NewNoopCollector(),
+		logger:    logging.DefaultNoopLogger(),
+		collector: observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(p)

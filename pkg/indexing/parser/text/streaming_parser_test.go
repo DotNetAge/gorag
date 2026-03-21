@@ -10,23 +10,23 @@ import (
 
 func TestTextStreamParser_New(t *testing.T) {
 	// Test with custom max read bytes
-	parser := NewTextStreamParser(1024)
+	parser := DefaultTextStreamParser(1024)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 1024, parser.maxReadBytes)
 
 	// Test with negative max read bytes (should default to 10MB)
-	parser = NewTextStreamParser(-1)
+	parser = DefaultTextStreamParser(-1)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 10*1024*1024, parser.maxReadBytes) // Default value
 
 	// Test with zero max read bytes (should default to 10MB)
-	parser = NewTextStreamParser(0)
+	parser = DefaultTextStreamParser(0)
 	assert.NotNil(t, parser)
 	assert.Equal(t, 10*1024*1024, parser.maxReadBytes) // Default value
 }
 
 func TestTextStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewTextStreamParser(1024)
+	parser := DefaultTextStreamParser(1024)
 	supportedTypes := parser.GetSupportedTypes()
 	expectedTypes := []string{".txt", ".md", ".csv", ".log", "text/plain", "text/markdown"}
 	assert.Equal(t, expectedTypes, supportedTypes)
@@ -38,7 +38,7 @@ func TestTextStreamParser_ParseStream_SmallContent(t *testing.T) {
 	reader := strings.NewReader(textContent)
 
 	// Create parser with large max read bytes
-	parser := NewTextStreamParser(1024)
+	parser := DefaultTextStreamParser(1024)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -75,7 +75,7 @@ func TestTextStreamParser_ParseStream_MultipleParts(t *testing.T) {
 	reader := strings.NewReader(textContent.String())
 
 	// Create parser with small max read bytes
-	parser := NewTextStreamParser(1000)
+	parser := DefaultTextStreamParser(1000)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -101,7 +101,7 @@ func TestTextStreamParser_ParseStream_EmptyFile(t *testing.T) {
 	reader := strings.NewReader(textContent)
 
 	// Create parser
-	parser := NewTextStreamParser(1024)
+	parser := DefaultTextStreamParser(1024)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -125,7 +125,7 @@ func TestTextStreamParser_ParseStream_WithMetadata(t *testing.T) {
 	}
 
 	// Create parser
-	parser := NewTextStreamParser(1024)
+	parser := DefaultTextStreamParser(1024)
 
 	// Test ParseStream
 	ctx := context.Background()
@@ -153,7 +153,7 @@ func TestTextStreamParser_ParseStream_ContextCanceled(t *testing.T) {
 	reader := strings.NewReader(textContent)
 
 	// Create parser
-	parser := NewTextStreamParser(100)
+	parser := DefaultTextStreamParser(100)
 
 	// Create a context that can be canceled
 	ctx, cancel := context.WithCancel(context.Background())

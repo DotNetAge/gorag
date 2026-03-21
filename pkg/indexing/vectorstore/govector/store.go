@@ -49,8 +49,19 @@ func WithHNSW(use bool) Option {
 	}
 }
 
+// DefaultStore returns a govector store configured for local testing.
+// It creates a "gorag_vectors.db" file in the current directory and uses a dimension of 1536 (OpenAI default).
+func DefaultStore() (core.VectorStore, error) {
+	return NewStore(
+		WithDBPath("gorag_vectors.db"),
+		WithDimension(1536),
+		WithCollection("gorag"),
+		WithHNSW(true),
+	)
+}
+
 // NewStore initializes a new govector store
-func NewStore(ctx context.Context, opts ...Option) (*Store, error) {
+func NewStore(opts ...Option) (core.VectorStore, error) {
 	store := &Store{
 		colName:   "gorag",
 		dimension: 1536,
@@ -77,11 +88,7 @@ func NewStore(ctx context.Context, opts ...Option) (*Store, error) {
 	return store, nil
 }
 
-func (s *Store) Add(ctx context.Context, vector *core.Vector) error {
-	return s.AddBatch(ctx, []*core.Vector{vector})
-}
-
-func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
+func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -109,12 +116,12 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 	return s.collection.Upsert(points)
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
 	var gvFilter *gvcore.Filter
 
-	if len(filter) > 0 {
+	if len(filters) > 0 {
 		gvFilter = &gvcore.Filter{}
-		for k, v := range filter {
+		for k, v := range filters {
 			gvFilter.Must = append(gvFilter.Must, gvcore.Condition{
 				Key:   k,
 				Match: gvcore.MatchValue{Value: v},
@@ -156,14 +163,10 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	return s.DeleteBatch(ctx, []string{id})
-}
-
-func (s *Store) DeleteBatch(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
+	if id == "" {
 		return nil
 	}
-	_, err := s.collection.Delete(ids, nil)
+	_, err := s.collection.Delete([]string{id}, nil)
 	return err
 }
 

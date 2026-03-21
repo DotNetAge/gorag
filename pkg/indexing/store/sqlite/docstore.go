@@ -18,6 +18,11 @@ type sqliteDocStore struct {
 }
 
 // NewDocStore creates a new SQLite based document store.
+// DefaultDocStore creates a SQLite DocStore using a default local file "gorag_docs.db".
+func DefaultDocStore() (store.DocStore, error) {
+	return NewDocStore("gorag_docs.db")
+}
+
 func NewDocStore(path string) (store.DocStore, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(path)

@@ -24,7 +24,7 @@ func Generate(
 	metrics core.Metrics,
 ) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &generate{
 		generator: generator,

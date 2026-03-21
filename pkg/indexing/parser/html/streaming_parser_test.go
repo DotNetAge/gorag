@@ -9,20 +9,20 @@ import (
 )
 
 func TestHtmlStreamParser_New(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	assert.NotNil(t, parser)
 	assert.NotNil(t, parser.legacyParser)
 }
 
 func TestHtmlStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	supported := parser.GetSupportedTypes()
 	assert.Contains(t, supported, ".html")
 	assert.Contains(t, supported, ".htm")
 }
 
 func TestHtmlStreamParser_ParseStream_Basic(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 
 	htmlContent := `<!DOCTYPE html>
 <html>
@@ -54,7 +54,7 @@ func TestHtmlStreamParser_ParseStream_Basic(t *testing.T) {
 }
 
 func TestHtmlStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 
 	htmlContent := `<html><body><h1>Test</h1></body></html>`
 	reader := strings.NewReader(htmlContent)
@@ -74,7 +74,7 @@ func TestHtmlStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
 }
 
 func TestHtmlStreamParser_ParseStream_EmptyFile(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	reader := strings.NewReader("")
 
 	ctx := context.Background()
@@ -90,7 +90,7 @@ func TestHtmlStreamParser_ParseStream_EmptyFile(t *testing.T) {
 }
 
 func TestHtmlStreamParser_ParseStream_Cancellation(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 
 	htmlContent := `<!DOCTYPE html>
 <html>
@@ -123,37 +123,37 @@ func TestHtmlStreamParser_ParseStream_Cancellation(t *testing.T) {
 }
 
 func TestHtmlStreamParser_SetChunkSize(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	parser.SetChunkSize(1000)
 	assert.Equal(t, 1000, parser.legacyParser.chunkSize)
 }
 
 func TestHtmlStreamParser_SetChunkOverlap(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	parser.SetChunkOverlap(100)
 	assert.Equal(t, 100, parser.legacyParser.chunkOverlap)
 }
 
 func TestHtmlStreamParser_SetCleanScripts(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	parser.SetCleanScripts(false)
 	assert.False(t, parser.legacyParser.cleanScripts)
 }
 
 func TestHtmlStreamParser_SetCleanStyles(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	parser.SetCleanStyles(false)
 	assert.False(t, parser.legacyParser.cleanStyles)
 }
 
 func TestHtmlStreamParser_SetExtractLinks(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	parser.SetExtractLinks(true)
 	assert.True(t, parser.legacyParser.extractLinks)
 }
 
 func TestHtmlStreamParser_ParseStream_WithScriptsAndStyles(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	// Allow scripts and styles for this test
 	parser.SetCleanScripts(false)
 	parser.SetCleanStyles(false)
@@ -191,7 +191,7 @@ func TestHtmlStreamParser_ParseStream_WithScriptsAndStyles(t *testing.T) {
 }
 
 func TestHtmlStreamParser_ParseStream_WithoutScriptsAndStyles(t *testing.T) {
-	parser := NewHtmlStreamParser()
+	parser := DefaultHtmlStreamParser()
 	// Default behavior: remove scripts and styles
 
 	htmlContent := `<!DOCTYPE html>

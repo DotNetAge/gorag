@@ -12,7 +12,10 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/indexing"
+	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
+	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	stepinx "github.com/DotNetAge/gorag/pkg/steps/indexing"
 	"golang.org/x/sync/errgroup"
@@ -44,99 +47,6 @@ type defaultIndexer struct {
 type Config struct {
 	Concurrency bool
 	Workers     int
-}
-
-// IndexerOption defines a function to configure the indexer.
-type IndexerOption func(*defaultIndexer)
-
-// WithConcurrency enables or disables concurrent indexing.
-func WithConcurrency(enabled bool) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.config.Concurrency = enabled
-	}
-}
-
-// WithWorkers sets the number of workers for concurrent indexing.
-func WithWorkers(workers int) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.config.Workers = workers
-	}
-}
-
-// WithParsers sets the parsers to use.
-func WithParsers(parsers ...core.Parser) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.parsers = parsers
-	}
-}
-
-// WithAllParsers enables all available parsers.
-func WithAllParsers() IndexerOption {
-	return func(idx *defaultIndexer) {
-		all := types.AllParsers()
-		parsers := make([]core.Parser, len(all))
-		for i, p := range all {
-			parsers[i] = p
-		}
-		idx.parsers = parsers
-	}
-}
-
-// WithWatchDir adds directories to watch for changes.
-func WithWatchDir(dirs ...string) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.watchDirs = append(idx.watchDirs, dirs...)
-	}
-}
-
-// WithStore sets the vector and document stores.
-func WithStore(vectorStore core.VectorStore, docStore store.DocStore) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.vectorStore = vectorStore
-		idx.docStore = docStore
-	}
-}
-
-// WithGraph sets the graph store.
-func WithGraph(graphStore store.GraphStore) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.graphStore = graphStore
-	}
-}
-
-// WithEmbedding sets the embedding provider.
-func WithEmbedding(embedder embedding.Provider) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.embedder = embedder
-	}
-}
-
-// WithMetrics sets the metrics recorder.
-func WithMetrics(metrics core.Metrics) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.metrics = metrics
-	}
-}
-
-// WithLogger sets the logger.
-func WithLogger(logger logging.Logger) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.logger = logger
-	}
-}
-
-// WithChunker sets the semantic chunker.
-func WithChunker(chunker core.SemanticChunker) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.chunker = chunker
-	}
-}
-
-// WithExtractor sets the entity extractor.
-func WithExtractor(extractor core.EntityExtractor) IndexerOption {
-	return func(idx *defaultIndexer) {
-		idx.extractor = extractor
-	}
 }
 
 func (idx *defaultIndexer) Init() error {
@@ -285,7 +195,7 @@ func NewVectorIndexer(
 	opts ...IndexerOption,
 ) Indexer {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 
 	idx := &defaultIndexer{
@@ -324,7 +234,7 @@ func NewMultimodalGraphIndexer(
 	opts ...IndexerOption,
 ) (Indexer, error) {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 
 	// Constraint: Multimodal pipeline MUST have GraphStore support
@@ -359,10 +269,93 @@ func NewMultimodalGraphIndexer(
 	return idx, nil
 }
 
-// DefaultIndexer creates a default indexer with options.
-func DefaultIndexer(opts ...IndexerOption) Indexer {
+// DefaultNativeIndexer creates a light-weight, local-first Indexer.
+// It uses default TokenChunker, local SQLite and GoVector stores.
+func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
+	// 1. Set default internal state
 	idx := &defaultIndexer{
-		logger: logging.NewNoopLogger(),
+		logger:  logging.DefaultNoopLogger(),
+		parsers: types.AllParsers(),
+		config: Config{
+			Concurrency: true,
+			Workers:     10,
+		},
+	}
+
+	// 2. Apply options
+	for _, opt := range opts {
+		opt(idx)
+	}
+
+	// 3. Fallback to defaults for missing components
+	workDir := "./data" // Use static default instead of mandatory parameter
+	
+	// Check if workDir was set via an option (we'll add WithWorkDir below)
+	// For simplicity in this factory, we'll just ensure it's created.
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create work directory: %w", err)
+	}
+
+	if idx.chunker == nil {
+		tkChunker, _ := chunker.DefaultTokenChunker()
+		idx.chunker = chunker.NewSemanticChunker(tkChunker, 1000, 250, 50)
+	}
+
+	if idx.vectorStore == nil {
+		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		idx.vectorStore, _ = govector.NewStore(
+			govector.WithDBPath(vecPath),
+			govector.WithDimension(1536),
+		)
+	}
+
+	if idx.docStore == nil {
+		docPath := filepath.Join(workDir, "gorag_docs.db")
+		idx.docStore, _ = sqlite.NewDocStore(docPath)
+	}
+
+	if err := idx.Init(); err != nil {
+		return nil, fmt.Errorf("failed to init indexer pipeline: %w", err)
+	}
+
+	return idx, nil
+}
+
+// DefaultAdvancedIndexer creates a high-performance Indexer preset for production.
+func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
+	idx := &defaultIndexer{
+		logger:  logging.DefaultNoopLogger(),
+		parsers: types.AllParsers(),
+		config: Config{
+			Concurrency: true,
+			Workers:     20, // Enterprise default
+		},
+	}
+
+	for _, opt := range opts {
+		opt(idx)
+	}
+
+	// Fallback logic
+	if idx.vectorStore == nil {
+		idx.vectorStore, _ = govector.DefaultStore()
+	}
+	if idx.docStore == nil {
+		idx.docStore, _ = sqlite.DefaultDocStore()
+	}
+
+	if err := idx.Init(); err != nil {
+		return nil, err
+	}
+
+	return idx, nil
+}
+
+// DefaultGraphIndexer creates a Knowledge-Graph enabled Indexer preset.
+func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
+	idx := &defaultIndexer{
+		logger:  logging.DefaultNoopLogger(),
+		parsers: types.AllParsers(),
 		config: Config{
 			Concurrency: true,
 			Workers:     10,
@@ -373,5 +366,21 @@ func DefaultIndexer(opts ...IndexerOption) Indexer {
 		opt(idx)
 	}
 
-	return idx
+	if idx.vectorStore == nil {
+		idx.vectorStore, _ = govector.DefaultStore()
+	}
+	if idx.docStore == nil {
+		idx.docStore, _ = sqlite.DefaultDocStore()
+	}
+
+	if err := idx.Init(); err != nil {
+		return nil, err
+	}
+
+	return idx, nil
+}
+
+// DefaultIndexer is an alias for DefaultNativeIndexer.
+func DefaultIndexer(opts ...IndexerOption) (Indexer, error) {
+	return DefaultNativeIndexer(opts...)
 }

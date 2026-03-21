@@ -45,7 +45,7 @@ func TestStore_Add_Search_Delete(t *testing.T) {
 
 	ctx := context.Background()
 	// Create a 4-dimensional collection
-	store, err := NewStore(ctx, endpoint, WithDimension(4))
+	store, err := NewStore("gorag", 1536, endpoint, 6334)
 	require.NoError(t, err)
 	defer store.Close(ctx)
 
@@ -58,7 +58,7 @@ func TestStore_Add_Search_Delete(t *testing.T) {
 		core.NewVector(uid2, []float32{0.9, 0.8, 0.7, 0.6}, "chunk2", map[string]any{"lang": "zh"}),
 	}
 
-	// Test AddBatch
+	// Test Upsert
 	err = store.Upsert(ctx, vectors)
 	require.NoError(t, err)
 

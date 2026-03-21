@@ -20,8 +20,8 @@ type Collector interface {
 // noopCollector is a no-op implementation for testing and default usage.
 type noopCollector struct{}
 
-// NewNoopCollector creates a no-op collector that discards all metrics.
-func NewNoopCollector() Collector {
+// DefaultNoopCollector creates a no-op collector that discards all metrics.
+func DefaultNoopCollector() Collector {
 	return &noopCollector{}
 }
 
@@ -61,8 +61,8 @@ type Span interface {
 // noopTracer is a no-op implementation.
 type noopTracer struct{}
 
-// NewNoopTracer creates a no-op tracer.
-func NewNoopTracer() Tracer {
+// DefaultNoopTracer creates a no-op tracer.
+func DefaultNoopTracer() Tracer {
 	return &noopTracer{}
 }
 

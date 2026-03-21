@@ -22,7 +22,7 @@ func Decompose(
 	logger logging.Logger,
 ) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &decompose{
 		decomposer: decomposer,

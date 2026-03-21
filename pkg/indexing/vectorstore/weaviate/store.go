@@ -1,9 +1,10 @@
 package weaviate
 
 import (
-	"github.com/DotNetAge/gorag/pkg/core"
 	"context"
 	"fmt"
+
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate"
 	"github.com/weaviate/weaviate-go-client/v4/weaviate/auth"
@@ -21,21 +22,12 @@ type Store struct {
 	dimension  int
 }
 
-type Option func(*Store)
-
-func WithCollection(name string) Option {
-	return func(s *Store) {
-		s.collection = name
-	}
+// DefaultStore creates a Weaviate store pointing to localhost:8080 with a default collection "GoRAG" and dimension 1536.
+func DefaultStore() (core.VectorStore, error) {
+	return NewStore("GoRAG", 1536, "localhost:8080", "")
 }
 
-func WithDimension(dim int) Option {
-	return func(s *Store) {
-		s.dimension = dim
-	}
-}
-
-func NewStore(addr string, apiKey string, opts ...Option) (*Store, error) {
+func NewStore(collection string, dimension int, addr string, apiKey string) (core.VectorStore, error) {
 	config := weaviate.Config{
 		Scheme: "http",
 		Host:   addr,
@@ -54,12 +46,8 @@ func NewStore(addr string, apiKey string, opts ...Option) (*Store, error) {
 
 	store := &Store{
 		client:     client,
-		collection: "GoRAG",
-		dimension:  1536,
-	}
-
-	for _, opt := range opts {
-		opt(store)
+		collection: collection,
+		dimension:  dimension,
 	}
 
 	err = store.ensureCollectionExists(context.Background())
@@ -98,11 +86,7 @@ func (s *Store) ensureCollectionExists(ctx context.Context) error {
 	return s.client.Schema().ClassCreator().WithClass(class).Do(ctx)
 }
 
-func (s *Store) Add(ctx context.Context, vector *core.Vector) error {
-	return s.AddBatch(ctx, []*core.Vector{vector})
-}
-
-func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
+func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -129,7 +113,7 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 			WithProperties(properties).
 			WithVector(v.Values).
 			Do(ctx)
-			
+
 		if err != nil {
 			return fmt.Errorf("failed to add vector %s: %w", v.ID, err)
 		}
@@ -138,7 +122,7 @@ func (s *Store) AddBatch(ctx context.Context, vectors []*core.Vector) error {
 	return nil
 }
 
-func (s *Store) Search(ctx context.Context, query []float32, topK int, filter map[string]any) ([]*core.Vector, []float32, error) {
+func (s *Store) Search(ctx context.Context, query []float32, topK int, searchFilters map[string]any) ([]*core.Vector, []float32, error) {
 	if topK <= 0 {
 		topK = 5
 	}
@@ -159,16 +143,16 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 		WithLimit(topK).
 		WithFields(fields...)
 
-	if len(filter) > 0 {
+	if len(searchFilters) > 0 {
 		// Weaviate filter builder
 		var wheres []*filters.WhereBuilder
-		for k, v := range filter {
+		for k, v := range searchFilters {
 			wheres = append(wheres, filters.Where().
 				WithPath([]string{k}).
 				WithOperator(filters.Equal).
 				WithValueString(fmt.Sprintf("%v", v)))
 		}
-		
+
 		if len(wheres) == 1 {
 			req = req.WithWhere(wheres[0])
 		} else if len(wheres) > 1 {
@@ -185,22 +169,16 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filter ma
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	return s.DeleteBatch(ctx, []string{id})
-}
-
-func (s *Store) DeleteBatch(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
+	if id == "" {
 		return nil
 	}
 
-	for _, id := range ids {
-		err := s.client.Data().Deleter().
-			WithClassName(s.collection).
-			WithID(id).
-			Do(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to delete vector %s: %w", id, err)
-		}
+	err := s.client.Data().Deleter().
+		WithClassName(s.collection).
+		WithID(id).
+		Do(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to delete vector %s: %w", id, err)
 	}
 
 	return nil
@@ -219,7 +197,7 @@ func (s *Store) parseGraphQLResult(result *models.GraphQLResponse) ([]*core.Vect
 	if !ok {
 		return nil, nil, nil
 	}
-	
+
 	objects, ok := data[s.collection].([]interface{})
 	if !ok {
 		return nil, nil, nil
@@ -254,5 +232,3 @@ func (s *Store) parseGraphQLResult(result *models.GraphQLResponse) ([]*core.Vect
 
 	return outVectors, outScores, nil
 }
-
-func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error { return s.AddBatch(ctx, vectors) }

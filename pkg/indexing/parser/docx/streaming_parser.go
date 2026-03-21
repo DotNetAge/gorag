@@ -16,8 +16,8 @@ import (
 // Parser implements a high-quality DOCX document parser.
 type Parser struct{}
 
-// NewParser creates a new DOCX parser instance.
-func NewParser() *Parser {
+// DefaultParser creates a new DOCX parser instance.
+func DefaultParser() *Parser {
 	return &Parser{}
 }
 

@@ -28,7 +28,7 @@ func MultiStore(
 	metrics core.Metrics,
 ) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &multiStore{
 		vectorStore: vectorStore,

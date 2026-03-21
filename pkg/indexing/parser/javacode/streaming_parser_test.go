@@ -9,19 +9,19 @@ import (
 )
 
 func TestJavacodeStreamParser_New(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	assert.NotNil(t, parser)
 	assert.NotNil(t, parser.legacyParser)
 }
 
 func TestJavacodeStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	supported := parser.GetSupportedTypes()
 	assert.Contains(t, supported, ".java")
 }
 
 func TestJavacodeStreamParser_ParseStream_Basic(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 
 	javaCode := `public class TestClass {
 	public void testMethod() {
@@ -47,7 +47,7 @@ func TestJavacodeStreamParser_ParseStream_Basic(t *testing.T) {
 }
 
 func TestJavacodeStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 
 	javaCode := `public class TestClass {
 	public void testMethod() {
@@ -71,7 +71,7 @@ func TestJavacodeStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
 }
 
 func TestJavacodeStreamParser_ParseStream_EmptyFile(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	reader := strings.NewReader("")
 
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func TestJavacodeStreamParser_ParseStream_EmptyFile(t *testing.T) {
 }
 
 func TestJavacodeStreamParser_ParseStream_Cancellation(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 
 	javaCode := `public class TestClass {
 	public void testMethod() {
@@ -115,37 +115,37 @@ func TestJavacodeStreamParser_ParseStream_Cancellation(t *testing.T) {
 }
 
 func TestJavacodeStreamParser_SetChunkSize(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetChunkSize(1000)
 	assert.Equal(t, 1000, parser.legacyParser.chunkSize)
 }
 
 func TestJavacodeStreamParser_SetChunkOverlap(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetChunkOverlap(100)
 	assert.Equal(t, 100, parser.legacyParser.chunkOverlap)
 }
 
 func TestJavacodeStreamParser_SetExtractMethods(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetExtractMethods(false)
 	assert.False(t, parser.legacyParser.extractMethods)
 }
 
 func TestJavacodeStreamParser_SetExtractClasses(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetExtractClasses(false)
 	assert.False(t, parser.legacyParser.extractClasses)
 }
 
 func TestJavacodeStreamParser_SetExtractComments(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetExtractComments(false)
 	assert.False(t, parser.legacyParser.extractComments)
 }
 
 func TestJavacodeStreamParser_ParseStream_WithComments(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 
 	javaCode := `// This is a class comment
 public class TestClass {
@@ -176,7 +176,7 @@ public class TestClass {
 }
 
 func TestJavacodeStreamParser_ParseStream_WithoutMethods(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetExtractMethods(false)
 
 	javaCode := `public class TestClass {
@@ -201,7 +201,7 @@ func TestJavacodeStreamParser_ParseStream_WithoutMethods(t *testing.T) {
 }
 
 func TestJavacodeStreamParser_ParseStream_WithoutClasses(t *testing.T) {
-	parser := NewJavacodeStreamParser()
+	parser := DefaultJavacodeStreamParser()
 	parser.SetExtractClasses(false)
 
 	javaCode := `public class TestClass {

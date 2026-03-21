@@ -20,10 +20,10 @@ type HtmlStreamParser struct {
 	legacyParser *Parser
 }
 
-// NewHtmlStreamParser creates a new HTML stream parser
-func NewHtmlStreamParser() *HtmlStreamParser {
+// DefaultHtmlStreamParser creates a new HTML stream parser
+func DefaultHtmlStreamParser() *HtmlStreamParser {
 	return &HtmlStreamParser{
-		legacyParser: NewParser(),
+		legacyParser: DefaultParser(),
 	}
 }
 

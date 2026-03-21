@@ -27,8 +27,8 @@ type JsonStreamParser struct {
 	chunkOverlap int
 }
 
-// NewJsonStreamParser creates a new JSON stream parser
-func NewJsonStreamParser() *JsonStreamParser {
+// DefaultJsonStreamParser creates a new JSON stream parser
+func DefaultJsonStreamParser() *JsonStreamParser {
 	return &JsonStreamParser{
 		chunkSize:    500,
 		chunkOverlap: 50,

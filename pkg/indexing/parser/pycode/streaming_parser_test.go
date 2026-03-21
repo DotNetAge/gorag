@@ -14,7 +14,7 @@ import (
 )
 
 func TestPycodeStreamParser_ParseStream(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -42,7 +42,7 @@ print(hello("World"))`)
 }
 
 func TestPycodeStreamParser_FunctionExtraction(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	parser.SetExtractFunctions(true)
 	ctx := context.Background()
 
@@ -66,7 +66,7 @@ func TestPycodeStreamParser_FunctionExtraction(t *testing.T) {
 }
 
 func TestPycodeStreamParser_ClassExtraction(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	parser.SetExtractClasses(true)
 	ctx := context.Background()
 
@@ -90,7 +90,7 @@ func TestPycodeStreamParser_ClassExtraction(t *testing.T) {
 }
 
 func TestPycodeStreamParser_EmptyCode(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	ctx := context.Background()
 
 	pythonContent := []byte(``)
@@ -106,7 +106,7 @@ func TestPycodeStreamParser_EmptyCode(t *testing.T) {
 }
 
 func TestPycodeStreamParser_LargeCode(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	parser.SetChunkSize(100)
 	ctx := context.Background()
 
@@ -127,7 +127,7 @@ func TestPycodeStreamParser_LargeCode(t *testing.T) {
 }
 
 func TestPycodeStreamParser_ChunkConfiguration(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	parser.SetChunkSize(200)
 	parser.SetChunkOverlap(20)
 
@@ -139,7 +139,7 @@ func TestPycodeStreamParser_ChunkConfiguration(t *testing.T) {
 }
 
 func TestPycodeStreamParser_ConfigurationOptions(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 
 	parser.SetExtractFunctions(false)
 	parser.SetExtractClasses(false)
@@ -154,7 +154,7 @@ func TestPycodeStreamParser_ConfigurationOptions(t *testing.T) {
 }
 
 func TestPycodeStreamParser_SupportedFormats(t *testing.T) {
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 1)
 	assert.Equal(t, ".py", formats[0])
@@ -167,7 +167,7 @@ func TestPycodeStreamParser_ParseStream_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewPycodeStreamParser()
+	parser := DefaultPycodeStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

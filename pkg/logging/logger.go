@@ -7,10 +7,10 @@ import (
 
 // Logger 通用日志接口
 type Logger interface {
-	Info(msg string, fields ...map[string]interface{})
-	Error(msg string, err error, fields ...map[string]interface{})
-	Debug(msg string, fields ...map[string]interface{})
-	Warn(msg string, fields ...map[string]interface{})
+	Info(msg string, fields ...map[string]any)
+	Error(msg string, err error, fields ...map[string]any)
+	Debug(msg string, fields ...map[string]any)
+	Warn(msg string, fields ...map[string]any)
 }
 
 // defaultLogger 默认日志实现，将日志写入文件
@@ -20,8 +20,16 @@ type defaultLogger struct {
 	logger   *log.Logger
 }
 
-// NewDefaultLogger 创建默认日志记录器，写入指定文件
-func NewDefaultLogger(filePath string) (Logger, error) {
+// DefaultConsoleLogger creates a default logger that writes to standard output.
+func DefaultConsoleLogger() Logger {
+	return &defaultLogger{
+		file:   os.Stdout,
+		logger: log.New(os.Stdout, "", log.LstdFlags),
+	}
+}
+
+// DefaultFileLogger 创建默认日志记录器，写入指定文件
+func DefaultFileLogger(filePath string) (Logger, error) {
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
@@ -35,22 +43,22 @@ func NewDefaultLogger(filePath string) (Logger, error) {
 }
 
 // Info 输出信息日志
-func (l *defaultLogger) Info(msg string, fields ...map[string]interface{}) {
+func (l *defaultLogger) Info(msg string, fields ...map[string]any) {
 	l.logger.Printf("[INFO] %s - %v", msg, fields)
 }
 
 // Error 输出错误日志
-func (l *defaultLogger) Error(msg string, err error, fields ...map[string]interface{}) {
+func (l *defaultLogger) Error(msg string, err error, fields ...map[string]any) {
 	l.logger.Printf("[ERROR] %s - %v - error: %v", msg, fields, err)
 }
 
 // Debug 输出调试日志
-func (l *defaultLogger) Debug(msg string, fields ...map[string]interface{}) {
+func (l *defaultLogger) Debug(msg string, fields ...map[string]any) {
 	l.logger.Printf("[DEBUG] %s - %v", msg, fields)
 }
 
 // Warn 输出警告日志
-func (l *defaultLogger) Warn(msg string, fields ...map[string]interface{}) {
+func (l *defaultLogger) Warn(msg string, fields ...map[string]any) {
 	l.logger.Printf("[WARN] %s - %v", msg, fields)
 }
 
@@ -63,12 +71,12 @@ func (l *defaultLogger) Close() error {
 // noopLogger 是一个空的日志记录器，用于测试或不需要日志的场景
 type noopLogger struct{}
 
-// NewNoopLogger 创建一个空的日志记录器
-func NewNoopLogger() Logger {
+// DefaultNoopLogger 创建一个空的日志记录器
+func DefaultNoopLogger() Logger {
 	return &noopLogger{}
 }
 
-func (l *noopLogger) Info(string, ...map[string]interface{})         {}
-func (l *noopLogger) Error(string, error, ...map[string]interface{}) {}
-func (l *noopLogger) Debug(string, ...map[string]interface{})        {}
-func (l *noopLogger) Warn(string, ...map[string]interface{})         {}
+func (l *noopLogger) Info(string, ...map[string]any)         {}
+func (l *noopLogger) Error(string, error, ...map[string]any) {}
+func (l *noopLogger) Debug(string, ...map[string]any)        {}
+func (l *noopLogger) Warn(string, ...map[string]any)         {}

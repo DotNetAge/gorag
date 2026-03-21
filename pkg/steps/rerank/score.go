@@ -39,7 +39,7 @@ func Score(
 		topK = 5
 	}
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &score{
 		reranker: reranker,

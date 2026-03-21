@@ -23,7 +23,7 @@ func CrossEncoderRerank(reranker core.Reranker, topK int, logger logging.Logger,
 		topK = 10
 	}
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &crossEncoderRerank{
 		reranker: reranker,

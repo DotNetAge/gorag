@@ -68,8 +68,8 @@ func NewEntityExtractor(llm chat.Client, opts ...EntityExtractorOption) *entityE
 	e := &entityExtractor{
 		llm:            llm,
 		promptTemplate: defaultEntityExtractionPrompt,
-		logger:         logging.NewNoopLogger(),
-		collector:      observability.NewNoopCollector(),
+		logger:         logging.DefaultNoopLogger(),
+		collector:      observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(e)

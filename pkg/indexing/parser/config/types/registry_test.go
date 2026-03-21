@@ -39,7 +39,7 @@ func TestParserTypeString(t *testing.T) {
 }
 
 func TestParserRegistry(t *testing.T) {
-	registry := NewParserRegistry()
+	registry := DefaultParserRegistry()
 
 	// Test empty registry
 	allParsers := registry.GetAll()
@@ -66,14 +66,14 @@ func TestDefaultRegistry(t *testing.T) {
 	assert.Equal(t, len(all), len(allParsers))
 }
 
-func TestNewParser(t *testing.T) {
+func TestDefaultParser(t *testing.T) {
 	// Test successful parser creation
-	parser, err := NewParser(TEXT)
+	parser, err := DefaultParser(TEXT)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 
 	// Test invalid parser type
-	invalidParser, err := NewParser(UNKNOWN)
+	invalidParser, err := DefaultParser(UNKNOWN)
 	assert.Error(t, err)
 	assert.Nil(t, invalidParser)
 	assert.Equal(t, ErrParserNotFound, err)

@@ -15,7 +15,7 @@ import (
 )
 
 func TestParser_ParseStream(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -46,7 +46,7 @@ func TestParser_ParseStream(t *testing.T) {
 }
 
 func TestParser_EmptyXML(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx := context.Background()
 
 	// Empty root element - should still create a chunk for the structure
@@ -64,7 +64,7 @@ func TestParser_EmptyXML(t *testing.T) {
 }
 
 func TestParser_LargeXML(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(100)
 	ctx := context.Background()
 
@@ -88,7 +88,7 @@ func TestParser_LargeXML(t *testing.T) {
 }
 
 func TestParser_ContextCancellation(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create large XML
@@ -113,7 +113,7 @@ func TestParser_ContextCancellation(t *testing.T) {
 }
 
 func TestParser_ChunkConfiguration(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(200)
 	parser.SetChunkOverlap(20)
 
@@ -123,7 +123,7 @@ func TestParser_ChunkConfiguration(t *testing.T) {
 
 func TestParser_CommentHandling(t *testing.T) {
 	// Test with comments preserved
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetPreserveComments(true)
 	ctx := context.Background()
 
@@ -140,7 +140,7 @@ func TestParser_CommentHandling(t *testing.T) {
 }
 
 func TestParser_GetSupportedTypes(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	formats := parser.GetSupportedTypes()
 	assert.Len(t, formats, 1)
 	assert.Equal(t, ".xml", formats[0])
@@ -153,7 +153,7 @@ func TestParser_ParseStream_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewParser()
+	parser := DefaultParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory

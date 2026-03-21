@@ -17,7 +17,7 @@ type docstoreEnrichStep struct {
 // EnrichWithDocStore creates a pipeline step to enrich retrieved chunks with full document context.
 func EnrichWithDocStore(s store.DocStore, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
-		logger = logging.NewNoopLogger()
+		logger = logging.DefaultNoopLogger()
 	}
 	return &docstoreEnrichStep{
 		store:  s,

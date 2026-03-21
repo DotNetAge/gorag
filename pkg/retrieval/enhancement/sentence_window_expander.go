@@ -66,8 +66,8 @@ func NewSentenceWindowExpander(opts ...SentenceWindowExpanderOption) *SentenceWi
 	e := &SentenceWindowExpander{
 		windowSize: 2,
 		maxChars:   2000,
-		logger:     logging.NewNoopLogger(),
-		collector:  observability.NewNoopCollector(),
+		logger:     logging.DefaultNoopLogger(),
+		collector:  observability.DefaultNoopCollector(),
 	}
 	for _, opt := range opts {
 		opt(e)

@@ -9,7 +9,7 @@ import (
 )
 
 func TestParser_New(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	assert.NotNil(t, parser)
 	assert.Equal(t, 500, parser.chunkSize)
 	assert.Equal(t, 50, parser.chunkOverlap)
@@ -17,25 +17,25 @@ func TestParser_New(t *testing.T) {
 }
 
 func TestParser_SetChunkSize(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(1000)
 	assert.Equal(t, 1000, parser.chunkSize)
 }
 
 func TestParser_SetChunkOverlap(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkOverlap(100)
 	assert.Equal(t, 100, parser.chunkOverlap)
 }
 
 func TestParser_SetFormat(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Nginx)
 	assert.Equal(t, Nginx, parser.format)
 }
 
 func TestParser_SetPattern(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	err := parser.SetPattern(`^\d{4}-\d{2}-\d{2}`)
 	assert.NoError(t, err)
 	assert.Equal(t, Custom, parser.format)
@@ -47,7 +47,7 @@ func TestParser_SetPattern(t *testing.T) {
 }
 
 func TestParser_GetSupportedTypes(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	supported := parser.GetSupportedTypes()
 	assert.Contains(t, supported, ".log")
 	assert.Contains(t, supported, ".txt")
@@ -62,7 +62,7 @@ func TestParser_Format_String(t *testing.T) {
 }
 
 func TestParser_ParseStream_Basic(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(100)
 	parser.SetChunkOverlap(10)
 
@@ -86,7 +86,7 @@ func TestParser_ParseStream_Basic(t *testing.T) {
 }
 
 func TestParser_ParseStream_WithOverlap(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetChunkSize(20)
 	parser.SetChunkOverlap(5)
 
@@ -106,7 +106,7 @@ func TestParser_ParseStream_WithOverlap(t *testing.T) {
 }
 
 func TestParser_ParseStream_NginxFormat(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Nginx)
 	parser.SetChunkSize(200)
 
@@ -129,7 +129,7 @@ func TestParser_ParseStream_NginxFormat(t *testing.T) {
 }
 
 func TestParser_ParseStream_ApacheFormat(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Apache)
 	parser.SetChunkSize(200)
 
@@ -151,7 +151,7 @@ func TestParser_ParseStream_ApacheFormat(t *testing.T) {
 }
 
 func TestParser_ParseStream_SyslogFormat(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Syslog)
 	parser.SetChunkSize(200)
 
@@ -174,7 +174,7 @@ func TestParser_ParseStream_SyslogFormat(t *testing.T) {
 }
 
 func TestParser_ParseStream_EmptyFile(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	reader := strings.NewReader("")
 
 	ctx := context.Background()
@@ -190,7 +190,7 @@ func TestParser_ParseStream_EmptyFile(t *testing.T) {
 }
 
 func TestParser_ParseStream_OnlyEmptyLines(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	reader := strings.NewReader("\n\n\n")
 
 	ctx := context.Background()
@@ -206,7 +206,7 @@ func TestParser_ParseStream_OnlyEmptyLines(t *testing.T) {
 }
 
 func TestParser_DetectFormat_Nginx(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	nginxLog := `192.168.1.1 - - [01/Jan/2023:12:00:00 +0000] "GET /index.html HTTP/1.1" 200 1234 "-" "Mozilla/5.0"`
 	reader := strings.NewReader(nginxLog)
 
@@ -216,7 +216,7 @@ func TestParser_DetectFormat_Nginx(t *testing.T) {
 }
 
 func TestParser_DetectFormat_Syslog(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	syslog := `Jan  1 12:00:00 server1 sshd[1234]: Accepted publickey for user from 192.168.1.1 port 22 ssh2`
 	reader := strings.NewReader(syslog)
 
@@ -226,7 +226,7 @@ func TestParser_DetectFormat_Syslog(t *testing.T) {
 }
 
 func TestParser_DetectFormat_Unknown(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	unknownLog := `This is not a recognized log format`
 	reader := strings.NewReader(unknownLog)
 
@@ -236,7 +236,7 @@ func TestParser_DetectFormat_Unknown(t *testing.T) {
 }
 
 func TestParser_ExtractMetadata_Nginx(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Nginx)
 
 	nginxLog := `192.168.1.1 - - [01/Jan/2023:12:00:00 +0000] "GET /index.html HTTP/1.1" 200 1234 "-" "Mozilla/5.0"`
@@ -248,7 +248,7 @@ func TestParser_ExtractMetadata_Nginx(t *testing.T) {
 }
 
 func TestParser_ExtractMetadata_Syslog(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 	parser.SetFormat(Syslog)
 
 	syslog := `Jan  1 12:00:00 server1 sshd[1234]: Accepted publickey for user from 192.168.1.1 port 22 ssh2`
@@ -259,7 +259,7 @@ func TestParser_ExtractMetadata_Syslog(t *testing.T) {
 }
 
 func TestParser_IdentifyFormat(t *testing.T) {
-	parser := NewParser()
+	parser := DefaultParser()
 
 	// Test nginx format
 	nginxLog := `192.168.1.1 - - [01/Jan/2023:12:00:00 +0000] "GET /index.html HTTP/1.1" 200 1234`

@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewExcelStreamParser(t *testing.T) {
-	parser := NewExcelStreamParser()
+func TestDefaultExcelStreamParser(t *testing.T) {
+	parser := DefaultExcelStreamParser()
 	require.NotNil(t, parser)
 	assert.Equal(t, 500, parser.chunkSize)
 	assert.Equal(t, 50, parser.chunkOverlap)
@@ -34,7 +34,7 @@ func TestExcelStreamParser_ParseStream(t *testing.T) {
   </relationships>
 </workbook>`
 
-	parser := NewExcelStreamParser()
+	parser := DefaultExcelStreamParser()
 	ctx := context.Background()
 
 	// This test will fail with the simplified XML, but it tests the method signature
@@ -51,7 +51,7 @@ func TestExcelStreamParser_ParseStream(t *testing.T) {
 }
 
 func TestExcelStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewExcelStreamParser()
+	parser := DefaultExcelStreamParser()
 	formats := parser.GetSupportedTypes()
 	assert.Contains(t, formats, ".xlsx")
 	assert.Contains(t, formats, ".xls")
@@ -64,7 +64,7 @@ func TestExcelStreamParser_Parse_FromDataDirectory(t *testing.T) {
 		t.Skip(".data directory not found, skipping test")
 	}
 
-	parser := NewExcelStreamParser()
+	parser := DefaultExcelStreamParser()
 	ctx := context.Background()
 
 	// Read all files in .data directory
@@ -139,7 +139,7 @@ func TestExcelStreamParser_ParseStream_WithContextCancel(t *testing.T) {
   </relationships>
 </workbook>`
 
-	parser := NewExcelStreamParser()
+	parser := DefaultExcelStreamParser()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Cancel the context immediately
@@ -169,7 +169,7 @@ func TestExcelStreamParser_ParseStream_WithMetadata(t *testing.T) {
   </relationships>
 </workbook>`
 
-	parser := NewExcelStreamParser()
+	parser := DefaultExcelStreamParser()
 	ctx := context.Background()
 
 	metadata := map[string]any{

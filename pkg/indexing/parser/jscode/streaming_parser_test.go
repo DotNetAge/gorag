@@ -9,13 +9,13 @@ import (
 )
 
 func TestJscodeStreamParser_New(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	assert.NotNil(t, parser)
 	assert.NotNil(t, parser.legacyParser)
 }
 
 func TestJscodeStreamParser_GetSupportedTypes(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	supported := parser.GetSupportedTypes()
 	assert.Contains(t, supported, ".js")
 	assert.Contains(t, supported, ".jsx")
@@ -23,7 +23,7 @@ func TestJscodeStreamParser_GetSupportedTypes(t *testing.T) {
 }
 
 func TestJscodeStreamParser_ParseStream_Basic(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 
 	jsCode := `function testFunction() {
 	console.log("Hello World");
@@ -53,7 +53,7 @@ class TestClass {
 }
 
 func TestJscodeStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 
 	jsCode := `function testFunction() {
 	console.log("Hello World");
@@ -75,7 +75,7 @@ func TestJscodeStreamParser_ParseStream_WithSourceMetadata(t *testing.T) {
 }
 
 func TestJscodeStreamParser_ParseStream_EmptyFile(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	reader := strings.NewReader("")
 
 	ctx := context.Background()
@@ -91,7 +91,7 @@ func TestJscodeStreamParser_ParseStream_EmptyFile(t *testing.T) {
 }
 
 func TestJscodeStreamParser_ParseStream_Cancellation(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 
 	jsCode := `function testFunction() {
 	console.log("Hello World");
@@ -123,37 +123,37 @@ class TestClass {
 }
 
 func TestJscodeStreamParser_SetChunkSize(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetChunkSize(1000)
 	assert.Equal(t, 1000, parser.legacyParser.chunkSize)
 }
 
 func TestJscodeStreamParser_SetChunkOverlap(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetChunkOverlap(100)
 	assert.Equal(t, 100, parser.legacyParser.chunkOverlap)
 }
 
 func TestJscodeStreamParser_SetExtractFunctions(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetExtractFunctions(false)
 	assert.False(t, parser.legacyParser.extractFunctions)
 }
 
 func TestJscodeStreamParser_SetExtractClasses(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetExtractClasses(false)
 	assert.False(t, parser.legacyParser.extractClasses)
 }
 
 func TestJscodeStreamParser_SetExtractComments(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetExtractComments(false)
 	assert.False(t, parser.legacyParser.extractComments)
 }
 
 func TestJscodeStreamParser_ParseStream_WithComments(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 
 	jsCode := `// This is a function comment
 function testFunction() {
@@ -188,7 +188,7 @@ class TestClass {
 }
 
 func TestJscodeStreamParser_ParseStream_WithoutFunctions(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetExtractFunctions(false)
 
 	jsCode := `function testFunction() {
@@ -216,7 +216,7 @@ class TestClass {
 }
 
 func TestJscodeStreamParser_ParseStream_WithoutClasses(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 	parser.SetExtractClasses(false)
 
 	jsCode := `function testFunction() {
@@ -244,7 +244,7 @@ class TestClass {
 }
 
 func TestJscodeStreamParser_ParseStream_ArrowFunctions(t *testing.T) {
-	parser := NewJscodeStreamParser()
+	parser := DefaultJscodeStreamParser()
 
 	jsCode := `const arrowFunction = () => {
 	console.log("Arrow function");
