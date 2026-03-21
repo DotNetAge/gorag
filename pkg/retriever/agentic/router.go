@@ -69,10 +69,24 @@ func (r *routerRetriever) Retrieve(ctx context.Context, queries []string, topK i
 			return nil, fmt.Errorf("no retriever available for intent %s and no default configured", intentRes.Intent)
 		}
 
-		// 3. Execute Retrieval
+		// 3. Execute Retrieval with Execution-level Fallback
 		res, err := target.Retrieve(ctx, []string{qText}, topK)
 		if err != nil {
-			return nil, fmt.Errorf("routed retrieval failed for intent %s: %w", intentRes.Intent, err)
+			// If target is already the default, we can't fallback further
+			if target == r.defaultRet {
+				return nil, fmt.Errorf("default retrieval failed: %w", err)
+			}
+
+			r.logger.Warn("routed retrieval failed, falling back to default", map[string]any{
+				"intent": intentRes.Intent,
+				"error":  err,
+				"query":  qText,
+			})
+			
+			res, err = r.defaultRet.Retrieve(ctx, []string{qText}, topK)
+			if err != nil {
+				return nil, fmt.Errorf("fallback retrieval failed after routed failure: %w", err)
+			}
 		}
 
 		// Attach intent info to metadata for traceability

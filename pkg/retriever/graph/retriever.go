@@ -19,6 +19,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
+	"golang.org/x/sync/errgroup"
 )
 const defaultGraphRAGPrompt = `You are a helpful and professional AI assistant.
 Please answer the user's question based on the provided reference documents and knowledge graph context.
@@ -211,11 +212,18 @@ func (s *graphSearchStep) Name() string {
 
 func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
 	if s.store == nil {
-		s.logger.Warn("GraphStore is nil, skipping graph search step", nil)
+		if s.logger != nil {
+			s.logger.Warn("GraphStore is nil, skipping graph search step", nil)
+		}
 		return nil
 	}
 
-	_, span := context.Tracer.StartSpan(ctx, "GraphSearch")
+	tracer := context.Tracer
+	if tracer == nil {
+		tracer = observability.DefaultNoopTracer()
+	}
+
+	_, span := tracer.StartSpan(ctx, "GraphSearch")
 	defer span.End()
 
 	entities, ok := context.Custom["extracted_entities"].([]string)
@@ -224,37 +232,69 @@ func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalCo
 		return nil
 	}
 
+	// Industrial Gate: Limit number of entities to process to prevent resource exhaustion
+	const maxEntities = 10
+	if len(entities) > maxEntities {
+		if s.logger != nil {
+			s.logger.Debug("too many entities extracted, limiting to top", map[string]any{"total": len(entities), "limit": maxEntities})
+		}
+		entities = entities[:maxEntities]
+	}
+
 	span.SetTag("entities_count", len(entities))
 
-	var graphContext strings.Builder
-	for _, entity := range entities {
-		nodes, edges, err := s.store.GetNeighbors(ctx, entity, s.depth, s.limit)
-		if err != nil {
-			s.logger.Warn("failed to get neighbors for entity", map[string]any{
-				"entity": entity,
-				"error":  err,
-			})
-			span.LogEvent("error_fetching_neighbors", map[string]any{"entity": entity, "error": err.Error()})
-			continue
-		}
+	// Concurrent Fetching
+	g, gctx := errgroup.WithContext(ctx)
+	results := make(chan string, len(entities))
 
-		if len(nodes) > 0 {
-			span.LogEvent("subgraph_found", map[string]any{"entity": entity, "nodes": len(nodes), "edges": len(edges)})
-			graphContext.WriteString(fmt.Sprintf("Entity: %s\n", entity))
-			for _, node := range nodes {
-				if node.ID != entity {
-					graphContext.WriteString(fmt.Sprintf("- Node: %s (Type: %s)\n", node.ID, node.Type))
+	for _, entity := range entities {
+		e := entity // capture
+		g.Go(func() error {
+			nodes, edges, err := s.store.GetNeighbors(gctx, e, s.depth, s.limit)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("failed to get neighbors for entity", map[string]any{
+						"entity": e,
+						"error":  err,
+					})
 				}
+				return nil // Non-fatal for individual entity
 			}
-			for _, edge := range edges {
-				graphContext.WriteString(fmt.Sprintf("- Relationship: %s --(%s)--> %s\n", edge.Source, edge.Type, edge.Target))
+
+			if len(nodes) > 0 {
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Entity: %s\n", e))
+				for _, node := range nodes {
+					if node.ID != e {
+						sb.WriteString(fmt.Sprintf("- Node: %s (Type: %s)\n", node.ID, node.Type))
+					}
+				}
+				for _, edge := range edges {
+					sb.WriteString(fmt.Sprintf("- Relationship: %s --(%s)--> %s\n", edge.Source, edge.Type, edge.Target))
+				}
+				results <- sb.String()
 			}
-			graphContext.WriteString("\n")
-		}
+			return nil
+		})
+	}
+
+	// Close results chan when all workers done
+	go func() {
+		_ = g.Wait()
+		close(results)
+	}()
+
+	var graphContext strings.Builder
+	for res := range results {
+		graphContext.WriteString(res)
+		graphContext.WriteString("\n")
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	context.Custom["graph_context"] = graphContext.String()
-
 	return nil
 }
 

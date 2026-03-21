@@ -58,9 +58,11 @@ func (p *TextStreamParser) ParseStream(ctx context.Context, r io.Reader, metadat
 		defer close(outChan)
 		
 		scanner := bufio.NewScanner(r)
-		// We use a custom split function if we want to chunk by specific bytes,
-		// but for general text, reading line by line and accumulating is safer for UTF-8.
-		
+		// Increase buffer to 1MB to handle exceptionally long lines (e.g., base64, minified logs)
+		const maxCapacity = 1 * 1024 * 1024
+		buf := make([]byte, 64*1024)
+		scanner.Buffer(buf, maxCapacity)
+
 		var sb strings.Builder
 		partIndex := 0
 

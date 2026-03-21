@@ -210,6 +210,29 @@ func (c *Container) Clear() *Container {
 	return c
 }
 
+// Close closes all initialized singleton services that implement io.Closer.
+// It returns a multi-error if any service fails to close.
+func (c *Container) Close() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	var errs []error
+	for _, svc := range c.services {
+		if svc.isSingleton && svc.isInitialized && svc.instance != nil {
+			if closer, ok := svc.instance.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to close some services: %v", errs)
+	}
+	return nil
+}
+
 // IsRegistered checks if a service is registered
 func (c *Container) IsRegistered(iface any) bool {
 	c.lock.RLock()

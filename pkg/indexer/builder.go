@@ -124,46 +124,40 @@ func (idx *defaultIndexer) IndexFile(ctx context.Context, filePath string) (*cor
 }
 
 func (idx *defaultIndexer) IndexDirectory(ctx context.Context, dirPath string, recursive bool) error {
-	var files []string
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if path != dirPath && !recursive {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Skip hidden files
-		if strings.HasPrefix(info.Name(), ".") {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to walk directory: %w", err)
-	}
-
-	if !idx.config.Concurrency {
-		for _, file := range files {
-			if _, err := idx.IndexFile(ctx, file); err != nil {
-				idx.logger.Error("failed to index file", err, map[string]interface{}{"path": file})
-			}
-		}
-		return nil
-	}
-
 	workers := idx.config.Workers
 	if workers <= 0 {
 		workers = 10
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
-	fileChan := make(chan string, len(files))
+	// Non-concurrent: Simple sequential processing
+	if !idx.config.Concurrency {
+		return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if path != dirPath && !recursive {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Skip hidden files
+			if strings.HasPrefix(info.Name(), ".") {
+				return nil
+			}
+			if _, err := idx.IndexFile(ctx, path); err != nil {
+				idx.logger.Error("failed to index file", err, map[string]interface{}{"path": path})
+			}
+			return nil
+		})
+	}
 
+	// Concurrent: Streaming Producer-Consumer
+	g, ctx := errgroup.WithContext(ctx)
+	// Small buffer to prevent memory pressure while keeping workers busy
+	fileChan := make(chan string, workers*2)
+
+	// Start workers (Consumers)
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
 			for file := range fileChan {
@@ -175,10 +169,32 @@ func (idx *defaultIndexer) IndexDirectory(ctx context.Context, dirPath string, r
 		})
 	}
 
-	for _, file := range files {
-		fileChan <- file
-	}
-	close(fileChan)
+	// Producer: Walk directory and stream files to channel
+	g.Go(func() error {
+		defer close(fileChan)
+		return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if path != dirPath && !recursive {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Skip hidden files
+			if strings.HasPrefix(info.Name(), ".") {
+				return nil
+			}
+
+			select {
+			case fileChan <- path:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
+	})
 
 	return g.Wait()
 }
@@ -288,30 +304,39 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	}
 
 	// 3. Fallback to defaults for missing components
-	workDir := "./data" // Use static default instead of mandatory parameter
+	workDir := "./data"
 	
-	// Check if workDir was set via an option (we'll add WithWorkDir below)
-	// For simplicity in this factory, we'll just ensure it's created.
 	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create work directory: %w", err)
+		return nil, fmt.Errorf("failed to create default work directory: %w", err)
 	}
 
 	if idx.chunker == nil {
-		tkChunker, _ := chunker.DefaultTokenChunker()
+		tkChunker, err := chunker.DefaultTokenChunker()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default token chunker: %w", err)
+		}
 		idx.chunker = chunker.NewSemanticChunker(tkChunker, 1000, 250, 50)
 	}
 
 	if idx.vectorStore == nil {
 		vecPath := filepath.Join(workDir, "gorag_vectors.db")
-		idx.vectorStore, _ = govector.NewStore(
+		vStore, err := govector.NewStore(
 			govector.WithDBPath(vecPath),
 			govector.WithDimension(1536),
 		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default vector store: %w", err)
+		}
+		idx.vectorStore = vStore
 	}
 
 	if idx.docStore == nil {
 		docPath := filepath.Join(workDir, "gorag_docs.db")
-		idx.docStore, _ = sqlite.NewDocStore(docPath)
+		dStore, err := sqlite.NewDocStore(docPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default doc store: %w", err)
+		}
+		idx.docStore = dStore
 	}
 
 	if err := idx.Init(); err != nil {
@@ -338,10 +363,14 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 
 	// Fallback logic
 	if idx.vectorStore == nil {
-		idx.vectorStore, _ = govector.DefaultStore()
+		vStore, err := govector.DefaultStore()
+		if err != nil { return nil, err }
+		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
-		idx.docStore, _ = sqlite.DefaultDocStore()
+		dStore, err := sqlite.DefaultDocStore()
+		if err != nil { return nil, err }
+		idx.docStore = dStore
 	}
 
 	if err := idx.Init(); err != nil {
@@ -367,10 +396,14 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	}
 
 	if idx.vectorStore == nil {
-		idx.vectorStore, _ = govector.DefaultStore()
+		vStore, err := govector.DefaultStore()
+		if err != nil { return nil, err }
+		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
-		idx.docStore, _ = sqlite.DefaultDocStore()
+		dStore, err := sqlite.DefaultDocStore()
+		if err != nil { return nil, err }
+		idx.docStore = dStore
 	}
 
 	if err := idx.Init(); err != nil {

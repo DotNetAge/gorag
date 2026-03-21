@@ -124,12 +124,12 @@ func TestGraphRetriever_Retrieve(t *testing.T) {
 	}, nil).Once()
 
 	// 2. Graph Search Mock
-	mGS.On("GetNeighbors", ctx, "Anthropic", 1, 10).Return(
+	mGS.On("GetNeighbors", mock.Anything, "Anthropic", 1, 10).Return(
 		[]*core.Node{{ID: "Dario Amodei", Type: "PERSON"}},
 		[]*core.Edge{{Source: "Dario Amodei", Target: "Anthropic", Type: "CEO_OF"}},
 		nil,
 	).Once()
-	mGS.On("GetNeighbors", ctx, "CEO", 1, 10).Return(
+	mGS.On("GetNeighbors", mock.Anything, "CEO", 1, 10).Return(
 		[]*core.Node{},
 		[]*core.Edge{},
 		nil,
@@ -137,8 +137,8 @@ func TestGraphRetriever_Retrieve(t *testing.T) {
 
 	// 3. Vector Search Mock
 	queryVec := []float32{0.1, 0.2, 0.3}
-	mEmb.On("Embed", ctx, []string{queryText}).Return([][]float32{queryVec}, nil).Once()
-	mVS.On("Search", ctx, queryVec, 5, mock.Anything).Return(
+	mEmb.On("Embed", mock.Anything, []string{queryText}).Return([][]float32{queryVec}, nil).Once()
+	mVS.On("Search", mock.Anything, queryVec, 5, mock.Anything).Return(
 		[]*core.Vector{{ID: "vec1", ChunkID: "chunk1"}},
 		[]float32{0.9},
 		nil,

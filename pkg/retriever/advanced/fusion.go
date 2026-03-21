@@ -11,12 +11,9 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
-	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	"github.com/DotNetAge/gorag/pkg/retrieval/fusion"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
-	"github.com/DotNetAge/gorag/pkg/steps/decompose"
 	"github.com/DotNetAge/gorag/pkg/steps/fuse"
-	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 )
 
@@ -56,7 +53,6 @@ func WithStore(s core.VectorStore) Option {
 }
 
 // DefaultAdvancedRetriever creates a best-practice Advanced RAG retriever.
-// It implements RAG-Fusion (Query Decomposition + RRF Fusion) for high-accuracy recall.
 func DefaultAdvancedRetriever(opts ...Option) (core.Retriever, error) {
 	options := &Options{
 		Logger: logging.DefaultNoopLogger(),
@@ -67,7 +63,6 @@ func DefaultAdvancedRetriever(opts ...Option) (core.Retriever, error) {
 		opt(options)
 	}
 
-	// Local Fallback for easy start if no enterprise store provided
 	vStore := options.VectorStore
 	if vStore == nil {
 		workDir := "./data"
@@ -85,6 +80,33 @@ func DefaultAdvancedRetriever(opts ...Option) (core.Retriever, error) {
 	return NewFusionRetriever(vStore, options.Embedder, options.LLM, options.TopK, options.Logger), nil
 }
 
+type decompositionStep struct {
+	decomposer core.QueryDecomposer
+	logger     logging.Logger
+}
+
+func (s *decompositionStep) Name() string { return "DecomposeWithFallback" }
+func (s *decompositionStep) Execute(ctx context.Context, rctx *core.RetrievalContext) error {
+	subQueries, err := s.decomposer.Decompose(ctx, rctx.Query)
+	if err != nil {
+		s.logger.Warn("query decomposition failed, falling back to original query", map[string]any{"error": err, "query": rctx.Query.Text})
+		rctx.Agentic.SubQueries = []string{rctx.Query.Text}
+		return nil
+	}
+	
+	if subQueries == nil || len(subQueries.SubQueries) == 0 {
+		rctx.Agentic.SubQueries = []string{rctx.Query.Text}
+	} else {
+		qs := subQueries.SubQueries
+		const maxSubQueries = 5
+		if len(qs) > maxSubQueries {
+			qs = qs[:maxSubQueries]
+		}
+		rctx.Agentic.SubQueries = qs
+	}
+	return nil
+}
+
 // NewFusionRetriever creates a new FusionRetriever for multi-perspective search.
 func NewFusionRetriever(
 	vectorStore core.VectorStore,
@@ -97,24 +119,35 @@ func NewFusionRetriever(
 		logger = logging.DefaultNoopLogger()
 	}
 
-	p := pipeline.New[*core.RetrievalContext]()
-	gen := answer.New(llm, answer.WithLogger(logger))
 	decomposer := query.NewDecomposer(llm, query.WithDecomposerLogger(logger))
-	fusionEngine := fusion.NewRRFFusionEngine()
+	return NewFusionRetrieverWithComponents(vectorStore, embedder, decomposer, topK, logger)
+}
 
-	// Step 1: Decompose query into sub-queries
-	p.AddStep(decompose.Decompose(decomposer, logger))
+// NewFusionRetrieverWithComponents allows injecting a specific decomposer for audit/testing.
+func NewFusionRetrieverWithComponents(
+	vectorStore core.VectorStore,
+	embedder embedding.Provider,
+	decomposer core.QueryDecomposer,
+	topK int,
+	logger logging.Logger,
+) core.Retriever {
+	if logger == nil {
+		logger = logging.DefaultNoopLogger()
+	}
+	
+	p := pipeline.New[*core.RetrievalContext]()
 
-	// Step 2: Multi-query search (implicitly handled by vector.Search)
+	// Step 1: Decompose query into sub-queries with defensive fallback
+	p.AddStep(&decompositionStep{decomposer: decomposer, logger: logger})
+
+	// Step 2: Multi-query search with Concurrency Control (Semaphore)
 	p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
-		TopK: topK,
+		TopK:        topK,
+		Concurrency: 3,
 	}))
 
-	// Step 3: RRF Fusion
-	p.AddStep(fuse.RRF(fusionEngine, topK, logger))
-
-	// Step 4: Generate final answer
-	p.AddStep(stepgen.Generate(gen, logger, nil))
+	// Step 3: Reciprocal Rank Fusion (RRF)
+	p.AddStep(fuse.RRF(fusion.NewRRFFusionEngine(), topK, logger))
 
 	return &fusionRetriever{pipeline: p}
 }
@@ -123,21 +156,20 @@ func (r *fusionRetriever) Retrieve(ctx context.Context, queries []string, topK i
 	results := make([]*core.RetrievalResult, 0, len(queries))
 
 	for _, q := range queries {
-		context := core.NewRetrievalContext(ctx, q)
-		
-		if err := r.pipeline.Execute(ctx, context); err != nil {
+		retrievalCtx := core.NewRetrievalContext(ctx, q)
+		if err := r.pipeline.Execute(ctx, retrievalCtx); err != nil {
 			return nil, err
 		}
 
 		var allChunks []*core.Chunk
-		for _, group := range context.RetrievedChunks {
+		for _, group := range retrievalCtx.RetrievedChunks {
 			allChunks = append(allChunks, group...)
 		}
 
 		res := &core.RetrievalResult{
 			Query:  q,
 			Chunks: allChunks,
-			Answer: context.Answer.Answer,
+			Answer: retrievalCtx.Answer.Answer,
 		}
 		results = append(results, res)
 	}

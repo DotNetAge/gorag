@@ -64,8 +64,8 @@ func TestSelfRAGRetriever_Refine(t *testing.T) {
 
 	// 1. Vector Search
 	queryVec := []float32{0.1, 0.2}
-	mEmb.On("Embed", ctx, []string{queryText}).Return([][]float32{queryVec}, nil).Once()
-	mVS.On("Search", ctx, queryVec, 5, mock.Anything).Return(
+	mEmb.On("Embed", mock.Anything, []string{queryText}).Return([][]float32{queryVec}, nil).Once()
+	mVS.On("Search", mock.Anything, queryVec, 5, mock.Anything).Return(
 		[]*core.Vector{{ID: "vec1", ChunkID: "chunk1"}},
 		[]float32{0.9},
 		nil,
