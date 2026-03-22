@@ -6,6 +6,7 @@
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
+  [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
   
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
@@ -31,14 +32,14 @@ From **GraphRAG** with automated triple extraction to **Agentic RAG** with self-
 
 GoRAG doesn't just give you tools; it gives you **pre-optimized strategies** as first-class citizens:
 
-| Strategy | When to use | Key Features |
-|----------|-------------|--------------|
-| **Native RAG** | Standard semantic search | Vector-only, fast, low cost |
-| **Graph RAG** | Complex relationship reasoning | Entities, Triples, Multi-hop reasoning |
-| **Self-RAG** | High accuracy requirements | Self-reflection, Hallucination detection |
-| **CRAG** | Handling ambiguous queries | Quality evaluation, fallback to Web Search |
-| **Fusion RAG**| Multi-faceted queries | Query rewriting, RRF fusion |
-| **Smart Router**| Dynamic workloads | Intent-based automatic dispatching |
+| Strategy         | When to use                    | Key Features                               |
+| ---------------- | ------------------------------ | ------------------------------------------ |
+| **Native RAG**   | Standard semantic search       | Vector-only, fast, low cost                |
+| **Graph RAG**    | Complex relationship reasoning | Entities, Triples, Multi-hop reasoning     |
+| **Self-RAG**     | High accuracy requirements     | Self-reflection, Hallucination detection   |
+| **CRAG**         | Handling ambiguous queries     | Quality evaluation, fallback to Web Search |
+| **Fusion RAG**   | Multi-faceted queries          | Query rewriting, RRF fusion                |
+| **Smart Router** | Dynamic workloads              | Intent-based automatic dispatching         |
 
 ---
 

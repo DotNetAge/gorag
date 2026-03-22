@@ -6,7 +6,8 @@
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
-  
+  [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
+
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
 
@@ -31,14 +32,14 @@
 
 GoRAG 不仅仅提供工具，更将**最佳实践**固化为标准组件：
 
-| 检索策略 | 适用场景 | 核心特性 |
-|----------|-------------|--------------|
-| **Native RAG** | 标准语义搜索 | 纯向量、高速、低成本 |
-| **Graph RAG** | 复杂关系推理 | 实体、三元组、多跳推理 |
-| **Self-RAG** | 高精度要求场景 | 自我反思、幻觉检测 |
-| **CRAG** | 处理模糊查询 | 质量评估、自动回退至 Web 搜索 |
-| **Fusion RAG**| 多维度复杂问题 | 查询重写、RRF 排序融合 |
-| **Smart Router**| 动态工作负载 | 基于意图的自动分流调度 |
+| 检索策略         | 适用场景       | 核心特性                      |
+| ---------------- | -------------- | ----------------------------- |
+| **Native RAG**   | 标准语义搜索   | 纯向量、高速、低成本          |
+| **Graph RAG**    | 复杂关系推理   | 实体、三元组、多跳推理        |
+| **Self-RAG**     | 高精度要求场景 | 自我反思、幻觉检测            |
+| **CRAG**         | 处理模糊查询   | 质量评估、自动回退至 Web 搜索 |
+| **Fusion RAG**   | 多维度复杂问题 | 查询重写、RRF 排序融合        |
+| **Smart Router** | 动态工作负载   | 基于意图的自动分流调度        |
 
 ---
 
