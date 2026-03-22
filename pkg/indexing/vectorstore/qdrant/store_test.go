@@ -37,6 +37,10 @@ func setupQdrantContainer(t *testing.T) (string, func()) {
 }
 
 func TestStore_Add_Search_Delete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping Qdrant integration test in short mode")
+	}
+
 	endpoint, cleanup := setupQdrantContainer(t)
 	defer cleanup()
 	if endpoint == "" {

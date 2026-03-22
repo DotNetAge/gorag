@@ -39,6 +39,10 @@ func (s *check) Execute(ctx context.Context, state *core.RetrievalContext) error
 		return nil
 	}
 
+	if state.Agentic == nil {
+		state.Agentic = core.NewAgenticState()
+	}
+
 	result, err := s.cache.CheckCache(ctx, state.Query)
 	if err != nil {
 		return nil
