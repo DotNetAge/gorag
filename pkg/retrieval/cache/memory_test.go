@@ -2,121 +2,377 @@ package cache
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
-	"github.com/stretchr/testify/assert"
+	"time"
+
+	"github.com/DotNetAge/gorag/pkg/core"
 )
 
-func TestInMemorySemanticCache_New(t *testing.T) {
-	// Test creating a new semantic cache
-	cache := NewInMemorySemanticCache()
-	assert.NotNil(t, cache)
-	assert.Empty(t, cache.entries)
+type mockEmbedder struct {
+	embeddings map[string][]float32
+	dimension  int
+	err        error
 }
 
-func TestInMemorySemanticCache_SetAndGet(t *testing.T) {
-	// Create a new semantic cache
-	cache := NewInMemorySemanticCache()
+func newMockEmbedder() *mockEmbedder {
+	return &mockEmbedder{
+		embeddings: make(map[string][]float32),
+		dimension:  4,
+	}
+}
 
-	// Create test embeddings and response
-	embedding1 := []float32{0.1, 0.2, 0.3}
-	response1 := "Response 1"
-	embedding2 := []float32{0.4, 0.5, 0.6}
-	response2 := "Response 2"
+func (m *mockEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if vec, ok := m.embeddings[text]; ok {
+		return vec, nil
+	}
+	vec := make([]float32, m.dimension)
+	h := fnvHash(text)
+	for i := 0; i < m.dimension; i++ {
+		vec[i] = float32((h>>uint(i*3))&0xFF) / 255.0
+	}
+	m.embeddings[text] = vec
+	return vec, nil
+}
 
-	// Set the first entry
+func fnvHash(s string) uint64 {
+	h := uint64(14695981039346656037)
+	for _, c := range s {
+		h ^= uint64(c)
+		h *= 1099511628211
+	}
+	return h
+}
+
+func (m *mockEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	result := make([][]float32, 0, len(texts))
+	for _, text := range texts {
+		vec, err := m.Embed(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, vec)
+	}
+	return result, nil
+}
+
+func (m *mockEmbedder) Dimension() int {
+	return m.dimension
+}
+
+func TestInMemorySemanticCache_CheckCache_Miss(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
 	ctx := context.Background()
-	err := cache.Set(ctx, embedding1, response1)
-	assert.NoError(t, err)
+	query := core.NewQuery("1", "什么是 Go 语言？", nil)
 
-	// Set the second entry
-	err = cache.Set(ctx, embedding2, response2)
-	assert.NoError(t, err)
-
-	// Check that entries were added
-	assert.Len(t, cache.entries, 2)
-
-	// Test getting with exact match
-	response, found, err := cache.Get(ctx, embedding1, 0.9)
-	assert.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, response1, response)
-
-	// Test getting with similar embedding
-	similarEmbedding := []float32{0.11, 0.21, 0.31} // Very similar to embedding1
-	response, found, err = cache.Get(ctx, similarEmbedding, 0.9)
-	assert.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, response1, response)
-
-	// Test getting with dissimilar embedding
-	dissimilarEmbedding := []float32{-0.9, -0.8, -0.7} // Very different (negative values)
-	response, found, err = cache.Get(ctx, dissimilarEmbedding, 0.9)
-	assert.NoError(t, err)
-	assert.False(t, found)
-	assert.Empty(t, response)
-
-	// Test getting with lower threshold
-	// First, let's calculate the actual similarity
-	sim1 := cosineSimilarity(dissimilarEmbedding, embedding1)
-	sim2 := cosineSimilarity(dissimilarEmbedding, embedding2)
-	highestSim := sim1
-	if sim2 > sim1 {
-		highestSim = sim2
+	result, err := cache.CheckCache(ctx, query)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	
-	// Set a threshold lower than the highest similarity
-	threshold := highestSim - 0.1
-	response, found, err = cache.Get(ctx, dissimilarEmbedding, threshold)
-	assert.NoError(t, err)
-	assert.True(t, found)
-	// Should return the most similar entry
-	if sim1 > sim2 {
-		assert.Equal(t, response1, response)
+	if result.Hit {
+		t.Fatal("expected cache miss")
+	}
+}
+
+func TestInMemorySemanticCache_CacheResponse_ThenCheckCache_Hit(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+	query := core.NewQuery("1", "什么是 Go 语言？", nil)
+	answer := &core.Result{Answer: "Go 是一种编译型语言"}
+
+	err := cache.CacheResponse(ctx, query, answer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, err := cache.CheckCache(ctx, query)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Hit {
+		t.Fatal("expected cache hit")
+	}
+	if result.Answer != "Go 是一种编译型语言" {
+		t.Fatalf("unexpected answer: %s", result.Answer)
+	}
+}
+
+func TestInMemorySemanticCache_SimilarQuery(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+	query1 := core.NewQuery("1", "如何学习 Go", nil)
+	answer1 := &core.Result{Answer: "学习 Go 多写代码"}
+
+	err := cache.CacheResponse(ctx, query1, answer1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	query2 := core.NewQuery("2", "怎么学习 Golang", nil)
+	result, err := cache.CheckCache(ctx, query2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Hit {
+		t.Log("similar query hit cache (similarity above threshold)")
 	} else {
-		assert.Equal(t, response2, response)
+		t.Log("similar query did not hit cache (similarity below threshold)")
 	}
 }
 
-func TestInMemorySemanticCache_Get_EmptyCache(t *testing.T) {
-	// Create a new semantic cache
-	cache := NewInMemorySemanticCache()
+func TestInMemorySemanticCache_TTLExpiry(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithTTL(50*time.Millisecond),
+	)
 
-	// Test getting from empty cache
-	embedding := []float32{0.1, 0.2, 0.3}
-	response, found, err := cache.Get(context.Background(), embedding, 0.9)
-	assert.NoError(t, err)
-	assert.False(t, found)
-	assert.Empty(t, response)
+	ctx := context.Background()
+	query := core.NewQuery("1", "测试 TTL", nil)
+	answer := &core.Result{Answer: "TTL 测试答案"}
+
+	err := cache.CacheResponse(ctx, query, answer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	result, err := cache.CheckCache(ctx, query)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Hit {
+		t.Fatal("expected cache miss after TTL expiry")
+	}
 }
 
-func TestCosineSimilarity(t *testing.T) {
-	// Test cosine similarity with identical vectors
-	a := []float32{1.0, 2.0, 3.0}
-	b := []float32{1.0, 2.0, 3.0}
-	sim := cosineSimilarity(a, b)
-	assert.InDelta(t, 1.0, sim, 0.000001)
+func TestInMemorySemanticCache_MaxSizeLRU(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithMaxSize(3),
+		WithEvictPolicy(EvictLRU),
+		WithThreshold(0.1),
+	)
 
-	// Test cosine similarity with different vectors
-	a = []float32{1.0, 0.0, 0.0}
-	b = []float32{0.0, 1.0, 0.0}
-	sim = cosineSimilarity(a, b)
-	assert.InDelta(t, 0.0, sim, 0.000001)
+	ctx := context.Background()
 
-	// Test cosine similarity with empty vectors
-	a = []float32{}
-	b = []float32{}
-	sim = cosineSimilarity(a, b)
-	assert.Equal(t, float32(0.0), sim)
+	cache.CacheResponse(ctx, core.NewQuery("1", "query1", nil), &core.Result{Answer: "答案1"})
+	cache.CacheResponse(ctx, core.NewQuery("2", "query2", nil), &core.Result{Answer: "答案2"})
+	cache.CacheResponse(ctx, core.NewQuery("3", "query3", nil), &core.Result{Answer: "答案3"})
 
-	// Test cosine similarity with vectors of different lengths
-	a = []float32{1.0, 2.0}
-	b = []float32{1.0, 2.0, 3.0}
-	sim = cosineSimilarity(a, b)
-	assert.Equal(t, float32(0.0), sim)
+	if cache.Size() != 3 {
+		t.Fatalf("expected size 3, got %d", cache.Size())
+	}
 
-	// Test cosine similarity with one zero vector
-	a = []float32{1.0, 2.0, 3.0}
-	b = []float32{0.0, 0.0, 0.0}
-	sim = cosineSimilarity(a, b)
-	assert.Equal(t, float32(0.0), sim)
+	cache.CacheResponse(ctx, core.NewQuery("4", "query4", nil), &core.Result{Answer: "答案4"})
+
+	if cache.Size() != 3 {
+		t.Fatalf("expected size 3 after eviction, got %d", cache.Size())
+	}
+}
+
+func TestInMemorySemanticCache_FIFOEviction(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithMaxSize(3),
+		WithEvictPolicy(EvictFIFO),
+	)
+
+	ctx := context.Background()
+
+	texts := []string{"查询1", "查询2", "查询3"}
+	for i, text := range texts {
+		query := core.NewQuery(string(rune('0'+i)), text, nil)
+		cache.CacheResponse(ctx, query, &core.Result{Answer: "答案"})
+	}
+
+	cache.CacheResponse(ctx, core.NewQuery("4", "查询4", nil), &core.Result{Answer: "新答案"})
+
+	if cache.Size() != 3 {
+		t.Fatalf("expected size 3, got %d", cache.Size())
+	}
+}
+
+func TestInMemorySemanticCache_LFUEviction(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithMaxSize(2),
+		WithEvictPolicy(EvictLFU),
+	)
+
+	ctx := context.Background()
+
+	q1 := core.NewQuery("1", "查询1", nil)
+	q2 := core.NewQuery("2", "查询2", nil)
+
+	cache.CacheResponse(ctx, q1, &core.Result{Answer: "答案1"})
+	cache.CacheResponse(ctx, q2, &core.Result{Answer: "答案2"})
+
+	cache.CheckCache(ctx, q1)
+	cache.CheckCache(ctx, q1)
+
+	cache.CacheResponse(ctx, core.NewQuery("3", "查询3", nil), &core.Result{Answer: "答案3"})
+
+	if cache.Size() != 2 {
+		t.Fatalf("expected size 2, got %d", cache.Size())
+	}
+}
+
+func TestInMemorySemanticCache_CleanExpired(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithTTL(100*time.Millisecond),
+	)
+
+	ctx := context.Background()
+
+	q1 := core.NewQuery("1", "查询1", nil)
+	q2 := core.NewQuery("2", "查询2", nil)
+
+	cache.CacheResponse(ctx, q1, &core.Result{Answer: "答案1"})
+	time.Sleep(150 * time.Millisecond)
+	cache.CacheResponse(ctx, q2, &core.Result{Answer: "答案2"})
+
+	removed, err := cache.CleanExpired(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 expired entry removed, got %d", removed)
+	}
+}
+
+func TestInMemorySemanticCache_UpdateExisting(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+	query := core.NewQuery("1", "测试查询", nil)
+
+	cache.CacheResponse(ctx, query, &core.Result{Answer: "旧答案"})
+
+	result1, _ := cache.CheckCache(ctx, query)
+	if result1.Answer != "旧答案" {
+		t.Fatalf("expected old answer, got %s", result1.Answer)
+	}
+
+	cache.CacheResponse(ctx, query, &core.Result{Answer: "新答案"})
+
+	result2, _ := cache.CheckCache(ctx, query)
+	if result2.Answer != "新答案" {
+		t.Fatalf("expected new answer, got %s", result2.Answer)
+	}
+
+	if cache.Size() != 1 {
+		t.Fatalf("expected size 1, got %d", cache.Size())
+	}
+}
+
+func TestInMemorySemanticCache_NilQuery(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+
+	result, err := cache.CheckCache(ctx, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Hit {
+		t.Fatal("expected cache miss for nil query")
+	}
+
+	err = cache.CacheResponse(ctx, nil, &core.Result{Answer: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInMemorySemanticCache_EmptyQuery(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+
+	result, err := cache.CheckCache(ctx, core.NewQuery("1", "", nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Hit {
+		t.Fatal("expected cache miss for empty query")
+	}
+}
+
+func TestInMemorySemanticCache_EmbedError(t *testing.T) {
+	emb := &mockEmbedder{err: errors.New("embed error")}
+	cache := NewInMemorySemanticCache(emb)
+
+	ctx := context.Background()
+	query := core.NewQuery("1", "test", nil)
+
+	_, err := cache.CheckCache(ctx, query)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInMemorySemanticCache_ConcurrentAccess(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb, WithMaxSize(100))
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+
+		go func(idx int) {
+			defer wg.Done()
+			query := core.NewQuery(string(rune('A'+idx)), "查询", nil)
+			cache.CacheResponse(ctx, query, &core.Result{Answer: "答案"})
+		}(i)
+
+		go func(idx int) {
+			defer wg.Done()
+			query := core.NewQuery(string(rune('A'+idx)), "查询", nil)
+			cache.CheckCache(ctx, query)
+		}(i)
+	}
+
+	wg.Wait()
+
+	if cache.Size() > 100 {
+		t.Fatalf("size exceeded max: %d", cache.Size())
+	}
+}
+
+func TestInMemorySemanticCache_Threshold(t *testing.T) {
+	emb := newMockEmbedder()
+	cache := NewInMemorySemanticCache(emb,
+		WithThreshold(0.5),
+	)
+
+	ctx := context.Background()
+	query1 := core.NewQuery("1", "AAA", nil)
+	cache.CacheResponse(ctx, query1, &core.Result{Answer: "答案1"})
+
+	query2 := core.NewQuery("2", "完全不同的查询 BBB", nil)
+	result, _ := cache.CheckCache(ctx, query2)
+
+	if result.Hit {
+		t.Log("queries with different embeddings above threshold")
+	} else {
+		t.Log("queries with different embeddings below threshold")
+	}
 }

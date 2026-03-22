@@ -36,11 +36,33 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexer"
 	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
+	"github.com/DotNetAge/gorag/pkg/logging"
+	"github.com/DotNetAge/gorag/pkg/retrieval/cache"
 	"github.com/DotNetAge/gorag/pkg/retriever/advanced"
 	"github.com/DotNetAge/gorag/pkg/retriever/agentic"
 	"github.com/DotNetAge/gorag/pkg/retriever/graph"
 	"github.com/DotNetAge/gorag/pkg/retriever/native"
 )
+
+type providerToEmbedderAdapter struct {
+	provider embedding.Provider
+}
+
+func (a *providerToEmbedderAdapter) Embed(ctx context.Context, text string) ([]float32, error) {
+	results, err := a.provider.Embed(ctx, []string{text})
+	if err != nil || len(results) == 0 {
+		return nil, err
+	}
+	return results[0], nil
+}
+
+func (a *providerToEmbedderAdapter) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	return a.provider.Embed(ctx, texts)
+}
+
+func (a *providerToEmbedderAdapter) Dimension() int {
+	return a.provider.Dimension()
+}
 
 // RAGConfig is the single source of truth for all RAG modes.
 // It holds configuration parameters for RAG system initialization.
@@ -71,7 +93,13 @@ type RAGConfig struct {
 	// TopK specifies the default number of top results to retrieve during search.
 	TopK int
 
-	// 4. Internal Component Injection
+	// 4. Semantic Cache
+	// EnableSemanticCache enables semantic caching for improved performance.
+	EnableSemanticCache bool
+	// SemanticCacheType specifies the cache backend type: "memory" or "bolt".
+	SemanticCacheType string
+
+	// 5. Internal Component Injection
 	// embedder is the internally injected embedding provider
 	embedder embedding.Provider
 	// llmClient is the internally injected LLM client
@@ -118,6 +146,19 @@ func WithParsers(p ...core.Parser) RAGOption { return func(c *RAGConfig) { c.par
 
 // WithContainer injects a custom dependency injection container.
 func WithContainer(ctr *di.Container) RAGOption { return func(c *RAGConfig) { c.container = ctr } }
+
+// WithSemanticCache enables semantic caching with specified backend type.
+// cacheType can be "memory" (default, in-memory) or "bolt" (persistent).
+func WithSemanticCache(enable bool, cacheType ...string) RAGOption {
+	return func(c *RAGConfig) {
+		c.EnableSemanticCache = enable
+		if len(cacheType) > 0 {
+			c.SemanticCacheType = cacheType[0]
+		} else {
+			c.SemanticCacheType = "memory"
+		}
+	}
+}
 
 // RAG application interface defines the main entry point for RAG operations.
 type RAG interface {
@@ -195,18 +236,24 @@ func DefaultGraphRAG(opts ...RAGOption) (RAG, error) {
 // It configures mode-specific parameters and then delegates to buildRAG for construction.
 func buildRAGWithDefaults(mode string, opts ...RAGOption) (RAG, error) {
 	cfg := &RAGConfig{
-		WorkDir:      "./data",
-		VectorDBType: "govector",
-		Dimension:    1536,
-		TopK:         5,
+		WorkDir:             "./data",
+		VectorDBType:        "govector",
+		Dimension:           1536,
+		TopK:                5,
+		EnableSemanticCache: false,
+		SemanticCacheType:   "memory",
 	}
 
 	// Mode-specific defaults
 	switch mode {
 	case "advanced":
 		cfg.TopK = 10
+		cfg.EnableSemanticCache = true
 	case "agentic":
 		cfg.TopK = 5
+		cfg.EnableSemanticCache = true
+	case "graph":
+		cfg.EnableSemanticCache = false
 	}
 
 	for _, opt := range opts {
@@ -246,6 +293,11 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 	// Align Dimension with Embedder if possible
 	if embedder != nil && cfg.Dimension == 1536 {
 		cfg.Dimension = embedder.Dimension()
+	}
+
+	var semanticEmbedder core.Embedder
+	if embedder != nil {
+		semanticEmbedder = &providerToEmbedderAdapter{provider: embedder}
 	}
 
 	// 1. Resolve or Register Persistence Singleton Resources
@@ -345,5 +397,30 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 3. Wrap retriever with semantic cache if enabled
+	if cfg.EnableSemanticCache && semanticEmbedder != nil {
+		var semanticCache core.SemanticCache
+		cachePath := fmt.Sprintf("%s/cache.db", cfg.WorkDir)
+
+		switch cfg.SemanticCacheType {
+		case "bolt":
+			semanticCache, err = cache.NewBoltSemanticCache(
+				semanticEmbedder,
+				cache.WithBoltDBPath(cachePath),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create bolt semantic cache: %w", err)
+			}
+		default: // "memory"
+			semanticCache = cache.NewInMemorySemanticCache(
+				semanticEmbedder,
+				cache.WithDBPath(cachePath),
+			)
+		}
+
+		ret = cache.NewRetrieverWithCache(ret, semanticCache, logging.DefaultNoopLogger())
+	}
+
 	return &defaultRAG{indexer: idx, retriever: ret, container: ctr}, nil
 }

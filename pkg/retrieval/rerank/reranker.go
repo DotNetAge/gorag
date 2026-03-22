@@ -95,6 +95,10 @@ func (r *CrossEncoder) Enhance(ctx context.Context, query *core.Query, chunks []
 		r.collector.RecordDuration("cross_encoder_rerank", time.Since(start), nil)
 	}()
 
+	if query == nil {
+		return nil, fmt.Errorf("rerank: query is nil")
+	}
+
 	if len(chunks) == 0 {
 		return chunks, nil
 	}

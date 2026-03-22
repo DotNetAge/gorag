@@ -174,11 +174,14 @@ func splitIntoSentences(text string) []string {
 
 // isSentenceEnd checks if a rune marks a sentence end.
 func isSentenceEnd(r rune, text string, pos int) bool {
-	if r != '.' && r != '!' && r != '?' {
-		return false
+	if r == '.' || r == '!' || r == '?' || r == '。' || r == '！' || r == '？' {
+		if pos+1 < len(text) {
+			nextRune := rune(text[pos+1])
+			if unicode.IsLower(nextRune) || unicode.Is(unicode.Scripts["Han"], nextRune) {
+				return false
+			}
+		}
+		return true
 	}
-	if pos+1 < len(text) && unicode.IsLower(rune(text[pos+1])) {
-		return false
-	}
-	return true
+	return false
 }

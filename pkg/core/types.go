@@ -35,9 +35,9 @@ const (
 
 // IntentResult holds the result of intent classification.
 type IntentResult struct {
-	Intent     IntentType
-	Confidence float32
-	Reason     string
+	Intent     IntentType `json:"intent"`
+	Confidence float32    `json:"confidence"`
+	Reason     string     `json:"reason"`
 }
 
 // RetrievalResult represents a search query's retrieved chunks and scores.
@@ -64,14 +64,14 @@ func NewRetrievalResult(id, queryID string, chunks []*Chunk, scores []float32, m
 
 // EntityExtractionResult holds the result of entity extraction.
 type EntityExtractionResult struct {
-	Entities []string
+	Entities []string `json:"entities"`
 }
 
 // DecompositionResult holds the result of query decomposition.
 type DecompositionResult struct {
-	SubQueries []string
-	Reasoning  string
-	IsComplex  bool
+	SubQueries []string `json:"sub_queries"`
+	Reasoning  string   `json:"reasoning"`
+	IsComplex  bool     `json:"is_complex"`
 }
 
 // CRAGLabel represents the relevance label for CRAG.

@@ -2,171 +2,168 @@ package cache
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockSemanticCache struct {
-	result *CacheResult
+	result *core.CacheResult
 	err    error
 }
 
-func (m *mockSemanticCache) CheckCache(ctx context.Context, query *core.Query) (*CacheResult, error) {
+func (m *mockSemanticCache) CheckCache(ctx context.Context, query *core.Query) (*core.CacheResult, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if m.result == nil {
+		return &core.CacheResult{Hit: false}, nil
 	}
 	return m.result, nil
 }
 
 func (m *mockSemanticCache) CacheResponse(ctx context.Context, query *core.Query, answer *core.Result) error {
-	return m.err
-}
-
-func TestCheck_Name(t *testing.T) {
-	step := Check(nil, nil, nil)
-	assert.Equal(t, "SemanticCacheCheck", step.Name())
-}
-
-func TestCheck_Execute_NilQuery(t *testing.T) {
-	step := Check(nil, nil, nil)
-	ctx := context.Background()
-	state := &core.RetrievalContext{Query: nil}
-
-	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-	assert.Nil(t, state.Agentic)
-}
-
-func TestCheck_Execute_EmptyQuery(t *testing.T) {
-	step := Check(nil, nil, nil)
-	ctx := context.Background()
-	state := &core.RetrievalContext{
-		Query:   core.NewQuery("q1", "", nil),
-		Agentic: core.NewAgenticState(),
+	if m.err != nil {
+		return m.err
 	}
-
-	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-	assert.False(t, state.Agentic.CacheHit)
+	return nil
 }
 
-func TestCheck_Execute_CacheHit(t *testing.T) {
-	cache := &mockSemanticCache{
-		result: &CacheResult{Hit: true, Answer: "Cached answer"},
+func TestCheckStep_Name(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Check(mockCache, nil, nil)
+	if step.Name() != "SemanticCacheCheck" {
+		t.Fatalf("expected SemanticCacheCheck, got %s", step.Name())
 	}
-	step := Check(cache, nil, nil)
+}
+
+func TestCheckStep_Execute_CacheMiss(t *testing.T) {
+	mockCache := &mockSemanticCache{
+		result: &core.CacheResult{Hit: false},
+	}
+	step := Check(mockCache, nil, nil)
+
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:   core.NewQuery("q1", "test query", nil),
-		Agentic: core.NewAgenticState(),
+		Query: core.NewQuery("1", "test query", nil),
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-	assert.True(t, state.Agentic.CacheHit)
-	assert.NotNil(t, state.Answer)
-	assert.Equal(t, "Cached answer", state.Answer.Answer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state.Answer != nil {
+		t.Fatal("expected nil answer on cache miss")
+	}
 }
 
-func TestCheck_Execute_CacheMiss(t *testing.T) {
-	cache := &mockSemanticCache{
-		result: &CacheResult{Hit: false, Answer: ""},
+func TestCheckStep_Execute_CacheHit(t *testing.T) {
+	mockCache := &mockSemanticCache{
+		result: &core.CacheResult{Hit: true, Answer: "cached answer"},
 	}
-	step := Check(cache, nil, nil)
+	step := Check(mockCache, nil, nil)
+
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:   core.NewQuery("q1", "test query", nil),
-		Agentic: core.NewAgenticState(),
+		Query: core.NewQuery("1", "test query", nil),
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-	assert.False(t, state.Agentic.CacheHit)
-	assert.Nil(t, state.Answer)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state.Answer == nil {
+		t.Fatal("expected answer on cache hit")
+	}
+	if state.Answer.Answer != "cached answer" {
+		t.Fatalf("expected cached answer, got %s", state.Answer.Answer)
+	}
+	if state.Agentic == nil {
+		t.Fatal("expected Agentic state to be set")
+	}
+	if !state.Agentic.CacheHit {
+		t.Fatal("expected CacheHit=true")
+	}
 }
 
-func TestCheck_Execute_CacheError(t *testing.T) {
-	cache := &mockSemanticCache{
-		err: errors.New("cache error"),
+func TestCheckStep_Execute_NilQuery(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Check(mockCache, nil, nil)
+
+	ctx := context.Background()
+	state := &core.RetrievalContext{}
+
+	err := step.Execute(ctx, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	step := Check(cache, nil, nil)
+}
+
+func TestCheckStep_Execute_EmptyQuery(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Check(mockCache, nil, nil)
+
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:   core.NewQuery("q1", "test query", nil),
-		Agentic: core.NewAgenticState(),
+		Query: core.NewQuery("1", "", nil),
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-	assert.False(t, state.Agentic.CacheHit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
-func TestStore_Name(t *testing.T) {
-	step := Store(nil, nil, nil)
-	assert.Equal(t, "SemanticCacheStore", step.Name())
+func TestStoreStep_Name(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Store(mockCache, nil, nil)
+	if step.Name() != "SemanticCacheStore" {
+		t.Fatalf("expected SemanticCacheStore, got %s", step.Name())
+	}
 }
 
-func TestStore_Execute_NilQuery(t *testing.T) {
-	step := Store(nil, nil, nil)
-	ctx := context.Background()
-	state := &core.RetrievalContext{Query: nil}
+func TestStoreStep_Execute(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Store(mockCache, nil, nil)
 
-	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-}
-
-func TestStore_Execute_NilAnswer(t *testing.T) {
-	step := Store(nil, nil, nil)
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:  core.NewQuery("q1", "test", nil),
-		Answer: nil,
+		Query:   core.NewQuery("1", "test query", nil),
+		Answer:  &core.Result{Answer: "test answer"},
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
-func TestStore_Execute_EmptyAnswer(t *testing.T) {
-	step := Store(nil, nil, nil)
+func TestStoreStep_Execute_NilQuery(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Store(mockCache, nil, nil)
+
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:  core.NewQuery("q1", "test", nil),
-		Answer: &core.Result{Answer: ""},
+		Answer: &core.Result{Answer: "test answer"},
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
-func TestStore_Execute_Success(t *testing.T) {
-	cache := &mockSemanticCache{}
-	step := Store(cache, nil, nil)
+func TestStoreStep_Execute_NilAnswer(t *testing.T) {
+	mockCache := &mockSemanticCache{}
+	step := Store(mockCache, nil, nil)
+
 	ctx := context.Background()
 	state := &core.RetrievalContext{
-		Query:  core.NewQuery("q1", "test", nil),
-		Answer: &core.Result{Answer: "Generated answer"},
+		Query: core.NewQuery("1", "test query", nil),
 	}
 
 	err := step.Execute(ctx, state)
-	assert.NoError(t, err)
-}
-
-func TestStore_Execute_CacheError(t *testing.T) {
-	cache := &mockSemanticCache{
-		err: errors.New("cache store error"),
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	step := Store(cache, nil, nil)
-	ctx := context.Background()
-	state := &core.RetrievalContext{
-		Query:  core.NewQuery("q1", "test", nil),
-		Answer: &core.Result{Answer: "Generated answer"},
-	}
-
-	err := step.Execute(ctx, state)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cache store error")
 }

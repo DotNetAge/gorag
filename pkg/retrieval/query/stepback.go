@@ -30,6 +30,10 @@ func NewStepBack(llm chat.Client) *StepBack {
 
 // GenerateStepBackQuery generates a step-back query.
 func (s *StepBack) GenerateStepBackQuery(ctx context.Context, query *core.Query) (*core.Query, error) {
+	if query == nil || query.Text == "" {
+		return nil, fmt.Errorf("query is nil or empty")
+	}
+
 	prompt := fmt.Sprintf(`You are an expert at core.
 The user is asking a very specific question. To answer it correctly, we first need to retrieve broader background information.
 Please write a "Step-back" question that asks for the underlying principles, concepts, or historical background related to the original question.

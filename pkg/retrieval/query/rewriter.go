@@ -22,6 +22,10 @@ func NewRewriter(llm chat.Client) *Rewriter {
 
 // Rewrite rewrites the user's query to improve search quality.
 func (r *Rewriter) Rewrite(ctx context.Context, query *core.Query) (*core.Query, error) {
+	if query == nil || query.Text == "" {
+		return nil, fmt.Errorf("query is nil or empty")
+	}
+
 	prompt := fmt.Sprintf(`You are an AI assistant helping to rewrite a search query.
 Please rewrite the following query to make it clearer, more specific, and better suited for a vector database search.
 Remove conversational filler words. Resolve pronouns if context permits.

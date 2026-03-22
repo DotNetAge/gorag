@@ -8,24 +8,13 @@ import (
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
-// SemanticCache is an interface for cache operations.
-type SemanticCache interface {
-	CheckCache(ctx context.Context, query *core.Query) (*CacheResult, error)
-	CacheResponse(ctx context.Context, query *core.Query, answer *core.Result) error
-}
-
-type CacheResult struct {
-	Hit    bool
-	Answer string
-}
-
 type check struct {
-	cache   SemanticCache
+	cache   core.SemanticCache
 	logger  logging.Logger
 	metrics core.Metrics
 }
 
-func Check(cache SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
+func Check(cache core.SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
@@ -39,32 +28,40 @@ func (s *check) Execute(ctx context.Context, state *core.RetrievalContext) error
 		return nil
 	}
 
-	if state.Agentic == nil {
-		state.Agentic = core.NewAgenticState()
-	}
-
 	result, err := s.cache.CheckCache(ctx, state.Query)
 	if err != nil {
-		return nil
+		s.logger.Debug("cache check failed", map[string]any{"error": err.Error()})
+		return err
 	}
 
 	if result.Hit {
+		s.logger.Debug("cache hit", map[string]any{
+			"query": state.Query.Text,
+		})
+		state.Answer = &core.Result{
+			Answer: result.Answer,
+			Score:  1.0,
+		}
+		if state.Agentic == nil {
+			state.Agentic = core.NewAgenticState()
+		}
 		state.Agentic.CacheHit = true
-		state.Answer = &core.Result{Answer: result.Answer}
-	} else {
-		state.Agentic.CacheHit = false
+	}
+
+	if s.metrics != nil {
+		s.metrics.RecordSearchResult("cache", 1)
 	}
 
 	return nil
 }
 
 type store struct {
-	cache   SemanticCache
+	cache   core.SemanticCache
 	logger  logging.Logger
 	metrics core.Metrics
 }
 
-func Store(cache SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
+func Store(cache core.SemanticCache, logger logging.Logger, metrics core.Metrics) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
@@ -74,8 +71,27 @@ func Store(cache SemanticCache, logger logging.Logger, metrics core.Metrics) pip
 func (s *store) Name() string { return "SemanticCacheStore" }
 
 func (s *store) Execute(ctx context.Context, state *core.RetrievalContext) error {
-	if state.Query == nil || state.Answer == nil || state.Answer.Answer == "" {
+	if state.Query == nil || state.Query.Text == "" {
 		return nil
 	}
-	return s.cache.CacheResponse(ctx, state.Query, state.Answer)
+
+	if state.Answer == nil || state.Answer.Answer == "" {
+		return nil
+	}
+
+	err := s.cache.CacheResponse(ctx, state.Query, state.Answer)
+	if err != nil {
+		s.logger.Debug("cache store failed", map[string]any{"error": err.Error()})
+		return err
+	}
+
+	s.logger.Debug("response cached", map[string]any{
+		"query": state.Query.Text,
+	})
+
+	if s.metrics != nil {
+		s.metrics.RecordVectorStoreOperations("cache_set", 1)
+	}
+
+	return nil
 }

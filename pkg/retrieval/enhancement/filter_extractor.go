@@ -24,6 +24,10 @@ func NewFilterExtractor(llm chat.Client) *FilterExtractor {
 
 // Extract extracts key-value filters from the user's query.
 func (f *FilterExtractor) Extract(ctx context.Context, query *core.Query) (map[string]any, error) {
+	if query == nil {
+		return make(map[string]any), nil
+	}
+
 	prompt := fmt.Sprintf(`You are a metadata extraction tool.
 Extract explicit filtering conditions from the user's query (e.g., year, author, document type, company name).
 Return ONLY a valid JSON object containing the key-value pairs. 

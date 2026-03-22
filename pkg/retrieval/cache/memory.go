@@ -4,59 +4,289 @@ import (
 	"context"
 	"math"
 	"sync"
+	"time"
+
+	"github.com/DotNetAge/gorag/pkg/core"
 )
 
-var _ SemanticCache = (*InMemorySemanticCache)(nil)
+var _ core.SemanticCache = (*InMemorySemanticCache)(nil)
 
 type cacheEntry struct {
+	Key       string
+	QueryText string
 	Embedding []float32
 	Response  string
+	CreatedAt time.Time
+	LastHitAt time.Time
+	HitCount  int
 }
 
-// InMemorySemanticCache is a lightweight, concurrent-safe semantic cache.
-// For production, this could be backed by Redis + Vector Search (like RedisVL).
-type InMemorySemanticCache struct {
-	entries []cacheEntry
-	lock    sync.RWMutex
+type EvictPolicy string
+
+const (
+	EvictLRU  EvictPolicy = "lru"
+	EvictFIFO EvictPolicy = "fifo"
+	EvictLFU  EvictPolicy = "lfu"
+)
+
+type Config struct {
+	MaxSize     int
+	TTL         time.Duration
+	Threshold   float32
+	EvictPolicy EvictPolicy
+	DBPath      string
 }
 
-func NewInMemorySemanticCache() *InMemorySemanticCache {
-	return &InMemorySemanticCache{
-		entries: make([]cacheEntry, 0),
-	}
-}
+type CacheOption func(*Config)
 
-func (c *InMemorySemanticCache) Get(ctx context.Context, queryEmbedding []float32, threshold float32) (string, bool, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	var bestMatch string
-	var highestSim float32 = -1.0
-
-	for _, entry := range c.entries {
-		sim := cosineSimilarity(queryEmbedding, entry.Embedding)
-		if sim > highestSim {
-			highestSim = sim
-			bestMatch = entry.Response
+func WithMaxSize(n int) CacheOption {
+	return func(c *Config) {
+		if n > 0 {
+			c.MaxSize = n
 		}
 	}
-
-	if highestSim >= threshold {
-		return bestMatch, true, nil
-	}
-
-	return "", false, nil
 }
 
-func (c *InMemorySemanticCache) Set(ctx context.Context, queryEmbedding []float32, response string) error {
+func WithTTL(d time.Duration) CacheOption {
+	return func(c *Config) {
+		if d > 0 {
+			c.TTL = d
+		}
+	}
+}
+
+func WithThreshold(threshold float32) CacheOption {
+	return func(c *Config) {
+		if threshold > 0 && threshold <= 1.0 {
+			c.Threshold = threshold
+		}
+	}
+}
+
+func WithEvictPolicy(p EvictPolicy) CacheOption {
+	return func(c *Config) {
+		c.EvictPolicy = p
+	}
+}
+
+func WithDBPath(path string) CacheOption {
+	return func(c *Config) {
+		c.DBPath = path
+	}
+}
+
+func defaultConfig() *Config {
+	return &Config{
+		MaxSize:     10000,
+		TTL:         time.Hour,
+		Threshold:   0.98,
+		EvictPolicy: EvictLRU,
+		DBPath:      "gorag_cache.db",
+	}
+}
+
+type InMemorySemanticCache struct {
+	embedder core.Embedder
+	config   *Config
+	entries  map[string]*cacheEntry
+	order    []string
+	lock     sync.RWMutex
+}
+
+func NewInMemorySemanticCache(embedder core.Embedder, opts ...CacheOption) *InMemorySemanticCache {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	return &InMemorySemanticCache{
+		embedder: embedder,
+		config:   cfg,
+		entries:  make(map[string]*cacheEntry),
+		order:    make([]string, 0, cfg.MaxSize),
+	}
+}
+
+func NewInMemorySemanticCacheWithConfig(embedder core.Embedder, cfg *Config) *InMemorySemanticCache {
+	if cfg == nil {
+		cfg = defaultConfig()
+	}
+
+	return &InMemorySemanticCache{
+		embedder: embedder,
+		config:   cfg,
+		entries:  make(map[string]*cacheEntry),
+		order:    make([]string, 0, cfg.MaxSize),
+	}
+}
+
+func (c *InMemorySemanticCache) CheckCache(ctx context.Context, query *core.Query) (*core.CacheResult, error) {
+	if query == nil || query.Text == "" {
+		return &core.CacheResult{Hit: false}, nil
+	}
+
+	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
+	if err != nil {
+		return nil, err
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.entries = append(c.entries, cacheEntry{
+	var bestMatchKey string
+	var bestMatch *cacheEntry
+	var highestSim float32 = -1.0
+
+	now := time.Now()
+	for key, entry := range c.entries {
+		if c.config.TTL > 0 && now.Sub(entry.CreatedAt) > c.config.TTL {
+			continue
+		}
+
+		sim := cosineSimilarity(queryEmbedding, entry.Embedding)
+		if sim > highestSim {
+			highestSim = sim
+			bestMatchKey = key
+			bestMatch = entry
+		}
+	}
+
+	if bestMatch != nil && highestSim >= c.config.Threshold {
+		bestMatch.LastHitAt = now
+		bestMatch.HitCount++
+
+		if c.config.EvictPolicy == EvictLRU {
+			c.moveToEnd(bestMatchKey)
+		}
+
+		return &core.CacheResult{
+			Hit:    true,
+			Answer: bestMatch.Response,
+		}, nil
+	}
+
+	return &core.CacheResult{Hit: false}, nil
+}
+
+func (c *InMemorySemanticCache) moveToEnd(key string) {
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			c.order = append(c.order, key)
+			break
+		}
+	}
+}
+
+func (c *InMemorySemanticCache) CacheResponse(ctx context.Context, query *core.Query, answer *core.Result) error {
+	if query == nil || query.Text == "" || answer == nil {
+		return nil
+	}
+
+	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
+	if err != nil {
+		return err
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	key := query.Text
+
+	if existing, exists := c.entries[key]; exists {
+		existing.Embedding = queryEmbedding
+		existing.Response = answer.Answer
+		existing.LastHitAt = time.Now()
+		return nil
+	}
+
+	if len(c.entries) >= c.config.MaxSize {
+		c.evict()
+	}
+
+	entry := &cacheEntry{
+		Key:       key,
+		QueryText: query.Text,
 		Embedding: queryEmbedding,
-		Response:  response,
-	})
+		Response:  answer.Answer,
+		CreatedAt: time.Now(),
+		LastHitAt: time.Now(),
+		HitCount:  0,
+	}
+
+	c.entries[key] = entry
+	c.order = append(c.order, key)
+
 	return nil
+}
+
+func (c *InMemorySemanticCache) evict() {
+	if len(c.order) == 0 {
+		return
+	}
+
+	var victim string
+
+	switch c.config.EvictPolicy {
+	case EvictLRU:
+		victim = c.order[0]
+	case EvictFIFO:
+		victim = c.order[0]
+	case EvictLFU:
+		victim = c.findLFUVictim()
+	default:
+		victim = c.order[0]
+	}
+
+	delete(c.entries, victim)
+	c.order = c.order[1:]
+}
+
+func (c *InMemorySemanticCache) findLFUVictim() string {
+	var victim string
+	var minHits int = int(^uint(0) >> 1)
+
+	for _, key := range c.order {
+		entry := c.entries[key]
+		if entry.HitCount < minHits {
+			minHits = entry.HitCount
+			victim = key
+		}
+	}
+
+	return victim
+}
+
+func (c *InMemorySemanticCache) CleanExpired(ctx context.Context) (int, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.config.TTL <= 0 {
+		return 0, nil
+	}
+
+	now := time.Now()
+	removed := 0
+	var newOrder []string
+
+	for _, key := range c.order {
+		entry := c.entries[key]
+		if now.Sub(entry.CreatedAt) > c.config.TTL {
+			delete(c.entries, key)
+			removed++
+		} else {
+			newOrder = append(newOrder, key)
+		}
+	}
+
+	c.order = newOrder
+	return removed, nil
+}
+
+func (c *InMemorySemanticCache) Size() int {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return len(c.entries)
 }
 
 func cosineSimilarity(a, b []float32) float32 {
