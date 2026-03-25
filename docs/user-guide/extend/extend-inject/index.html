@@ -1,0 +1,3614 @@
+
+<!DOCTYPE html>
+
+<html class="no-js" lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<meta content="GoRAG - A modern, production-ready, high-performance RAG framework for Go" name="description"/>
+<meta content="Ray" name="author"/>
+<link href="../di/" rel="prev"/>
+<link href="../tools/" rel="next"/>
+<link href="../../../assets/images/favicon.png" rel="icon"/>
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.6" name="generator"/>
+<title>依赖注入扩展 - GoRAG 开发者文档</title>
+<link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet"/>
+<link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" rel="stylesheet"/>
+<script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+</head>
+<body data-md-color-accent="red" data-md-color-primary="red" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#_1">
+          跳转至
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header" data-md-component="header">
+<nav aria-label="页眉" class="md-header__inner md-grid">
+<a aria-label="GoRAG 开发者文档" class="md-header__button md-logo" data-md-component="logo" href="../../.." title="GoRAG 开发者文档">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            GoRAG 开发者文档
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              依赖注入扩展
+            
+          </span>
+</div>
+</div>
+</div>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="搜索" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="搜索" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="查找" class="md-search__options">
+<button aria-label="清空当前内容" class="md-search__icon md-icon" tabindex="-1" title="清空当前内容" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+<div class="md-search__suggest" data-md-component="search-suggest"></div>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/DotNetAge/gorag" title="前往仓库">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<nav aria-label="标签" class="md-tabs" data-md-component="tabs">
+<div class="md-grid">
+<ul class="md-tabs__list">
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="../../../advantages/">
+          
+  
+  
+  GoRAG
+
+        </a>
+</li>
+<li class="md-tabs__item md-tabs__item--active">
+<a class="md-tabs__link" href="../../core/concepts/">
+          
+  
+  
+  开发指南
+
+        </a>
+</li>
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="../../../examples/">
+          
+  
+  
+  示例和教程
+
+        </a>
+</li>
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="../../../api/">
+          
+  
+  
+  API参考
+
+        </a>
+</li>
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="../../../concepts/basic/">
+          
+  
+  
+  RAG 系统原理
+
+        </a>
+</li>
+</ul>
+</div>
+</nav>
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="导航栏" class="md-nav md-nav--primary md-nav--lifted" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="GoRAG 开发者文档" class="md-nav__button md-logo" data-md-component="logo" href="../../.." title="GoRAG 开发者文档">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+    GoRAG 开发者文档
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/DotNetAge/gorag" title="前往仓库">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    GoRAG
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_1_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    GoRAG
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../advantages/">
+<span class="md-ellipsis">
+    
+  
+    RAG 的优势与必要性
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../challenges/">
+<span class="md-ellipsis">
+    
+  
+    RAG 面临的挑战
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../intro/">
+<span class="md-ellipsis">
+    
+  
+    为什么要选择GORAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../features/">
+<span class="md-ellipsis">
+    
+  
+    核心优势
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_1_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_1_5" id="__nav_1_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    快速上手
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_1_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_1_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    快速上手
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/getting-started/">
+<span class="md-ellipsis">
+    
+  
+    轻松构建你的RAG应用
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/simple-pattern/">
+<span class="md-ellipsis">
+    
+  
+    RAG模式
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/options/">
+<span class="md-ellipsis">
+    
+  
+    RAG核心配置
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/native-rag/">
+<span class="md-ellipsis">
+    
+  
+    Native RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/advanced-rag/">
+<span class="md-ellipsis">
+    
+  
+    Advanced RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/graph-rag/">
+<span class="md-ellipsis">
+    
+  
+    Graph RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/agentic-rag/">
+<span class="md-ellipsis">
+    
+  
+    Agentic RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/self-rag/">
+<span class="md-ellipsis">
+    
+  
+    Self-RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../quickstart/crag/">
+<span class="md-ellipsis">
+    
+  
+    CRAG
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    开发指南
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    开发指南
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/concepts/">
+<span class="md-ellipsis">
+    
+  
+    核心概念
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/base/">
+<span class="md-ellipsis">
+    
+  
+    RAG基础理论
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/pipline/">
+<span class="md-ellipsis">
+    
+  
+    管道化架构
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/model/">
+<span class="md-ellipsis">
+    
+  
+    数据模型
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/intent-router/">
+<span class="md-ellipsis">
+    
+  
+    意图分类与路由
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../core/evaluate/">
+<span class="md-ellipsis">
+    
+  
+    评估指标体系
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_7" id="__nav_2_7_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    应用配置
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_7_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    应用配置
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configure/">
+<span class="md-ellipsis">
+    
+  
+    应用配置
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configure/preconfig/">
+<span class="md-ellipsis">
+    
+  
+    预配置应用详解
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configure/rag-types/">
+<span class="md-ellipsis">
+    
+  
+    RAG应用类型对比
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configure/store/">
+<span class="md-ellipsis">
+    
+  
+    存储后端选择
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configure/customize/">
+<span class="md-ellipsis">
+    
+  
+    自定义配置指南
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_8" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_8" id="__nav_2_8_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    索引阶段
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_8_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    索引阶段
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/">
+<span class="md-ellipsis">
+    
+  
+    索引器模块
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/arch/">
+<span class="md-ellipsis">
+    
+  
+    索引器架构
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/chunker/">
+<span class="md-ellipsis">
+    
+  
+    分块策略
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/concurrency/">
+<span class="md-ellipsis">
+    
+  
+    并发与性能
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_8_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_8_5" id="__nav_2_8_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    处理步骤
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_8_5_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_8_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    处理步骤
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/intro/">
+<span class="md-ellipsis">
+    
+  
+    管道步骤详解
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/embedding/">
+<span class="md-ellipsis">
+    
+  
+    向量嵌入步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/doc/">
+<span class="md-ellipsis">
+    
+  
+    文档解析步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/chunker/">
+<span class="md-ellipsis">
+    
+  
+    分块处理步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/discovery/">
+<span class="md-ellipsis">
+    
+  
+    文件发现步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/multi/">
+<span class="md-ellipsis">
+    
+  
+    多存储步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/steps/triples/">
+<span class="md-ellipsis">
+    
+  
+    三元组提取步骤
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_8_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_8_6" id="__nav_2_8_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    解释器
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_8_6_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_8_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    解释器
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/intro/">
+<span class="md-ellipsis">
+    
+  
+    解析器系统
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/interface/">
+<span class="md-ellipsis">
+    
+  
+    解析器接口设计
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/flow/">
+<span class="md-ellipsis">
+    
+  
+    流式处理机制
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/customize/">
+<span class="md-ellipsis">
+    
+  
+    自定义解析器开发
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_8_6_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_8_6_5" id="__nav_2_8_6_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    内置解释器
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_8_6_5_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_2_8_6_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    内置解释器
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/internal-impl.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/code.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/data.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/doc.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/media.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/parsers/text.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_8_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_8_7" id="__nav_2_8_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    存储
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_8_7_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_8_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    存储
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/store/intro/">
+<span class="md-ellipsis">
+    
+  
+    存储管理
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/store/config/">
+<span class="md-ellipsis">
+    
+  
+    存储配置与优化
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/store/vector/">
+<span class="md-ellipsis">
+    
+  
+    向量存储
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/store/doc/">
+<span class="md-ellipsis">
+    
+  
+    文档存储
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../indexer/store/graph/">
+<span class="md-ellipsis">
+    
+  
+    图谱存储
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9" id="__nav_2_9_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    检索阶段
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    检索阶段
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../02-retrievers/">
+<span class="md-ellipsis">
+    
+  
+    查询阶段
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/intro/">
+<span class="md-ellipsis">
+    
+  
+    检索器模块
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_3" id="__nav_2_9_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    检索器
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_3_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    检索器
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/native/">
+<span class="md-ellipsis">
+    
+  
+    Native RAG检索器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/advanced/">
+<span class="md-ellipsis">
+    
+  
+    Advanced RAG检索器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/graph/">
+<span class="md-ellipsis">
+    
+  
+    Graph RAG检索器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/agentic/">
+<span class="md-ellipsis">
+    
+  
+    智能代理检索器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/selfrag/">
+<span class="md-ellipsis">
+    
+  
+    Self-RAG检索器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../retrievers/crag/">
+<span class="md-ellipsis">
+    
+  
+    C-RAG检索器
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_4" id="__nav_2_9_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    处理步骤
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    处理步骤
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../steps/rerank/">
+<span class="md-ellipsis">
+    
+  
+    Rerank Step - 结果重排序步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../steps/fusion/">
+<span class="md-ellipsis">
+    
+  
+    Fusion Step - 多路召回融合步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../steps/rewrite/">
+<span class="md-ellipsis">
+    
+  
+    Rewrite Step - 查询重写步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../steps/filter/">
+<span class="md-ellipsis">
+    
+  
+    Filter Step
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_5" id="__nav_2_9_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    缓存组件
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_5_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    缓存组件
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/cache/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    Semantic Cache - 语义缓存
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/cache/01-lru/">
+<span class="md-ellipsis">
+    
+  
+    LRU 缓存策略
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/cache/02-ttl/">
+<span class="md-ellipsis">
+    
+  
+    TTL 缓存策略
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/cache/03-bolt/">
+<span class="md-ellipsis">
+    
+  
+    BoltDB 持久化缓存
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_6" id="__nav_2_9_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    查询组件
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_6_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    查询组件
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/query/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    Query Processing - 查询处理
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/citation/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    Citation Generator - 引用生成器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/enhancement/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    Retrieval Enhancement - 检索增强
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/expand/01-parent-doc/">
+<span class="md-ellipsis">
+    
+  
+    Parent Document Expansion - 父文档扩展
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_7" id="__nav_2_9_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    结果生成
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_7_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    结果生成
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/answer/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    答案生成器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/rerank/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    结果重排
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/fusion/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    RRF 融合算法 - Reciprocal Rank Fusion
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/evaluator/01-overview/">
+<span class="md-ellipsis">
+    
+  
+    RAG Evaluator - RAG 评估器
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_9_8" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_9_8" id="__nav_2_9_8_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    工具组件
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_9_8_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_2_9_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    工具组件
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/observability.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../components/logger.md">
+<span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_2_10" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_10" id="__nav_2_10_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    扩展开发
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_2_10_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_10">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    扩展开发
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../">
+<span class="md-ellipsis">
+    
+  
+    扩展开发
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../steps/">
+<span class="md-ellipsis">
+    
+  
+    自定义管道步骤
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../plugin/">
+<span class="md-ellipsis">
+    
+  
+    插件系统开发
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../di/">
+<span class="md-ellipsis">
+    
+  
+    依赖注入容器
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    依赖注入扩展
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    依赖注入扩展
+  
+
+    
+  </span>
+</a>
+<nav aria-label="目录" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_2">
+<span class="md-ellipsis">
+      
+        项目结构
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_3">
+<span class="md-ellipsis">
+      
+        核心组件
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_4">
+<span class="md-ellipsis">
+      
+        架构总览
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_5">
+<span class="md-ellipsis">
+      
+        详细组件分析
+      
+    </span>
+</a>
+<nav aria-label="详细组件分析" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_6">
+<span class="md-ellipsis">
+      
+        容器类与生命周期
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_7">
+<span class="md-ellipsis">
+      
+        选项化注册与全局默认容器
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_8">
+<span class="md-ellipsis">
+      
+        自定义服务注册与配置
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_9">
+<span class="md-ellipsis">
+      
+        服务替换与装饰器模式
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_10">
+<span class="md-ellipsis">
+      
+        生命周期管理与并发安全
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#goraggo">
+<span class="md-ellipsis">
+      
+        应用层集成示例（从 gorag.go 观察）
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_11">
+<span class="md-ellipsis">
+      
+        依赖关系分析
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_12">
+<span class="md-ellipsis">
+      
+        性能考量
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_13">
+<span class="md-ellipsis">
+      
+        故障排查指南
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_14">
+<span class="md-ellipsis">
+      
+        结论
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_15">
+<span class="md-ellipsis">
+      
+        附录
+      
+    </span>
+</a>
+<nav aria-label="附录" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_16">
+<span class="md-ellipsis">
+      
+        最佳实践清单
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_17">
+<span class="md-ellipsis">
+      
+        性能优化建议
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ioc">
+<span class="md-ellipsis">
+      
+        IoC容器生命周期管理指南
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tools/">
+<span class="md-ellipsis">
+    
+  
+    代理和工具系统
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../test/">
+<span class="md-ellipsis">
+    
+  
+    扩展测试和验证
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_11" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_11" id="__nav_2_11_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    评估与监控
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_11_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_11">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    评估与监控
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/">
+<span class="md-ellipsis">
+    
+  
+    评估和监控
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/logger/">
+<span class="md-ellipsis">
+    
+  
+    日志记录系统
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/evaluator/">
+<span class="md-ellipsis">
+    
+  
+    评估器实现
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/performance/">
+<span class="md-ellipsis">
+    
+  
+    性能监控
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/tracking/">
+<span class="md-ellipsis">
+    
+  
+    分布式追踪
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../observability/doctor/">
+<span class="md-ellipsis">
+    
+  
+    合规性测试框架
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2_12" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2_12" id="__nav_2_12_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    常见问题
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_12_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_2_12">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    常见问题
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/01_multiple_instances/">
+<span class="md-ellipsis">
+    
+  
+    如何在同一个项目中构建多个 GoRAG 实例？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/02_custom_parser/">
+<span class="md-ellipsis">
+    
+  
+    如何自定义 Parser 增加新的文件类型支持？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/03_custom_step/">
+<span class="md-ellipsis">
+    
+  
+    如何自定义 Step 为 GoRAG 增加新的处理步骤？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/04_custom_vectorstore/">
+<span class="md-ellipsis">
+    
+  
+    如何增加新的向量数据库支持 (VectorStore)？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/05_custom_docstore/">
+<span class="md-ellipsis">
+    
+  
+    如何增加新的文档数据库支持 (DocumentStore)？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/06_custom_graphstore/">
+<span class="md-ellipsis">
+    
+  
+    如何增加新的图数据库支持 (GraphStore)？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/07_cypher_graph/">
+<span class="md-ellipsis">
+    
+  
+    如何定义 CypherGraph 进行高级图检索？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/08_observability/">
+<span class="md-ellipsis">
+    
+  
+    如何获取系统内核的可观测性数据 (Observability)？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/09_custom_logger/">
+<span class="md-ellipsis">
+    
+  
+    如何更改自定义的日志记录器 (Logger)？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/10_custom_embedder/">
+<span class="md-ellipsis">
+    
+  
+    如何更换其它的 Embedding 模型？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/11_resilience/">
+<span class="md-ellipsis">
+    
+  
+    如何增加弹性包装器 (Resilience) 提高系统稳定性？
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../howto/12_custom_tool/">
+<span class="md-ellipsis">
+    
+  
+    如何为 Agent 增加自定义工具 (Custom Tool)？
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    示例和教程
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    示例和教程
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/">
+<span class="md-ellipsis">
+    
+  
+    示例和教程
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/base/">
+<span class="md-ellipsis">
+    
+  
+    基础使用示例
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/advanced/">
+<span class="md-ellipsis">
+    
+  
+    高级配置示例
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/optimize/">
+<span class="md-ellipsis">
+    
+  
+    性能优化实战
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/flow/">
+<span class="md-ellipsis">
+    
+  
+    完整工作流程示例
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/customize/">
+<span class="md-ellipsis">
+    
+  
+    自定义开发示例
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../examples/thirdparty/">
+<span class="md-ellipsis">
+    
+  
+    第三方服务集成示例
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    API参考
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    API参考
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/">
+<span class="md-ellipsis">
+    
+  
+    API参考
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/core/">
+<span class="md-ellipsis">
+    
+  
+    核心接口
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/rag-app/">
+<span class="md-ellipsis">
+    
+  
+    RAG应用API
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/indexer/">
+<span class="md-ellipsis">
+    
+  
+    检索器API
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/parser/">
+<span class="md-ellipsis">
+    
+  
+    解析器API
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/store/">
+<span class="md-ellipsis">
+    
+  
+    存储API
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/retriever/">
+<span class="md-ellipsis">
+    
+  
+    索引器API
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../api/steps/">
+<span class="md-ellipsis">
+    
+  
+    管道步骤API
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    RAG 系统原理
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    RAG 系统原理
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    1. 基础理论
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_1_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    1. 基础理论
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/basic/">
+<span class="md-ellipsis">
+    
+  
+    RAG 工作原理
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/architecture/">
+<span class="md-ellipsis">
+    
+  
+    RAG架构理论
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    2. 数据处理与索引流水线
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    2. 数据处理与索引流水线
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/index-overview/">
+<span class="md-ellipsis">
+    
+  
+    索引总览
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/document-parsing/">
+<span class="md-ellipsis">
+    
+  
+    文档解析
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/advanced-preprocessing/">
+<span class="md-ellipsis">
+    
+  
+    高级预处理与语义增强
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/data-cleaning/">
+<span class="md-ellipsis">
+    
+  
+    数据清洗与增强
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/chunker/">
+<span class="md-ellipsis">
+    
+  
+    语义分块策略
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/embedding/">
+<span class="md-ellipsis">
+    
+  
+    向量化表示
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_2_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_2_7" id="__nav_5_2_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    元数据与存储
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_2_7_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_5_2_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    元数据与存储
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/metadata/">
+<span class="md-ellipsis">
+    
+  
+    元数据提取 (Metadata Extraction)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/vector-db/">
+<span class="md-ellipsis">
+    
+  
+    向量数据库 (Vector Database)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/DocStore/">
+<span class="md-ellipsis">
+    
+  
+    DocStore（文档存储）
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    3. 检索技术与架构
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_3_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    3. 检索技术与架构
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/retrieval/">
+<span class="md-ellipsis">
+    
+  
+    检索架构理论
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/vector-retrieval/">
+<span class="md-ellipsis">
+    
+  
+    密集检索 (Dense)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/keyword-retrieval/">
+<span class="md-ellipsis">
+    
+  
+    稀疏检索 (Sparse)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_3_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_3_4" id="__nav_5_3_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    混合检索与 RRF
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_3_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_5_3_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    混合检索与 RRF
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/hybrid-search/">
+<span class="md-ellipsis">
+    
+  
+    混合检索 (Hybrid Search)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/rrf/">
+<span class="md-ellipsis">
+    
+  
+    倒数排名融合 (RRF)
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_3_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_3_5" id="__nav_5_3_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    检索增强技术
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_3_5_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_5_3_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    检索增强技术
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/enhance/">
+<span class="md-ellipsis">
+    
+  
+    检索增强理论 (Retrieval Enhancement)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/rerank/">
+<span class="md-ellipsis">
+    
+  
+    结果重排（Reranking）
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/context-compress/">
+<span class="md-ellipsis">
+    
+  
+    上下文压缩 (Context Compression)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/parent-doc/">
+<span class="md-ellipsis">
+    
+  
+    父子文档检索 (Parent Document Retrieval)
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    4. 查询处理与意图对齐
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_4_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    4. 查询处理与意图对齐
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/query-transformation/">
+<span class="md-ellipsis">
+    
+  
+    查询变换总览
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/hyde/">
+<span class="md-ellipsis">
+    
+  
+    假设性文档 (HyDE)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/multi-query/">
+<span class="md-ellipsis">
+    
+  
+    多查询生成 (Multi-Query)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/cypher/">
+<span class="md-ellipsis">
+    
+  
+    语义化图谱查询 (Cypher)
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    5. RAG 范式演进
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    5. RAG 范式演进
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/naive-rag/">
+<span class="md-ellipsis">
+    
+  
+    1. 经典范式 (Naive RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/advanced-rag/">
+<span class="md-ellipsis">
+    
+  
+    2. 进阶范式 (Advanced RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/modular-rag/">
+<span class="md-ellipsis">
+    
+  
+    3. 模块化范式 (Modular RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/self-rag/">
+<span class="md-ellipsis">
+    
+  
+    4. 自我反思范式 (Self-Reflective)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/graph-rag/">
+<span class="md-ellipsis">
+    
+  
+    5. 图增强范式 (Graph-based)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/agentic-rag/">
+<span class="md-ellipsis">
+    
+  
+    6. 智能体范式 (Agentic RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/multimodal-rag/">
+<span class="md-ellipsis">
+    
+  
+    7. 多模态范式 (Multimodal RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_5_8" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_5_8" id="__nav_5_5_8_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    技术深度探索
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_5_8_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_5_5_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    技术深度探索
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/multi-hop-rag/">
+<span class="md-ellipsis">
+    
+  
+    多跳迭代检索（Multi-Hop RAG）原理及应用详解
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/light-rag/">
+<span class="md-ellipsis">
+    
+  
+    LightRAG（轻量级图检索增强生成）
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/hippo-rag/">
+<span class="md-ellipsis">
+    
+  
+    HippoRAG（海马体启发的 RAG）
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_6" id="__nav_5_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    6. 评估体系与调优
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_6_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    6. 评估体系与调优
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/evaluation-triad/">
+<span class="md-ellipsis">
+    
+  
+    评估方法论 (RAG Triad)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/evaluation/">
+<span class="md-ellipsis">
+    
+  
+    核心评估指标
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/benchmark/">
+<span class="md-ellipsis">
+    
+  
+    评测基准 (Benchmark)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/optimization/">
+<span class="md-ellipsis">
+    
+  
+    性能优化与调优
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_7" id="__nav_5_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    7. 前沿探索
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_7_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    7. 前沿探索
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/memory/">
+<span class="md-ellipsis">
+    
+  
+    RAG 记忆机制 (Memory in RAG)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/context-eng/">
+<span class="md-ellipsis">
+    
+  
+    上下文工程 (Context Engineering)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/long-context/">
+<span class="md-ellipsis">
+    
+  
+    长上下文 vs RAG
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../concepts/rag-agent/">
+<span class="md-ellipsis">
+    
+  
+    RAG Agent 架构
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="目录" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_2">
+<span class="md-ellipsis">
+      
+        项目结构
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_3">
+<span class="md-ellipsis">
+      
+        核心组件
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_4">
+<span class="md-ellipsis">
+      
+        架构总览
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_5">
+<span class="md-ellipsis">
+      
+        详细组件分析
+      
+    </span>
+</a>
+<nav aria-label="详细组件分析" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_6">
+<span class="md-ellipsis">
+      
+        容器类与生命周期
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_7">
+<span class="md-ellipsis">
+      
+        选项化注册与全局默认容器
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_8">
+<span class="md-ellipsis">
+      
+        自定义服务注册与配置
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_9">
+<span class="md-ellipsis">
+      
+        服务替换与装饰器模式
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_10">
+<span class="md-ellipsis">
+      
+        生命周期管理与并发安全
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#goraggo">
+<span class="md-ellipsis">
+      
+        应用层集成示例（从 gorag.go 观察）
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_11">
+<span class="md-ellipsis">
+      
+        依赖关系分析
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_12">
+<span class="md-ellipsis">
+      
+        性能考量
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_13">
+<span class="md-ellipsis">
+      
+        故障排查指南
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_14">
+<span class="md-ellipsis">
+      
+        结论
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_15">
+<span class="md-ellipsis">
+      
+        附录
+      
+    </span>
+</a>
+<nav aria-label="附录" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_16">
+<span class="md-ellipsis">
+      
+        最佳实践清单
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#_17">
+<span class="md-ellipsis">
+      
+        性能优化建议
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ioc">
+<span class="md-ellipsis">
+      
+        IoC容器生命周期管理指南
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="_1">依赖注入扩展<a class="headerlink" href="#_1" title="Permanent link">¶</a></h1>
+<p>本指南面向希望在 GoRAG 中扩展依赖注入（DI）系统的开发者，目标是帮助你：
+- 理解 DI 容器的架构与生命周期管理
+- 掌握服务注册、替换与装饰器模式的实现方式
+- 学会扩展容器以支持新的服务类型与依赖关系
+- 了解最佳实践与性能优化技巧，确保扩展的兼容性与稳定性</p>
+<p>GoRAG 的 DI 容器采用"接口 + 工厂函数"的轻量设计，支持单例与瞬态两种生命周期，并提供全局默认容器与选项化构建能力，便于在不同模块中统一管理依赖。<strong>最新版本增强了资源池化和生命周期管理功能，支持IoC容器的完整生命周期管理。</strong></p>
+<h2 id="_2">项目结构<a class="headerlink" href="#_2" title="Permanent link">¶</a></h2>
+<p>围绕 DI 扩展的相关文件与职责如下：
+- pkg/di/container.go：DI 容器主体，提供注册、解析、生命周期管理等核心能力
+- pkg/di/options.go：容器选项（WithSingleton、WithTransient、WithInstance、NewWithOptions）
+- pkg/di/container_test.go：对容器行为的单元测试，覆盖注册、解析、生命周期、错误处理等
+- pkg/core/interfaces.go：核心接口定义，用于指导服务注册与替换
+- pkg/resilience/decorators.go：装饰器模式示例（限于 pipeline 步骤包装），可借鉴到 DI 场景
+- gorag.go：应用入口与预设构建逻辑，展示如何在业务层组织服务</p>
+<div class="mermaid">graph TB
+    subgraph "DI 核心"
+        C["Container&lt;br/&gt;注册/解析/生命周期管理"]
+        O["Options&lt;br/&gt;WithSingleton/WithTransient/WithInstance/NewWithOptions"]
+        CL["Close&lt;br/&gt;生命周期关闭管理"]
+    end
+    subgraph "应用层"
+        G["gorag.go&lt;br/&gt;RAG 预设与构建"]
+        IF["core/interfaces.go&lt;br/&gt;核心接口"]
+    end
+    subgraph "扩展示例"
+        D["resilience/decorators.go&lt;br/&gt;装饰器模式"]
+    end
+    C --&gt; O
+    C --&gt; CL
+    G --&gt; C
+    G --&gt; IF
+    D -. 可复用到 DI 装饰 .-&gt; C
+</div>
+<h2 id="_3">核心组件<a class="headerlink" href="#_3" title="Permanent link">¶</a></h2>
+<ul>
+<li>Container：容器主体，内部以接口类型为键存储服务元数据（工厂函数、是否单例、是否已初始化）</li>
+<li>service：服务元数据，包含实例、工厂、单例标记与初始化状态</li>
+<li>全局默认容器：通过 Default() 提供单例容器，配合 Register/Resolve 等便捷函数</li>
+<li>Options：以函数式选项的方式批量注册服务，支持单例、瞬态与已有实例</li>
+<li><strong>新增</strong>：Close方法支持IoC容器的完整生命周期管理，自动关闭实现了io.Closer接口的单例服务</li>
+</ul>
+<p>关键能力与特性：
+- 注册阶段校验接口类型，支持指针到接口类型的自动解包
+- 解析阶段区分单例与瞬态；单例采用双检锁与懒初始化
+- 提供类型安全的解析与断言工具（ResolveTyped、MustResolveTyped）
+- 支持批量注册 RegisterServices 与 RegisterDefaultServices
+- 提供 Clear 清空与 IsRegistered 检查
+- <strong>新增</strong>：支持IoC容器生命周期管理，自动关闭实现了io.Closer接口的单例服务
+- <strong>新增</strong>：泛型注册和解析方法，提供更好的类型安全</p>
+<h2 id="_4">架构总览<a class="headerlink" href="#_4" title="Permanent link">¶</a></h2>
+<p>下图展示了 DI 容器在系统中的位置与交互关系，以及与应用层和核心接口的关系。</p>
+<div class="mermaid">sequenceDiagram
+    participant App as "应用层"
+    participant DI as "DI 容器"
+    participant IF as "核心接口"
+    participant Impl as "具体实现"
+    App-&gt;&gt;DI : "注册服务单例/瞬态/实例"
+    DI--&gt;&gt;App : "注册完成"
+    App-&gt;&gt;DI : "解析服务"
+    alt 单例且未初始化
+        DI-&gt;&gt;Impl : "调用工厂函数创建实例"
+        DI--&gt;&gt;App : "返回实例"
+    else 瞬态
+        DI-&gt;&gt;Impl : "每次调用工厂函数创建新实例"
+        DI--&gt;&gt;App : "返回新实例"
+    else 单例且已初始化
+        DI--&gt;&gt;App : "直接返回缓存实例"
+    end
+    App-&gt;&gt;IF : "以接口形式使用服务"
+    App-&gt;&gt;DI : "应用关闭"
+    DI-&gt;&gt;Impl : "自动关闭实现了io.Closer的单例服务"
+</div>
+<h2 id="_5">详细组件分析<a class="headerlink" href="#_5" title="Permanent link">¶</a></h2>
+<h3 id="_6">容器类与生命周期<a class="headerlink" href="#_6" title="Permanent link">¶</a></h3>
+<ul>
+<li>类型与字段</li>
+<li>Container：持有服务映射与读写锁</li>
+<li>service：封装实例、工厂、单例标记与初始化状态</li>
+<li>关键流程</li>
+<li>Register：注册接口与工厂，记录 isSingleton</li>
+<li>RegisterInstance：注册现有实例，标记 isSingleton=true 且 isInitialized=true</li>
+<li>Resolve：根据接口类型查找服务；单例需懒初始化并支持双检锁；瞬态每次调用工厂</li>
+<li>ResolveTyped/MustResolveTyped：类型安全解析与断言</li>
+<li>RegisterServices：批量注册</li>
+<li>Clear/IsRegistered：清空与查询</li>
+<li><strong>新增</strong>：Close：关闭所有实现了io.Closer接口的单例服务</li>
+</ul>
+<div class="mermaid">classDiagram
+    class Container {
+        -map~reflect.Type, service~ services
+        -RWMutex lock
+        +Register(iface, factory, isSingleton) *Container
+        +RegisterInstance(iface, instance) *Container
+        +RegisterSingleton(iface, factory) *Container
+        +RegisterTransient(iface, factory) *Container
+        +Resolve(iface) (any, error)
+        +ResolveTyped[T](c) (T, error)
+        +MustResolve(iface) any
+        +MustResolveTyped[T](c) T
+        +Clear() *Container
+        +IsRegistered(iface) bool
+        +RegisterServices(...func) *Container
+        +Close() error
+    }
+    class service {
+        +any instance
+        +func(*Container) (any, error) factory
+        +bool isSingleton
+        +bool isInitialized
+    }
+    Container --&gt; service : "管理"
+</div>
+<h3 id="_7">选项化注册与全局默认容器<a class="headerlink" href="#_7" title="Permanent link">¶</a></h3>
+<ul>
+<li>Options</li>
+<li>WithSingleton/WithTransient：以 Option 形式注册单例或瞬态</li>
+<li>WithInstance：注册已有实例</li>
+<li>NewWithOptions：一次性应用多个 Option 创建容器</li>
+<li>全局默认容器</li>
+<li>Default：延迟初始化全局容器</li>
+<li>Register/Resolve/IsRegistered/Clear/RegisterServices 等便捷函数均委托给默认容器</li>
+<li><strong>新增</strong>：RegisterDefaultSingletonInstance：全局默认容器的泛型单例实例注册</li>
+</ul>
+<div class="mermaid">flowchart TD
+    Start(["开始"]) --&gt; NewOpt["NewWithOptions(opts...)"]
+    NewOpt --&gt; Apply["逐个应用 Option 到容器"]
+    Apply --&gt; Done(["容器就绪"])
+</div>
+<h3 id="_8">自定义服务注册与配置<a class="headerlink" href="#_8" title="Permanent link">¶</a></h3>
+<ul>
+<li>注册单例服务</li>
+<li>使用 RegisterSingleton 或 WithSingleton</li>
+<li>工厂函数负责创建并可能依赖其他服务（通过容器参数）</li>
+<li>注册瞬态服务</li>
+<li>使用 RegisterTransient 或 WithTransient</li>
+<li>每次解析都会重新创建实例</li>
+<li>注册已有实例</li>
+<li>使用 RegisterInstance 或 WithInstance</li>
+<li>适用于外部库实例或测试桩</li>
+<li>批量注册</li>
+<li>使用 RegisterServices 或 RegisterDefaultServices</li>
+<li>将多个服务注册函数组合为一组</li>
+<li><strong>新增</strong>：RegisterSingletonInstance：泛型单例实例注册</li>
+<li><strong>新增</strong>：RegisterDefaultSingletonInstance：全局默认容器的泛型单例实例注册</li>
+</ul>
+<h3 id="_9">服务替换与装饰器模式<a class="headerlink" href="#_9" title="Permanent link">¶</a></h3>
+<ul>
+<li>服务替换</li>
+<li>在同一接口上重复注册会覆盖旧实现（以最后注册为准）</li>
+<li>建议在应用启动时集中注册，避免运行时动态替换导致不可控</li>
+<li>装饰器模式</li>
+<li>可参考 resilience/decorators.go 中的 RateLimiterStepWrapper 与 CircuitBreakerStepWrapper</li>
+<li>在 DI 中可将真实服务作为被装饰对象，通过工厂函数返回包装后的实例</li>
+<li>注意：装饰器应保持接口不变，避免破坏容器解析契约</li>
+</ul>
+<div class="mermaid">sequenceDiagram
+    participant Client as "客户端"
+    participant DI as "DI 容器"
+    participant Real as "真实服务"
+    participant Wrap as "装饰器包装"
+    Client-&gt;&gt;DI : "Resolve(接口)"
+    DI-&gt;&gt;Real : "创建真实服务"
+    DI-&gt;&gt;Wrap : "用装饰器包装真实服务"
+    DI--&gt;&gt;Client : "返回包装后的实例"
+</div>
+<h3 id="_10">生命周期管理与并发安全<a class="headerlink" href="#_10" title="Permanent link">¶</a></h3>
+<ul>
+<li>单例懒加载与双检锁</li>
+<li>首次解析单例时，先读锁检查，再加写锁进行初始化，再次检查防止重复初始化</li>
+<li>并发控制</li>
+<li>读多写少场景使用 RWMutex，保证解析高并发下的性能</li>
+<li>错误处理</li>
+<li>工厂函数返回 error 时，解析阶段会传播错误</li>
+<li>MustResolve/MustResolveTyped 失败时会 panic，适合启动期严格校验</li>
+<li><strong>新增</strong>：IoC容器生命周期管理</li>
+<li>Close方法自动关闭实现了io.Closer接口的所有单例服务</li>
+<li>支持多错误聚合，返回详细的关闭失败信息</li>
+<li>仅关闭已初始化的单例服务</li>
+</ul>
+<h3 id="goraggo">应用层集成示例（从 gorag.go 观察）<a class="headerlink" href="#goraggo" title="Permanent link">¶</a></h3>
+<ul>
+<li>应用层通过 RAGConfig 与多种模式（native/advanced/agentic/graph）组合服务</li>
+<li>DI 容器可用于集中注册这些服务，替代或补充当前直接构造方式</li>
+<li>建议将 VectorStore、DocStore、Retriever 等抽象为接口，通过 DI 注入</li>
+<li><strong>新增</strong>：利用Close方法实现资源池化和生命周期管理</li>
+</ul>
+<h2 id="_11">依赖关系分析<a class="headerlink" href="#_11" title="Permanent link">¶</a></h2>
+<ul>
+<li>内部耦合</li>
+<li>Container 仅依赖标准库（反射、同步原语），内聚度高</li>
+<li>Options 与 Container 为组合关系，通过函数式选项降低耦合</li>
+<li>对外依赖</li>
+<li>通过接口隔离对外实现细节，便于替换与测试</li>
+<li>循环依赖风险</li>
+<li>工厂函数参数为容器本身，若不当使用可能导致循环依赖；建议通过接口分层与延迟初始化规避</li>
+<li><strong>新增</strong>：IoC容器生命周期管理</li>
+<li>依赖io.Closer接口，支持资源池化和自动清理</li>
+</ul>
+<div class="mermaid">graph LR
+    Container["Container"] --&gt; Options["Options"]
+    Container --&gt; Interfaces["core/interfaces.go"]
+    Container --&gt; Closer["io.Closer"]
+    Gorag["gorag.go"] --&gt; Container
+    Gorag --&gt; Interfaces
+    Decorators["resilience/decorators.go"] -. 可复用到 DI .-&gt; Container
+</div>
+<h2 id="_12">性能考量<a class="headerlink" href="#_12" title="Permanent link">¶</a></h2>
+<ul>
+<li>单例懒加载与双检锁</li>
+<li>减少不必要的初始化开销，提升并发解析性能</li>
+<li>读写锁策略</li>
+<li>读多写少场景下，RWMutex 提升吞吐</li>
+<li>工厂函数幂等性</li>
+<li>工厂应尽量无副作用，避免在解析过程中产生不可预期的资源竞争</li>
+<li>批量注册</li>
+<li>使用 RegisterServices/ RegisterDefaultServices 合并多次注册，减少锁竞争</li>
+<li>类型安全解析</li>
+<li>ResolveTyped/MustResolveTyped 可减少类型断言成本与错误路径</li>
+<li><strong>新增</strong>：IoC容器生命周期管理性能</li>
+<li>Close方法采用批量关闭策略，避免逐个检查的开销</li>
+<li>仅对已初始化的单例服务执行关闭操作</li>
+</ul>
+<h2 id="_13">故障排查指南<a class="headerlink" href="#_13" title="Permanent link">¶</a></h2>
+<p>常见问题与定位要点：
+- 注册接口类型错误
+  - Register/ RegisterInstance 期望接口或指针到接口；否则触发 panic
+  - RegisterInstance 实例必须实现对应接口，否则触发 panic
+- 解析失败
+  - Resolve 返回错误：接口类型非法、未注册、工厂返回错误
+  - MustResolve/MustResolveTyped 失败会 panic，适合启动期严格校验
+- 生命周期异常
+  - 单例未初始化或被意外 Clear 导致后续解析失败
+  - <strong>新增</strong>：Close方法返回的多错误聚合信息，便于定位具体失败的服务
+- 测试环境
+  - ResetForTesting 仅用于测试，生产禁止调用
+- <strong>新增</strong>：IoC容器生命周期管理问题
+  - 关闭失败的服务会累积到错误列表中
+  - 仅实现了io.Closer接口的服务才会被自动关闭</p>
+<h2 id="_14">结论<a class="headerlink" href="#_14" title="Permanent link">¶</a></h2>
+<p>GoRAG 的 DI 容器提供了简洁而强大的依赖管理能力：以接口为中心的服务注册、单例与瞬态生命周期、类型安全解析与全局默认容器，使得在复杂业务场景中也能保持清晰的依赖关系与良好的可维护性。<strong>最新版本增强了IoC容器的完整生命周期管理功能，支持资源池化和自动清理，通过Close方法统一管理实现了io.Closer接口的单例服务。</strong>通过选项化注册、批量注册与装饰器模式，可以进一步增强扩展性与可测试性。建议在应用层以接口抽象为核心，结合 DI 容器实现松耦合、可替换的服务体系。</p>
+<h2 id="_15">附录<a class="headerlink" href="#_15" title="Permanent link">¶</a></h2>
+<h3 id="_16">最佳实践清单<a class="headerlink" href="#_16" title="Permanent link">¶</a></h3>
+<ul>
+<li>明确接口边界：所有服务以接口暴露，避免直接依赖具体实现</li>
+<li>启动期严格校验：使用 MustResolveTyped/MustResolve 在应用启动阶段快速发现配置错误</li>
+<li>单例优先：共享昂贵资源（如数据库连接、向量库）使用单例</li>
+<li>瞬态隔离：需要隔离状态或线程不安全的组件使用瞬态</li>
+<li>装饰器透明：装饰器包装后仍保持接口一致，避免破坏容器契约</li>
+<li>批量注册：将相关服务聚合为注册函数，使用 RegisterServices/ RegisterDefaultServices</li>
+<li>测试隔离：使用 ResetForTesting 清理全局状态，确保测试互不影响</li>
+<li><strong>新增</strong>：资源池化：实现io.Closer接口的服务会在应用关闭时自动清理</li>
+<li><strong>新增</strong>：生命周期管理：合理使用Close方法管理IoC容器的完整生命周期</li>
+</ul>
+<h3 id="_17">性能优化建议<a class="headerlink" href="#_17" title="Permanent link">¶</a></h3>
+<ul>
+<li>减少锁竞争：批量注册、避免频繁 Clear</li>
+<li>工厂幂等：工厂函数应无副作用，避免在解析时产生额外开销</li>
+<li>单例懒加载：充分利用容器的单例懒加载机制</li>
+<li>类型安全：优先使用 ResolveTyped/MustResolveTyped，减少运行时断言</li>
+<li><strong>新增</strong>：IoC容器优化：合理设计服务的生命周期，避免在Close中执行耗时操作</li>
+<li><strong>新增</strong>：资源池化优化：对于昂贵的资源，考虑使用单例模式配合Close方法统一管理</li>
+</ul>
+<h3 id="ioc">IoC容器生命周期管理指南<a class="headerlink" href="#ioc" title="Permanent link">¶</a></h3>
+<ul>
+<li>实现io.Closer接口：对于需要清理的资源（数据库连接、文件句柄等），实现Close方法</li>
+<li>单例注册：将实现了Close方法的服务注册为单例，以便容器统一管理</li>
+<li>应用关闭：在应用退出时调用container.Close()，容器会自动关闭所有实现了io.Closer接口的单例服务</li>
+<li>错误处理：Close方法返回的错误列表包含了所有关闭失败的服务信息，便于诊断问题</li>
+<li>资源池化：通过单例模式实现资源池化，避免重复创建昂贵的资源</li>
+</ul>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+<div class="md-copyright__highlight">
+      Copyright © 2024 Raya Info co., Ltd.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" rel="noopener" target="_blank">
+      Material for MkDocs
+    </a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+<script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../../javascripts/mathjax.js"></script>
+<script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script type="module">import mermaid from "https://unpkg.com/mermaid@10.4.0/dist/mermaid.esm.min.mjs";
+mermaid.initialize({});</script></body>
+</html>
