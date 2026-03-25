@@ -13,6 +13,7 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
@@ -52,16 +53,35 @@ func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 	// 1. Fallback to default vector store if none provided
 	if options.vectorStore == nil {
 		workDir := "./data"
-		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		vecName := "gorag_vectors.db"
+		if options.name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", options.name)
+		}
+		vecPath := filepath.Join(workDir, vecName)
 		dimension := 1536
 		if options.embedder != nil {
 			dimension = options.embedder.Dimension()
 		}
 
+		colName := "gorag"
+		if options.name != "" {
+			colName = options.name
+		}
+
 		options.vectorStore, _ = govector.NewStore(
 			govector.WithDBPath(vecPath),
 			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
 		)
+	}
+
+	// 1.5 Fallback to default graph store if none provided
+	if options.graphStore == nil {
+		graphName := "gorag_graph.bolt"
+		if options.name != "" {
+			graphName = fmt.Sprintf("gorag_graph_%s.bolt", options.name)
+		}
+		options.graphStore, _ = bolt.NewGraphStore(graphName)
 	}
 
 	// 2. Initialize the retriever using the expanded Options
@@ -377,6 +397,7 @@ func (s *graphGenerationStep) Execute(ctx context.Context, context *core.Retriev
 
 // Options for GraphRAG retriever
 type Options struct {
+	name           string
 	topK           int
 	depth          int
 	limit          int
@@ -389,6 +410,10 @@ type Options struct {
 	vectorStore    core.VectorStore
 	graphStore     store.GraphStore
 	customSteps    []pipeline.Step[*core.RetrievalContext]
+}
+
+func WithName(name string) Option {
+	return func(o *Options) { o.name = name }
 }
 
 func WithVectorStore(s core.VectorStore) Option {

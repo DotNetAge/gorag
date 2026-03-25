@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Collector defines the interface for collecting metrics.
+// Collector defines the interface for collecting metrics (Deprecated: use core.Metrics instead).
 type Collector interface {
 	// RecordDuration records the duration of an operation.
 	RecordDuration(operation string, duration time.Duration, labels map[string]string)
@@ -36,6 +36,20 @@ func (c *noopCollector) RecordCount(string, string, map[string]string) {
 func (c *noopCollector) RecordValue(string, float64, map[string]string) {
 	// No-op
 }
+
+// NoopMetrics is a no-op implementation of core.Metrics.
+type NoopMetrics struct{}
+
+func (m *NoopMetrics) RecordSearchDuration(string, any)                  {}
+func (m *NoopMetrics) RecordSearchResult(string, int)                    {}
+func (m *NoopMetrics) RecordSearchError(string, error)                   {}
+func (m *NoopMetrics) RecordIndexingDuration(string, any)                {}
+func (m *NoopMetrics) RecordIndexingResult(string, int)                  {}
+func (m *NoopMetrics) RecordEmbeddingCount(int)                         {}
+func (m *NoopMetrics) RecordVectorStoreOperations(string, int)           {}
+func (m *NoopMetrics) RecordQueryCount(string)                           {}
+func (m *NoopMetrics) RecordLLMTokenUsage(string, int, int)              {}
+func (m *NoopMetrics) RecordRAGEvaluation(string, float32)                {}
 
 // Tracer defines the interface for distributed tracing.
 type Tracer interface {

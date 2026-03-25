@@ -38,7 +38,7 @@ func TestRAGEvaluator_New(t *testing.T) {
 func TestRAGEvaluator_Evaluate(t *testing.T) {
 	mockLLM := &mockChatClient{
 		chatFn: func(ctx context.Context, messages []chat.Message, options ...chat.Option) (*chat.Response, error) {
-			return &chat.Response{Content: "Evaluation complete"}, nil
+			return &chat.Response{Content: `{"faithfulness": 0.8, "relevance": 0.8, "context_recall": 0.8, "reasoning": "test reasoning"}`}, nil
 		},
 	}
 	evaluator := NewRAGEvaluator(mockLLM)

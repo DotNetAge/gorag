@@ -116,6 +116,15 @@ func TestWithTopK(t *testing.T) {
 	assert.Equal(t, 10, options.TopK)
 }
 
+func TestWithName(t *testing.T) {
+	opt := WithName("test_bot")
+
+	options := &Options{}
+	opt(options)
+
+	assert.Equal(t, "test_bot", options.Name)
+}
+
 func TestOptions_Defaults(t *testing.T) {
 	options := &Options{}
 

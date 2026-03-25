@@ -17,6 +17,11 @@ type PrometheusMetrics struct {
 	indexingResult      *prometheus.CounterVec
 	embeddingCount      prometheus.Counter
 	vectorStoreOpsCount *prometheus.CounterVec
+
+	// RAG Specific Metrics
+	queryCount *prometheus.CounterVec
+	llmTokens  *prometheus.CounterVec
+	ragQuality *prometheus.HistogramVec
 }
 
 // DefaultPrometheusMetrics creates a new prometheus-based metrics collector
@@ -73,6 +78,28 @@ func DefaultPrometheusMetrics(addr string) *PrometheusMetrics {
 			},
 			[]string{"operation"},
 		),
+		queryCount: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "gorag_queries_total",
+				Help: "Total number of RAG queries (for QPS calculation)",
+			},
+			[]string{"engine"},
+		),
+		llmTokens: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "gorag_llm_tokens_total",
+				Help: "Total number of LLM tokens consumed",
+			},
+			[]string{"model", "type"}, // prompt or completion
+		),
+		ragQuality: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "gorag_qa_quality_score",
+				Help:    "Scores for Faithfulness, Relevance, and Precision",
+				Buckets: []float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
+			},
+			[]string{"metric"}, // faithfulness, relevance, precision
+		),
 	}
 
 	prometheus.MustRegister(m.searchDuration)
@@ -82,6 +109,9 @@ func DefaultPrometheusMetrics(addr string) *PrometheusMetrics {
 	prometheus.MustRegister(m.indexingResult)
 	prometheus.MustRegister(m.embeddingCount)
 	prometheus.MustRegister(m.vectorStoreOpsCount)
+	prometheus.MustRegister(m.queryCount)
+	prometheus.MustRegister(m.llmTokens)
+	prometheus.MustRegister(m.ragQuality)
 
 	if addr != "" {
 		go func() {
@@ -127,4 +157,17 @@ func (m *PrometheusMetrics) RecordEmbeddingCount(count int) {
 
 func (m *PrometheusMetrics) RecordVectorStoreOperations(op string, count int) {
 	m.vectorStoreOpsCount.WithLabelValues(op).Add(float64(count))
+}
+
+func (m *PrometheusMetrics) RecordQueryCount(engine string) {
+	m.queryCount.WithLabelValues(engine).Inc()
+}
+
+func (m *PrometheusMetrics) RecordLLMTokenUsage(model string, prompt int, completion int) {
+	m.llmTokens.WithLabelValues(model, "prompt").Add(float64(prompt))
+	m.llmTokens.WithLabelValues(model, "completion").Add(float64(completion))
+}
+
+func (m *PrometheusMetrics) RecordRAGEvaluation(metric string, score float32) {
+	m.ragQuality.WithLabelValues(metric).Observe(float64(score))
 }

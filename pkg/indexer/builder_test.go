@@ -53,6 +53,16 @@ func TestDefaultIndexer_WithParsers(t *testing.T) {
 	assert.NotNil(t, idx.registry)
 }
 
+func TestDefaultIndexer_WithName(t *testing.T) {
+	idxIface, err := DefaultNativeIndexer(
+		WithName("test_bot"),
+	)
+	require.NoError(t, err)
+	idx := idxIface.(*defaultIndexer)
+
+	assert.Equal(t, "test_bot", idx.name)
+}
+
 func TestDefaultIndexer_IndexFile_Init(t *testing.T) {
 	tmpDir := t.TempDir()
 	idxIface, err := DefaultIndexer(

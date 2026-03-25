@@ -29,6 +29,7 @@ Thumbs.db
 
 # 日志文件
 *.log
+*.db
 
 # 环境文件
 .env.local
@@ -47,3 +48,4 @@ specs
 docs
 CLAUDE.md
 GEMINI.md
+

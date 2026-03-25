@@ -92,11 +92,12 @@ type CRAGEvaluation struct {
 
 // RAGEvaluation holds the result of RAG quality evaluation.
 type RAGEvaluation struct {
-	Faithfulness float32
-	Relevance    float32
-	OverallScore float32
-	Passed       bool
-	Feedback     string
+	Faithfulness  float32
+	Relevance     float32
+	ContextRecall float32 // How much of the necessary information was retrieved
+	OverallScore  float32
+	Passed        bool
+	Feedback      string
 }
 
 // SearchRequest is the DTO for search use case input.

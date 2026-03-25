@@ -23,6 +23,13 @@ import (
 // IndexerOption defines a function to configure the indexer.
 type IndexerOption func(*defaultIndexer)
 
+// WithName sets a unique name for the indexer instance, used for resource isolation.
+func WithName(name string) IndexerOption {
+	return func(idx *defaultIndexer) {
+		idx.name = name
+	}
+}
+
 // WithConcurrency enables or disables concurrent indexing.
 func WithConcurrency(enabled bool) IndexerOption {
 	return func(idx *defaultIndexer) {

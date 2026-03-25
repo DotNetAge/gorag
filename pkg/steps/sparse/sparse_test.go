@@ -37,6 +37,9 @@ func (m *mockMetricsForSparse) RecordIndexingDuration(parser string, duration an
 func (m *mockMetricsForSparse) RecordIndexingResult(parser string, count int)      {}
 func (m *mockMetricsForSparse) RecordEmbeddingCount(count int)                     {}
 func (m *mockMetricsForSparse) RecordVectorStoreOperations(op string, count int)   {}
+func (m *mockMetricsForSparse) RecordQueryCount(engine string)                          {}
+func (m *mockMetricsForSparse) RecordLLMTokenUsage(model string, prompt int, completion int) {}
+func (m *mockMetricsForSparse) RecordRAGEvaluation(metric string, score float32)         {}
 
 func TestSearch_Name(t *testing.T) {
 	step := Search(nil, 10, nil, nil)

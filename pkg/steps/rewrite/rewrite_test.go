@@ -42,6 +42,9 @@ func (m *mockMetricsForRewrite) RecordIndexingDuration(parser string, duration a
 func (m *mockMetricsForRewrite) RecordIndexingResult(parser string, count int)      {}
 func (m *mockMetricsForRewrite) RecordEmbeddingCount(count int)                     {}
 func (m *mockMetricsForRewrite) RecordVectorStoreOperations(op string, count int)   {}
+func (m *mockMetricsForRewrite) RecordQueryCount(engine string)                          {}
+func (m *mockMetricsForRewrite) RecordLLMTokenUsage(model string, prompt int, completion int) {}
+func (m *mockMetricsForRewrite) RecordRAGEvaluation(metric string, score float32)         {}
 
 func TestRewrite_Name(t *testing.T) {
 	step := Rewrite(nil, nil, nil)

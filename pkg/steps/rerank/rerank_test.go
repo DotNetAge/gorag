@@ -37,6 +37,9 @@ func (m *mockMetricsForRerank) RecordIndexingDuration(parser string, duration an
 func (m *mockMetricsForRerank) RecordIndexingResult(parser string, count int)      {}
 func (m *mockMetricsForRerank) RecordEmbeddingCount(count int)                     {}
 func (m *mockMetricsForRerank) RecordVectorStoreOperations(op string, count int)   {}
+func (m *mockMetricsForRerank) RecordQueryCount(engine string)                          {}
+func (m *mockMetricsForRerank) RecordLLMTokenUsage(model string, prompt int, completion int) {}
+func (m *mockMetricsForRerank) RecordRAGEvaluation(metric string, score float32)         {}
 
 func TestCrossEncoderRerank_Name(t *testing.T) {
 	step := CrossEncoderRerank(nil, 10, nil, nil)

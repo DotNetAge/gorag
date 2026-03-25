@@ -49,6 +49,9 @@ func (m *mockMetricsForImage) RecordIndexingDuration(parser string, duration any
 func (m *mockMetricsForImage) RecordIndexingResult(parser string, count int)      {}
 func (m *mockMetricsForImage) RecordEmbeddingCount(count int)                     {}
 func (m *mockMetricsForImage) RecordVectorStoreOperations(op string, count int)   {}
+func (m *mockMetricsForImage) RecordQueryCount(engine string)                          {}
+func (m *mockMetricsForImage) RecordLLMTokenUsage(model string, prompt int, completion int) {}
+func (m *mockMetricsForImage) RecordRAGEvaluation(metric string, score float32)         {}
 
 func TestSearch_Name(t *testing.T) {
 	step := Search(nil, 10, nil, nil)

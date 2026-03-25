@@ -22,6 +22,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexing"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
@@ -38,6 +39,7 @@ type Indexer interface {
 }
 
 type defaultIndexer struct {
+	name        string
 	pipeline    *pipeline.Pipeline[*core.IndexingContext]
 	config      Config
 	logger      logging.Logger
@@ -48,8 +50,8 @@ type defaultIndexer struct {
 	graphStore  store.GraphStore
 	chunker     core.SemanticChunker
 	embedder    embedding.Provider
-	metrics     core.Metrics
 	extractor   core.EntityExtractor
+	metrics     core.Metrics
 }
 
 // Config defines the configuration for the indexer.
@@ -362,15 +364,25 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	}
 
 	if idx.vectorStore == nil {
-		vecPath := filepath.Join(workDir, "gorag_vectors.db")
+		vecName := "gorag_vectors.db"
+		if idx.name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
+		}
+		vecPath := filepath.Join(workDir, vecName)
 		dimension := 1536
 		if idx.embedder != nil {
 			dimension = idx.embedder.Dimension()
 		}
 
+		colName := "gorag"
+		if idx.name != "" {
+			colName = idx.name
+		}
+
 		vStore, err := govector.NewStore(
 			govector.WithDBPath(vecPath),
 			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default vector store: %w", err)
@@ -379,7 +391,11 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	}
 
 	if idx.docStore == nil {
-		docPath := filepath.Join(workDir, "gorag_docs.db")
+		docFileName := "gorag_docs.db"
+		if idx.name != "" {
+			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
+		}
+		docPath := filepath.Join(workDir, docFileName)
 		dStore, err := sqlite.NewDocStore(docPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default doc store: %w", err)
@@ -412,14 +428,35 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 
 	// Fallback logic
 	if idx.vectorStore == nil {
-		vStore, err := govector.DefaultStore()
+		vecName := "gorag_vectors.db"
+		if idx.name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
+		}
+		dimension := 1536
+		if idx.embedder != nil {
+			dimension = idx.embedder.Dimension()
+		}
+		colName := "gorag"
+		if idx.name != "" {
+			colName = idx.name
+		}
+
+		vStore, err := govector.NewStore(
+			govector.WithDBPath(vecName),
+			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
+		)
 		if err != nil {
 			return nil, err
 		}
 		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
-		dStore, err := sqlite.DefaultDocStore()
+		docFileName := "gorag_docs.db"
+		if idx.name != "" {
+			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
+		}
+		dStore, err := sqlite.NewDocStore(docFileName)
 		if err != nil {
 			return nil, err
 		}
@@ -450,18 +487,51 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	}
 
 	if idx.vectorStore == nil {
-		vStore, err := govector.DefaultStore()
+		vecName := "gorag_vectors.db"
+		if idx.name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
+		}
+		dimension := 1536
+		if idx.embedder != nil {
+			dimension = idx.embedder.Dimension()
+		}
+		colName := "gorag"
+		if idx.name != "" {
+			colName = idx.name
+		}
+
+		vStore, err := govector.NewStore(
+			govector.WithDBPath(vecName),
+			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
+		)
 		if err != nil {
 			return nil, err
 		}
 		idx.vectorStore = vStore
 	}
 	if idx.docStore == nil {
-		dStore, err := sqlite.DefaultDocStore()
+		docFileName := "gorag_docs.db"
+		if idx.name != "" {
+			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
+		}
+		dStore, err := sqlite.NewDocStore(docFileName)
 		if err != nil {
 			return nil, err
 		}
 		idx.docStore = dStore
+	}
+
+	if idx.graphStore == nil {
+		graphName := "gorag_graph.bolt"
+		if idx.name != "" {
+			graphName = fmt.Sprintf("gorag_graph_%s.bolt", idx.name)
+		}
+		gStore, err := bolt.NewGraphStore(graphName)
+		if err != nil {
+			return nil, err
+		}
+		idx.graphStore = gStore
 	}
 
 	if err := idx.Init(); err != nil {

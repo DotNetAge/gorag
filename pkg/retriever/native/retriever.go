@@ -25,6 +25,7 @@ type nativeRetriever struct {
 
 // Options for native retriever
 type Options struct {
+	Name        string
 	Logger      logging.Logger
 	Tracer      observability.Tracer
 	Embedder    embedding.Provider
@@ -37,6 +38,7 @@ type Options struct {
 
 type Option func(*Options)
 
+func WithName(name string) Option                { return func(o *Options) { o.Name = name } }
 func WithVectorStore(s core.VectorStore) Option { return func(o *Options) { o.VectorStore = s } }
 func WithDocStore(s store.DocStore) Option       { return func(o *Options) { o.DocStore = s } }
 func WithWorkDir(dir string) Option              { return func(o *Options) { o.WorkDir = dir } }
@@ -61,14 +63,27 @@ func DefaultNativeRetriever(opts ...Option) (core.Retriever, error) {
 
 	vStore := options.VectorStore
 	if vStore == nil {
-		vecPath := filepath.Join(options.WorkDir, "gorag_vectors.db")
+		vecName := "gorag_vectors.db"
+		if options.Name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", options.Name)
+		}
+		vecPath := filepath.Join(options.WorkDir, vecName)
 		dimension := 1536
 		if options.Embedder != nil {
 			dimension = options.Embedder.Dimension()
 		}
 
+		colName := "gorag"
+		if options.Name != "" {
+			colName = options.Name
+		}
+
 		var err error
-		vStore, err = govector.NewStore(govector.WithDBPath(vecPath), govector.WithDimension(dimension))
+		vStore, err = govector.NewStore(
+			govector.WithDBPath(vecPath),
+			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to init default vector store: %w", err)
 		}

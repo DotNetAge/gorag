@@ -37,6 +37,9 @@ func (m *mockMetricsForPrune) RecordIndexingDuration(parser string, duration any
 func (m *mockMetricsForPrune) RecordIndexingResult(parser string, count int)      {}
 func (m *mockMetricsForPrune) RecordEmbeddingCount(count int)                     {}
 func (m *mockMetricsForPrune) RecordVectorStoreOperations(op string, count int)   {}
+func (m *mockMetricsForPrune) RecordQueryCount(engine string)                          {}
+func (m *mockMetricsForPrune) RecordLLMTokenUsage(model string, prompt int, completion int) {}
+func (m *mockMetricsForPrune) RecordRAGEvaluation(metric string, score float32)         {}
 
 func TestPrune_Name(t *testing.T) {
 	step := Prune(nil, nil, nil)
