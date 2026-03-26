@@ -7,7 +7,8 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
   [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
-  
+  [![Documentation](https://img.shields.io/badge/docs-gorag.rayainfo.cn-e53734.svg)](https://gorag.rayainfo.cn)
+
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
 
