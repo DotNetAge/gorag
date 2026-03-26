@@ -36,8 +36,6 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/di"
 	"github.com/DotNetAge/gorag/pkg/indexer"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"

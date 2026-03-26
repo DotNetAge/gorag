@@ -17,14 +17,13 @@ type sqliteDocStore struct {
 	db *sql.DB
 }
 
-// NewDocStore creates a new SQLite based document store.
 // DefaultDocStore creates a SQLite DocStore using a default local file "gorag_docs.db".
 func DefaultDocStore() (store.DocStore, error) {
 	return NewDocStore("gorag_docs.db")
 }
 
+// NewDocStore creates a new SQLite based document store.
 func NewDocStore(path string) (store.DocStore, error) {
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -32,7 +31,8 @@ func NewDocStore(path string) (store.DocStore, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", path)
+	// Optimization: WAL mode for better concurrency
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_synchronous=NORMAL")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite db: %w", err)
 	}
@@ -114,6 +114,10 @@ func (s *sqliteDocStore) DeleteDocument(ctx context.Context, docID string) error
 }
 
 func (s *sqliteDocStore) SetChunks(ctx context.Context, chunks []*core.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

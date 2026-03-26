@@ -14,6 +14,52 @@ type neo4jGraphStore struct {
 	dbName string
 }
 
+type Options struct {
+	URI      string
+	Username string
+	Password string
+	DBName   string
+}
+
+type Option func(*Options)
+
+func WithURI(uri string) Option {
+	return func(o *Options) {
+		o.URI = uri
+	}
+}
+
+func WithAuth(username, password string) Option {
+	return func(o *Options) {
+		o.Username = username
+		o.Password = password
+	}
+}
+
+func WithDBName(name string) Option {
+	return func(o *Options) {
+		o.DBName = name
+	}
+}
+
+func defaultOptions() *Options {
+	return &Options{
+		URI:      "bolt://localhost:7687",
+		Username: "neo4j",
+		Password: "password",
+		DBName:   "neo4j",
+	}
+}
+
+// DefaultGraphStore creates a Neo4j GraphStore using default connection settings.
+func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+	return NewGraphStore(options.URI, options.Username, options.Password, options.DBName)
+}
+
 // NewGraphStore creates a new Neo4j based graph store.
 func NewGraphStore(uri, username, password, dbName string) (store.GraphStore, error) {
 	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(username, password, ""))
@@ -37,8 +83,6 @@ func (s *neo4jGraphStore) UpsertNodes(ctx context.Context, nodes []*core.Node) e
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		for _, node := range nodes {
-			// Using MERGE for idempotency. 
-			// We use a generic 'Entity' label plus the specific node type as a label.
 			query := fmt.Sprintf("MERGE (n:Entity:%s {id: $id}) SET n += $props", node.Type)
 			_, err := tx.Run(ctx, query, map[string]any{
 				"id":    node.ID,
@@ -59,9 +103,6 @@ func (s *neo4jGraphStore) UpsertEdges(ctx context.Context, edges []*core.Edge) e
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		for _, edge := range edges {
-			// In Cypher, relationship types cannot be parameterized directly in the MERGE clause easily 
-			// without string concatenation or using APOC. 
-			// We'll use string formatting for the type since it's controlled.
 			query := fmt.Sprintf(`
 				MATCH (s:Entity {id: $sourceID})
 				MATCH (t:Entity {id: $targetID})
@@ -110,7 +151,6 @@ func (s *neo4jGraphStore) GetNode(ctx context.Context, id string) (*core.Node, e
 
 	neoNode := result.(neo4j.Node)
 	
-	// Extract types from labels (excluding 'Entity')
 	nodeType := "Unknown"
 	for _, label := range neoNode.Labels {
 		if label != "Entity" {
@@ -152,7 +192,6 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 		for res.Next(ctx) {
 			record := res.Record()
 			
-			// Handle Node
 			if nVal, ok := record.Get("n"); ok && nVal != nil {
 				n := nVal.(neo4j.Node)
 				id := n.Props["id"].(string)
@@ -172,9 +211,7 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 				}
 			}
 
-			// Handle Relationship(s) - r can be a list due to *1..depth
 			if rVal, ok := record.Get("r"); ok && rVal != nil {
-				// Cypher path returns r as a list of relationships
 				rels, isList := rVal.([]any)
 				if !isList {
 					rels = []any{rVal}
@@ -188,13 +225,9 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 					}
 					
 					if _, exists := edgeMap[edgeID]; !exists {
-						// We need to resolve source and target node IDs
-						// This might require additional MATCH if element IDs are not enough, 
-						// but in our schema source/target are Entity nodes with 'id' prop.
 						edgeMap[edgeID] = &core.Edge{
 							ID:         edgeID,
 							Type:       r.Type,
-							// Note: Simplified. Actual source/target resolution might need ElementId mapping
 							Properties: r.Props,
 						}
 					}
@@ -246,7 +279,6 @@ func (s *neo4jGraphStore) Query(ctx context.Context, query string, params map[st
 }
 
 func (s *neo4jGraphStore) GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error) {
-	// Custom implementation for Microsoft GraphRAG pattern in Neo4j
 	query := "MATCH (c:Community {level: $level}) RETURN c.id as id, c.summary as summary, c.nodes as nodes"
 	return s.Query(ctx, query, map[string]any{"level": level})
 }

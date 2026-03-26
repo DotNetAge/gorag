@@ -22,8 +22,6 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexing"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	stepinx "github.com/DotNetAge/gorag/pkg/steps/indexing"
@@ -522,16 +520,8 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 		idx.docStore = dStore
 	}
 
-	if idx.graphStore == nil {
-		graphName := "gorag_graph.bolt"
-		if idx.name != "" {
-			graphName = fmt.Sprintf("gorag_graph_%s.bolt", idx.name)
-		}
-		gStore, err := bolt.NewGraphStore(graphName)
-		if err != nil {
-			return nil, err
-		}
-		idx.graphStore = gStore
+	if idx.graphStore == nil && idx.enableGraph {
+		return nil, fmt.Errorf("GraphStore is required when GraphRAG is enabled")
 	}
 
 	if err := idx.Init(); err != nil {

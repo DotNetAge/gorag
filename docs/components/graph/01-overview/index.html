@@ -3346,13 +3346,11 @@ type Edge struct {
 <h2 id="_6">支持的图存储<a class="headerlink" href="#_6" title="Permanent link">¶</a></h2>
 <h3 id="sqlite">SQLite (嵌入式)<a class="headerlink" href="#sqlite" title="Permanent link">¶</a></h3>
 <p>推荐用于本地和轻量级应用：</p>
-<pre><code class="language-go">import "github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 
 graphStore, _ := sqlite.NewGraphStore("./data/graph.db")
 </code></pre>
 <h3 id="boltdb">BoltDB (嵌入式)<a class="headerlink" href="#boltdb" title="Permanent link">¶</a></h3>
 <p>纯 Go 实现，极高性能：</p>
-<pre><code class="language-go">import "github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 
 graphStore, _ := bolt.NewGraphStore("./data/graph.db")
 </code></pre>

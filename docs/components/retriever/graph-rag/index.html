@@ -3360,13 +3360,11 @@ rag, err := gorag.DefaultGraphRAG(
 <p>GoRAG 提供多种图存储实现：</p>
 <h3 id="1-sqlite">1. SQLite (嵌入式)<a class="headerlink" href="#1-sqlite" title="Permanent link">¶</a></h3>
 <p>推荐用于本地和轻量级应用。支持递归 CTE 遍历：</p>
-<pre><code class="language-go">import "github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 
 graphStore, _ := sqlite.NewGraphStore("./data/graph.db")
 </code></pre>
 <h3 id="2-boltdb">2. BoltDB (嵌入式)<a class="headerlink" href="#2-boltdb" title="Permanent link">¶</a></h3>
 <p>纯 Go 实现，极高性能的本地 K/V 索引：</p>
-<pre><code class="language-go">import "github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 
 graphStore, _ := bolt.NewGraphStore("./data/graph.db")
 </code></pre>

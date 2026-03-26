@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	docBucket   = []byte("documents")
-	chunkBucket = []byte("chunks")
+	docBucket      = []byte("documents")
+	chunkBucket    = []byte("chunks")
+	docChunkBucket = []byte("doc_chunks") // New Secondary Index: docID -> []chunkID
 )
 
 type boltDocStore struct {
@@ -28,7 +29,6 @@ func DefaultDocStore() (store.DocStore, error) {
 
 // NewDocStore creates a new BoltDB based document store.
 func NewDocStore(path string) (store.DocStore, error) {
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -41,14 +41,14 @@ func NewDocStore(path string) (store.DocStore, error) {
 		return nil, fmt.Errorf("failed to open bolt db: %w", err)
 	}
 
-	// Initialize buckets
 	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(docBucket)
-		if err != nil {
-			return err
+		buckets := [][]byte{docBucket, chunkBucket, docChunkBucket}
+		for _, b := range buckets {
+			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
+				return err
+			}
 		}
-		_, err = tx.CreateBucketIfNotExists(chunkBucket)
-		return err
+		return nil
 	})
 
 	if err != nil {
@@ -89,24 +89,76 @@ func (s *boltDocStore) GetDocument(ctx context.Context, docID string) (*core.Doc
 
 func (s *boltDocStore) DeleteDocument(ctx context.Context, docID string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
+		// 1. Delete Document
 		b := tx.Bucket(docBucket)
-		return b.Delete([]byte(docID))
-		// Note: We could also delete associated chunks here if needed
+		if err := b.Delete([]byte(docID)); err != nil {
+			return err
+		}
+
+		// 2. Retrieve chunk IDs associated with this document
+		dcb := tx.Bucket(docChunkBucket)
+		chunkIDsData := dcb.Get([]byte(docID))
+		if chunkIDsData != nil {
+			var chunkIDs []string
+			if err := json.Unmarshal(chunkIDsData, &chunkIDs); err == nil {
+				// 3. Delete individual chunks
+				cb := tx.Bucket(chunkBucket)
+				for _, cid := range chunkIDs {
+					cb.Delete([]byte(cid))
+				}
+			}
+			// 4. Delete the index entry
+			dcb.Delete([]byte(docID))
+		}
+		return nil
 	})
 }
 
 func (s *boltDocStore) SetChunks(ctx context.Context, chunks []*core.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+
 	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(chunkBucket)
+		cb := tx.Bucket(chunkBucket)
+		dcb := tx.Bucket(docChunkBucket)
+
+		// Group chunks by Document ID to efficiently update the secondary index
+		docToChunksMap := make(map[string][]string)
+
 		for _, chunk := range chunks {
 			data, err := json.Marshal(chunk)
 			if err != nil {
 				return err
 			}
-			if err := b.Put([]byte(chunk.ID), data); err != nil {
+			if err := cb.Put([]byte(chunk.ID), data); err != nil {
+				return err
+			}
+			
+			docToChunksMap[chunk.DocumentID] = append(docToChunksMap[chunk.DocumentID], chunk.ID)
+		}
+
+		// Update Secondary Index (doc_chunks)
+		for docID, newChunkIDs := range docToChunksMap {
+			var existingIDs []string
+			existingData := dcb.Get([]byte(docID))
+			if existingData != nil {
+				_ = json.Unmarshal(existingData, &existingIDs)
+			}
+			
+			// Append new IDs (assuming no duplicates for simplicity, 
+			// in a real scenario we might want to check for duplicates or use a set)
+			existingIDs = append(existingIDs, newChunkIDs...)
+			
+			indexData, err := json.Marshal(existingIDs)
+			if err != nil {
+				return err
+			}
+			if err := dcb.Put([]byte(docID), indexData); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	})
 }
@@ -130,16 +182,25 @@ func (s *boltDocStore) GetChunk(ctx context.Context, chunkID string) (*core.Chun
 func (s *boltDocStore) GetChunksByDocID(ctx context.Context, docID string) ([]*core.Chunk, error) {
 	var chunks []*core.Chunk
 	err := s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(chunkBucket)
-		c := b.Cursor()
+		dcb := tx.Bucket(docChunkBucket)
+		chunkIDsData := dcb.Get([]byte(docID))
+		if chunkIDsData == nil {
+			return nil // No chunks found for this document, not necessarily an error
+		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var chunk core.Chunk
-			if err := json.Unmarshal(v, &chunk); err != nil {
-				continue
-			}
-			if chunk.DocumentID == docID {
-				chunks = append(chunks, &chunk)
+		var chunkIDs []string
+		if err := json.Unmarshal(chunkIDsData, &chunkIDs); err != nil {
+			return err
+		}
+
+		cb := tx.Bucket(chunkBucket)
+		for _, cid := range chunkIDs {
+			chunkData := cb.Get([]byte(cid))
+			if chunkData != nil {
+				var chunk core.Chunk
+				if err := json.Unmarshal(chunkData, &chunk); err == nil {
+					chunks = append(chunks, &chunk)
+				}
 			}
 		}
 		return nil

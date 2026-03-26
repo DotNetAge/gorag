@@ -79,7 +79,16 @@ func (s *multiStore) Execute(ctx context.Context, state *core.IndexingContext) e
 
 	// 3. GraphStore: Upsert entities and edges
 	if s.graphStore != nil {
-		// GraphStore integration is ready to accept nodes/edges parsed by Entities step.
+		if len(state.Nodes) > 0 {
+			if err := s.graphStore.UpsertNodes(ctx, state.Nodes); err != nil {
+				s.logger.Error("Failed to upsert nodes to GraphStore", err, nil)
+			}
+		}
+		if len(state.Edges) > 0 {
+			if err := s.graphStore.UpsertEdges(ctx, state.Edges); err != nil {
+				s.logger.Error("Failed to upsert edges to GraphStore", err, nil)
+			}
+		}
 	}
 
 	s.logger.Info("MultiStore step completed successfully", nil)

@@ -13,7 +13,6 @@ import (
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core/store"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
@@ -77,11 +76,7 @@ func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 
 	// 1.5 Fallback to default graph store if none provided
 	if options.graphStore == nil {
-		graphName := "gorag_graph.bolt"
-		if options.name != "" {
-			graphName = fmt.Sprintf("gorag_graph_%s.bolt", options.name)
-		}
-		options.graphStore, _ = bolt.NewGraphStore(graphName)
+		return nil, fmt.Errorf("GraphStore is required for GraphRAG retriever")
 	}
 
 	// 2. Initialize the retriever using the expanded Options
