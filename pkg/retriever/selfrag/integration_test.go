@@ -8,6 +8,7 @@ import (
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/retriever/selfrag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -36,7 +37,7 @@ func (m *mockVectorStore) Search(ctx context.Context, query []float32, topK int,
 	return args.Get(0).([]*core.Vector), args.Get(1).([]float32), args.Error(2)
 }
 func (m *mockVectorStore) Delete(ctx context.Context, id string) error { return nil }
-func (m *mockVectorStore) Close(ctx context.Context) error           { return nil }
+func (m *mockVectorStore) Close(ctx context.Context) error             { return nil }
 
 // MockEmbedder locally defined
 type mockEmbedder struct{ mock.Mock }
@@ -85,7 +86,7 @@ func TestSelfRAGWithSQLiteEnrichment(t *testing.T) {
 	// 2. Prepare Data
 	docID := "doc_001"
 	fullContent := "GoRAG is a high-performance RAG framework written in Go. Created in 2024."
-	
+
 	doc := &core.Document{
 		ID:      docID,
 		Content: fullContent,
@@ -132,7 +133,7 @@ func TestSelfRAGWithSQLiteEnrichment(t *testing.T) {
 
 	// 5. Execute
 	resp, err := retriever.Retrieve(ctx, []string{queryText}, 5)
-	
+
 	// 6. Assertions
 	require.NoError(t, err)
 	assert.Len(t, resp, 1)

@@ -8,7 +8,9 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
 	"github.com/DotNetAge/gorag/pkg/indexing/store/neo4j"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/milvus"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/pinecone"
@@ -69,6 +71,7 @@ func ClearParsers() IndexerOption {
 		idx.registry = types.NewParserRegistry()
 	}
 }
+
 // WithVectorStore sets a custom vector store.
 func WithVectorStore(s core.VectorStore) IndexerOption {
 	return func(idx *defaultIndexer) {
@@ -165,7 +168,11 @@ func WithZapLogger(path string, maxSizeMB, maxDays, maxBackups int, console bool
 
 func WithNeoGraph(uri, username, password, dbName string) IndexerOption {
 	return func(idx *defaultIndexer) {
-		idx.graphStore, _ = neo4j.NewGraphStore(uri, username, password, dbName)
+		gs, err := neo4j.NewGraphStore(uri, username, password, dbName)
+		if err != nil {
+			return
+		}
+		idx.graphStore = gs
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexing"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	stepinx "github.com/DotNetAge/gorag/pkg/steps/indexing"
@@ -333,7 +334,7 @@ func NewMultimodalGraphIndexer(
 func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 	// 1. Set default internal state
 	idx := &defaultIndexer{
-		logger:  logging.DefaultNoopLogger(),
+		logger:   logging.DefaultNoopLogger(),
 		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
@@ -412,7 +413,7 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 // It features increased worker concurrency and optimized defaults for enterprise workloads.
 func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
-		logger:  logging.DefaultNoopLogger(),
+		logger:   logging.DefaultNoopLogger(),
 		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
@@ -472,7 +473,7 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 // It integrates graph-based entity relationship extraction for complex query understanding.
 func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 	idx := &defaultIndexer{
-		logger:  logging.DefaultNoopLogger(),
+		logger:   logging.DefaultNoopLogger(),
 		registry: types.DefaultRegistry,
 		config: Config{
 			Concurrency: true,
@@ -520,7 +521,7 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 		idx.docStore = dStore
 	}
 
-	if idx.graphStore == nil && idx.enableGraph {
+	if idx.graphStore == nil {
 		return nil, fmt.Errorf("GraphStore is required when GraphRAG is enabled")
 	}
 

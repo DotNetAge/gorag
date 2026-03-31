@@ -36,6 +36,8 @@ import (
 	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/di"
 	"github.com/DotNetAge/gorag/pkg/indexer"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/gograph"
+	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
@@ -491,11 +493,11 @@ func buildRAG(cfg *RAGConfig, mode string) (RAG, error) {
 		if ctr.IsRegistered((*store.GraphStore)(nil)) {
 			gStore = ctr.MustResolve((*store.GraphStore)(nil)).(store.GraphStore)
 		} else {
-			graphName := "graph.bolt"
+			graphName := "graph.gograph.db"
 			if cfg.Name != "" {
-				graphName = fmt.Sprintf("graph_%s.bolt", cfg.Name)
+				graphName = fmt.Sprintf("graph_%s.gograph.db", cfg.Name)
 			}
-			gStore, err = bolt.NewGraphStore(fmt.Sprintf("%s/%s", cfg.WorkDir, graphName))
+			gStore, err = gograph.NewGraphStore(fmt.Sprintf("%s/%s", cfg.WorkDir, graphName))
 			if err != nil {
 				return nil, fmt.Errorf("failed to init graph store: %w", err)
 			}
