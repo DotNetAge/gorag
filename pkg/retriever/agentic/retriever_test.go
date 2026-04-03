@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/agent"
-	"github.com/DotNetAge/gorag/pkg/core/store"
+	"github.com/DotNetAge/gorag/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -20,29 +19,29 @@ func (m *mockAgent) Name() string {
 	return args.String(0)
 }
 
-func (m *mockAgent) AddTool(tool agent.Tool) {
+func (m *mockAgent) AddTool(tool core.Tool) {
 	m.Called(tool)
 }
 
-func (m *mockAgent) Chat(ctx context.Context, query string, history []chat.Message) (*agent.AgentResponse, error) {
+func (m *mockAgent) Chat(ctx context.Context, query string, history []chat.Message) (*core.AgentResponse, error) {
 	args := m.Called(ctx, query, history)
-	return args.Get(0).(*agent.AgentResponse), args.Error(1)
+	return args.Get(0).(*core.AgentResponse), args.Error(1)
 }
 
-func (m *mockAgent) Memory() store.ChatMemory {
+func (m *mockAgent) Memory() core.ChatMemory {
 	args := m.Called()
-	return args.Get(0).(store.ChatMemory)
+	return args.Get(0).(core.ChatMemory)
 }
 
 func TestAgenticRetriever_Retrieve(t *testing.T) {
 	ctx := context.Background()
 	queryText := "Explain the RAG process."
-	
+
 	mAgent := new(mockAgent)
 	mAgent.On("Name").Return("TestAgent")
-	mAgent.On("Chat", ctx, queryText, mock.Anything).Return(&agent.AgentResponse{
+	mAgent.On("Chat", ctx, queryText, mock.Anything).Return(&core.AgentResponse{
 		Response: "RAG involves retrieval and generation.",
-		Steps: []agent.AgentStep{
+		Steps: []core.AgentStep{
 			{Thought: "I should explain RAG.", Action: "None", Observation: "Initial thought."},
 		},
 	}, nil).Once()
@@ -54,10 +53,10 @@ func TestAgenticRetriever_Retrieve(t *testing.T) {
 	assert.Len(t, results, 1)
 	assert.Equal(t, "RAG involves retrieval and generation.", results[0].Answer)
 	assert.Equal(t, queryText, results[0].Query)
-	
+
 	// Check if agent steps are in metadata
 	assert.NotNil(t, results[0].Metadata["agent_steps"])
-	steps := results[0].Metadata["agent_steps"].([]agent.AgentStep)
+	steps := results[0].Metadata["agent_steps"].([]core.AgentStep)
 	assert.Len(t, steps, 1)
 	assert.Equal(t, "I should explain RAG.", steps[0].Thought)
 

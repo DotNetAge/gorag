@@ -18,14 +18,13 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/indexing"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	stepinx "github.com/DotNetAge/gorag/pkg/steps/indexing"
+	"github.com/DotNetAge/gorag/pkg/store/doc/sqlite"
+	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -45,8 +44,8 @@ type defaultIndexer struct {
 	registry    *types.ParserRegistry
 	watchDirs   []string
 	vectorStore core.VectorStore
-	docStore    store.DocStore
-	graphStore  store.GraphStore
+	docStore    core.DocStore
+	graphStore  core.GraphStore
 	chunker     core.SemanticChunker
 	embedder    embedding.Provider
 	extractor   core.EntityExtractor
@@ -225,7 +224,7 @@ func NewVectorIndexer(
 	chunker core.SemanticChunker,
 	embedder embedding.Provider,
 	vectorStore core.VectorStore,
-	docStore store.DocStore,
+	docStore core.DocStore,
 	logger logging.Logger,
 	metrics core.Metrics,
 	opts ...IndexerOption,
@@ -281,8 +280,8 @@ func NewMultimodalGraphIndexer(
 	embedder embedding.MultimodalProvider,
 	entityExtractor core.EntityExtractor,
 	vectorStore core.VectorStore,
-	docStore store.DocStore,
-	graphStore store.GraphStore,
+	docStore core.DocStore,
+	graphStore core.GraphStore,
 	logger logging.Logger,
 	metrics core.Metrics,
 	opts ...IndexerOption,

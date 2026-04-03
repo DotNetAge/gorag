@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -18,12 +17,12 @@ type sqliteDocStore struct {
 }
 
 // DefaultDocStore creates a SQLite DocStore using a default local file "gorag_docs.db".
-func DefaultDocStore() (store.DocStore, error) {
+func DefaultDocStore() (core.DocStore, error) {
 	return NewDocStore("gorag_docs.db")
 }
 
-// NewDocStore creates a new SQLite based document store.
-func NewDocStore(path string) (store.DocStore, error) {
+// NewDocStore creates a new SQLite based document core.
+func NewDocStore(path string) (core.DocStore, error) {
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {

@@ -14,11 +14,3 @@ type Embedder interface {
 	// Dimension returns the dimension of the embedding vectors.
 	Dimension() int
 }
-
-// MultimodalEmbedder extends Embedder to support multi-modal inputs (text and images).
-// It encodes both text and image inputs into a shared vector space for cross-modal retrieval.
-type MultimodalEmbedder interface {
-	Embedder
-	// EmbedImage encodes raw image bytes (JPEG/PNG) into a vector in the shared embedding space.
-	EmbedImage(ctx context.Context, imageData []byte) ([]float32, error)
-}

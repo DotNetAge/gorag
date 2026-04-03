@@ -9,11 +9,6 @@ import (
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
-// Searcher defines the interface for sparse search operations.
-type Searcher interface {
-	Search(ctx context.Context, query string, topK int) ([]*Result, error)
-}
-
 // Result represents a sparse search result.
 type Result struct {
 	Chunk *core.Chunk
@@ -22,10 +17,12 @@ type Result struct {
 
 // search retrieves relevant chunks using BM25 sparse core.
 type search struct {
-	searcher Searcher
-	topK     int
-	logger   logging.Logger
-	metrics  core.Metrics
+	searcher interface {
+		Search(ctx context.Context, query string, topK int) ([]*Result, error)
+	}
+	topK    int
+	logger  logging.Logger
+	metrics core.Metrics
 }
 
 // Search creates a new BM25 sparse search step with logger and metrics.
@@ -40,7 +37,9 @@ type search struct {
 //
 //	p.AddStep(sparse.Search(searcher, 20, logger, metrics))
 func Search(
-	searcher Searcher,
+	searcher interface {
+		Search(ctx context.Context, query string, topK int) ([]*Result, error)
+	},
 	topK int,
 	logger logging.Logger,
 	metrics core.Metrics,

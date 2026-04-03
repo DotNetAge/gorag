@@ -8,8 +8,8 @@ import (
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
 	"github.com/DotNetAge/gorag/pkg/retriever/selfrag"
+	"github.com/DotNetAge/gorag/pkg/store/doc/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

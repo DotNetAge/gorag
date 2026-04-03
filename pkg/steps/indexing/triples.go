@@ -6,20 +6,19 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/base"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 type triples struct {
 	extractor *base.TriplesExtractor
-	store     store.GraphStore
+	store     core.GraphStore
 	logger    logging.Logger
 }
 
 // ExtractTriples creates a new step for automated knowledge graph construction.
 // It extracts triples (Subject-Predicate-Object) from chunks and upserts them into the GraphStore.
-func ExtractTriples(extractor *base.TriplesExtractor, graphStore store.GraphStore, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
+func ExtractTriples(extractor *base.TriplesExtractor, graphStore core.GraphStore, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
@@ -58,7 +57,7 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 	state.Chunks = outChan
 
 	s.logger.Info("Starting automated triples extraction for graph construction", map[string]any{
-		"file": state.FilePath,
+		"file":   state.FilePath,
 		"chunks": len(allChunks),
 	})
 

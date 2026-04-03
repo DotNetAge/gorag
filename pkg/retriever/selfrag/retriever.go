@@ -9,7 +9,6 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
@@ -222,7 +221,7 @@ type Options struct {
 	topK       int
 	threshold  float32
 	maxRetries int
-	docStore   store.DocStore
+	docStore   core.DocStore
 	logger     logging.Logger
 	tracer     observability.Tracer
 }
@@ -256,7 +255,7 @@ func WithMaxRetries(r int) Option {
 	}
 }
 
-func WithDocStore(s store.DocStore) Option {
+func WithDocStore(s core.DocStore) Option {
 	return func(o *Options) {
 		o.docStore = s
 	}

@@ -44,7 +44,11 @@ type BenchmarkResult struct {
 }
 
 // RunBenchmark executes a full evaluation suite against a retriever.
-func RunBenchmark(ctx context.Context, retriever core.Retriever, judge LLMJudge, cases []TestCase, topK int) (*BenchmarkResult, error) {
+func RunBenchmark(ctx context.Context, retriever core.Retriever, judge interface {
+	EvaluateFaithfulness(ctx context.Context, query string, chunks []*core.Chunk, answer string) (score float32, reason string, err error)
+	EvaluateAnswerRelevance(ctx context.Context, query string, answer string) (score float32, reason string, err error)
+	EvaluateContextPrecision(ctx context.Context, query string, chunks []*core.Chunk) (score float32, reason string, err error)
+}, cases []TestCase, topK int) (*BenchmarkResult, error) {
 	totalStart := time.Now()
 	res := &BenchmarkResult{
 		TotalCases: len(cases),

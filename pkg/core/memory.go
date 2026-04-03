@@ -1,4 +1,4 @@
-package store
+package core
 
 import (
 	"context"
@@ -11,13 +11,13 @@ import (
 type ChatMemory interface {
 	// AddUserMessage appends a user query to memory
 	AddUserMessage(ctx context.Context, sessionID string, msg string) error
-	
+
 	// AddAIMessage appends agent's response
 	AddAIMessage(ctx context.Context, sessionID string, msg string) error
-	
+
 	// GetMessages returns conversational history tailored for context limits
 	GetMessages(ctx context.Context, sessionID string) ([]chat.Message, error)
-	
+
 	// Clear flushes history
 	Clear(ctx context.Context, sessionID string) error
 }

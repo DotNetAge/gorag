@@ -6,20 +6,19 @@ import (
 	"strings"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 // CypherStep allows using Cypher templates for deep relationship retrieval.
 // It is specifically designed for GraphStores that support Cypher (like Neo4j).
 type CypherStep struct {
-	store    store.GraphStore
+	store    core.GraphStore
 	template string // Cypher template, e.g., MATCH (p:Entity {id: $id})-[:WORKS_AT]->(c)-[:CEO_OF]-(ceo) RETURN ceo.id as name
 	logger   logging.Logger
 }
 
 // NewCypherStep creates a new step for Cypher-based graph retrieval.
-func NewCypherStep(store store.GraphStore, template string, logger logging.Logger) *CypherStep {
+func NewCypherStep(store core.GraphStore, template string, logger logging.Logger) *CypherStep {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}

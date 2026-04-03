@@ -12,15 +12,15 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
+	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
 	"golang.org/x/sync/errgroup"
 )
+
 const defaultGraphRAGPrompt = `You are a helpful and professional AI assistant.
 Please answer the user's question based on the provided reference documents and knowledge graph context.
 If the information do not contain the answer, say "I don't know based on the provided context."
@@ -86,7 +86,7 @@ func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 // NewRetriever creates a new GraphRAG retriever.
 func NewRetriever(
 	vectorStore core.VectorStore,
-	graphStore store.GraphStore,
+	graphStore core.GraphStore,
 	embedder embedding.Provider,
 	llm chat.Client,
 	opts ...Option,
@@ -194,8 +194,8 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 
 // entityExtractionStep extracts entities from query and stores them in context.
 type entityExtractionStep struct {
-	extractor core.EntityExtractor
-	logger    logging.Logger
+	extractor   core.EntityExtractor
+	logger      logging.Logger
 	failOnError bool
 }
 
@@ -232,7 +232,7 @@ func (s *entityExtractionStep) Execute(ctx context.Context, context *core.Retrie
 
 // graphSearchStep searches the knowledge graph using extracted entities.
 type graphSearchStep struct {
-	store  store.GraphStore
+	store  core.GraphStore
 	depth  int
 	limit  int
 	logger logging.Logger
@@ -397,13 +397,13 @@ type Options struct {
 	depth          int
 	limit          int
 	promptTemplate string
-	docStore       store.DocStore
+	docStore       core.DocStore
 	logger         logging.Logger
 	tracer         observability.Tracer
 	embedder       embedding.Provider
 	llm            chat.Client
 	vectorStore    core.VectorStore
-	graphStore     store.GraphStore
+	graphStore     core.GraphStore
 	customSteps    []pipeline.Step[*core.RetrievalContext]
 }
 
@@ -415,7 +415,7 @@ func WithVectorStore(s core.VectorStore) Option {
 	return func(o *Options) { o.vectorStore = s }
 }
 
-func WithGraphStore(s store.GraphStore) Option {
+func WithGraphStore(s core.GraphStore) Option {
 	return func(o *Options) { o.graphStore = s }
 }
 func defaultOptions() *Options {
@@ -461,7 +461,7 @@ func WithLimit(l int) Option {
 	}
 }
 
-func WithDocStore(s store.DocStore) Option {
+func WithDocStore(s core.DocStore) Option {
 	return func(o *Options) {
 		o.docStore = s
 	}

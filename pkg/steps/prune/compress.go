@@ -30,7 +30,7 @@ type compress struct {
 // Example:
 //
 //	p.AddStep(prune.Compress(llm, logger, metrics, 300))
-func Compress(llm core.Client, logger logging.Logger, metrics core.Metrics, maxTokens int) pipeline.Step[*core.RetrievalContext] {
+func Compress(llm chat.Client, logger logging.Logger, metrics core.Metrics, maxTokens int) pipeline.Step[*core.RetrievalContext] {
 	if maxTokens <= 0 {
 		maxTokens = 300
 	}

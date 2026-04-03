@@ -9,13 +9,12 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/answer"
 	stepgen "github.com/DotNetAge/gorag/pkg/steps/generate"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
+	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
 )
 
 type nativeRetriever struct {
@@ -33,20 +32,20 @@ type Options struct {
 	TopK        int
 	WorkDir     string
 	VectorStore core.VectorStore
-	DocStore    store.DocStore
+	DocStore    core.DocStore
 }
 
 type Option func(*Options)
 
-func WithName(name string) Option                { return func(o *Options) { o.Name = name } }
+func WithName(name string) Option               { return func(o *Options) { o.Name = name } }
 func WithVectorStore(s core.VectorStore) Option { return func(o *Options) { o.VectorStore = s } }
-func WithDocStore(s store.DocStore) Option       { return func(o *Options) { o.DocStore = s } }
-func WithWorkDir(dir string) Option              { return func(o *Options) { o.WorkDir = dir } }
-func WithLogger(l logging.Logger) Option         { return func(o *Options) { o.Logger = l } }
-func WithTracer(t observability.Tracer) Option    { return func(o *Options) { o.Tracer = t } }
-func WithEmbedder(e embedding.Provider) Option    { return func(o *Options) { o.Embedder = e } }
-func WithLLM(l chat.Client) Option               { return func(o *Options) { o.LLM = l } }
-func WithTopK(k int) Option                      { return func(o *Options) { o.TopK = k } }
+func WithDocStore(s core.DocStore) Option       { return func(o *Options) { o.DocStore = s } }
+func WithWorkDir(dir string) Option             { return func(o *Options) { o.WorkDir = dir } }
+func WithLogger(l logging.Logger) Option        { return func(o *Options) { o.Logger = l } }
+func WithTracer(t observability.Tracer) Option  { return func(o *Options) { o.Tracer = t } }
+func WithEmbedder(e embedding.Provider) Option  { return func(o *Options) { o.Embedder = e } }
+func WithLLM(l chat.Client) Option              { return func(o *Options) { o.LLM = l } }
+func WithTopK(k int) Option                     { return func(o *Options) { o.TopK = k } }
 
 // DefaultNativeRetriever creates an out-of-the-box Native Retriever.
 func DefaultNativeRetriever(opts ...Option) (core.Retriever, error) {

@@ -29,7 +29,7 @@ type rewrite struct {
 //
 //	p.AddStep(rewrite.Rewrite(llm, logger, metrics))
 func Rewrite(
-	llm core.Client,
+	llm chat.Client,
 	logger logging.Logger,
 	metrics core.Metrics,
 ) pipeline.Step[*core.RetrievalContext] {

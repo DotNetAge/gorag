@@ -6,15 +6,14 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 // multiStore routes and persists data to multiple storage backends.
 type multiStore struct {
 	vectorStore core.VectorStore
-	docStore    store.DocStore
-	graphStore  store.GraphStore
+	docStore    core.DocStore
+	graphStore  core.GraphStore
 	logger      logging.Logger
 	metrics     core.Metrics
 }
@@ -22,8 +21,8 @@ type multiStore struct {
 // MultiStore creates a step to store chunks, vectors, and entities to multiple backends.
 func MultiStore(
 	vectorStore core.VectorStore,
-	docStore store.DocStore,
-	graphStore store.GraphStore,
+	docStore core.DocStore,
+	graphStore core.GraphStore,
 	logger logging.Logger,
 	metrics core.Metrics,
 ) pipeline.Step[*core.IndexingContext] {
@@ -68,7 +67,7 @@ func (s *multiStore) Execute(ctx context.Context, state *core.IndexingContext) e
 			"filename": state.Metadata.FileName,
 			"size":     state.Metadata.Size,
 		})
-		
+
 		if err := s.docStore.SetDocument(ctx, doc); err != nil {
 			s.logger.Error("Failed to store main document in DocStore", err, nil)
 		}

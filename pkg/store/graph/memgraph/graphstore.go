@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -44,7 +43,7 @@ func defaultOptions() *Options {
 }
 
 // DefaultGraphStore creates a Memgraph GraphStore using default connection settings.
-func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
+func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -52,8 +51,8 @@ func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
 	return NewGraphStore(options.URI, options.Username, options.Password)
 }
 
-// NewGraphStore creates a new Memgraph based graph store.
-func NewGraphStore(uri, username, password string) (store.GraphStore, error) {
+// NewGraphStore creates a new Memgraph based graph core.
+func NewGraphStore(uri, username, password string) (core.GraphStore, error) {
 	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(username, password, ""))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memgraph driver: %w", err)
@@ -125,7 +124,7 @@ func (s *memgraphStore) GetNode(ctx context.Context, id string) (*core.Node, err
 			record := res.Record()
 			labels, _ := record.Get("labels")
 			props, _ := record.Get("props")
-			
+
 			node := &core.Node{
 				ID:         id,
 				Properties: props.(map[string]any),
@@ -171,16 +170,16 @@ func (s *memgraphStore) GetNeighbors(ctx context.Context, nodeID string, depth i
 		data := &graphData{}
 		visitedNodes := make(map[string]bool)
 		visitedEdges := make(map[string]bool)
-		
+
 		for res.Next(ctx) {
 			record := res.Record()
-			
+
 			// Parse Node
 			mRaw, _ := record.Get("m")
 			if mRaw != nil {
 				mNode := mRaw.(neo4j.Node)
 				mID, _ := mNode.Props["id"].(string)
-				
+
 				if mID != "" && !visitedNodes[mID] {
 					visitedNodes[mID] = true
 					node := &core.Node{

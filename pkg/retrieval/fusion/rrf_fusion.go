@@ -7,7 +7,7 @@ import (
 )
 
 // ensure interface implementation
-var _ FusionEngine = (*RRFFusionEngine)(nil)
+var _ core.FusionEngine = (*RRFFusionEngine)(nil)
 
 // RRFFusionEngine implements Reciprocal Rank Fusion.
 // RRF computes a score for each chunk based on its rank in multiple result sets.

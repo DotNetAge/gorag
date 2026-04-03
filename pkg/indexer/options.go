@@ -5,19 +5,18 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/indexing/chunker"
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/bolt"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/neo4j"
-	"github.com/DotNetAge/gorag/pkg/indexing/store/sqlite"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/milvus"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/pinecone"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/qdrant"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/weaviate"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/observability"
+	"github.com/DotNetAge/gorag/pkg/store/doc/bolt"
+	"github.com/DotNetAge/gorag/pkg/store/doc/sqlite"
+	"github.com/DotNetAge/gorag/pkg/store/graph/neo4j"
+	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
+	"github.com/DotNetAge/gorag/pkg/store/vector/milvus"
+	"github.com/DotNetAge/gorag/pkg/store/vector/pinecone"
+	"github.com/DotNetAge/gorag/pkg/store/vector/qdrant"
+	"github.com/DotNetAge/gorag/pkg/store/vector/weaviate"
 )
 
 // IndexerOption defines a function to configure the indexer.
@@ -72,15 +71,15 @@ func ClearParsers() IndexerOption {
 	}
 }
 
-// WithVectorStore sets a custom vector store.
+// WithVectorStore sets a custom vector core.
 func WithVectorStore(s core.VectorStore) IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.vectorStore = s
 	}
 }
 
-// WithDocStore sets a custom document store.
-func WithDocStore(s store.DocStore) IndexerOption {
+// WithDocStore sets a custom document core.
+func WithDocStore(s core.DocStore) IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.docStore = s
 	}
@@ -95,14 +94,14 @@ func WithWatchDir(dirs ...string) IndexerOption {
 
 // --- Default Component Options (Zero Configuration) ---
 
-// WithDefaultGoVector configures the indexer with an out-of-the-box local GoVector store.
+// WithDefaultGoVector configures the indexer with an out-of-the-box local GoVector core.
 func WithDefaultGoVector() IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.vectorStore, _ = govector.DefaultStore()
 	}
 }
 
-// WithDefaultSQLiteDoc configures the indexer with an out-of-the-box local SQLite doc store.
+// WithDefaultSQLiteDoc configures the indexer with an out-of-the-box local SQLite doc core.
 func WithDefaultSQLiteDoc() IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.docStore, _ = sqlite.DefaultDocStore()
@@ -229,7 +228,7 @@ func WithPinecone(indexName string, apiKey string, dimension int) IndexerOption 
 // --- Explicit Component Options (Advanced Use) ---
 
 // WithStore sets the vector and document stores explicitly.
-func WithStore(vectorStore core.VectorStore, docStore store.DocStore) IndexerOption {
+func WithStore(vectorStore core.VectorStore, docStore core.DocStore) IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.vectorStore = vectorStore
 		idx.docStore = docStore
@@ -237,7 +236,7 @@ func WithStore(vectorStore core.VectorStore, docStore store.DocStore) IndexerOpt
 }
 
 // WithGraph sets the graph store explicitly.
-func WithGraph(graphStore store.GraphStore) IndexerOption {
+func WithGraph(graphStore core.GraphStore) IndexerOption {
 	return func(idx *defaultIndexer) {
 		idx.graphStore = graphStore
 	}

@@ -9,12 +9,12 @@ import (
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/indexing/vectorstore/govector"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	"github.com/DotNetAge/gorag/pkg/retrieval/fusion"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/fuse"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
+	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
 )
 
 type fusionRetriever struct {
@@ -113,7 +113,7 @@ func (s *decompositionStep) Execute(ctx context.Context, rctx *core.RetrievalCon
 		rctx.Agentic.SubQueries = []string{rctx.Query.Text}
 		return nil
 	}
-	
+
 	if subQueries == nil || len(subQueries.SubQueries) == 0 {
 		rctx.Agentic.SubQueries = []string{rctx.Query.Text}
 	} else {
@@ -154,7 +154,7 @@ func NewFusionRetrieverWithComponents(
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
-	
+
 	p := pipeline.New[*core.RetrievalContext]()
 
 	// Step 1: Decompose query into sub-queries with defensive fallback

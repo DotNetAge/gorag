@@ -9,22 +9,7 @@ import (
 	chat "github.com/DotNetAge/gochat/pkg/core"
 )
 
-// LLMJudge provides production-grade Evaluation metrics (e.g., RAGAS) using an LLM as the evaluator.
-type LLMJudge interface {
-	// EvaluateFaithfulness checks if the generated answer is strictly grounded in the retrieved chunks.
-	EvaluateFaithfulness(ctx context.Context, query string, chunks []*core.Chunk, answer string) (score float32, reason string, err error)
-
-	// EvaluateAnswerRelevance checks if the answer effectively addresses the user's intent.
-	EvaluateAnswerRelevance(ctx context.Context, query string, answer string) (score float32, reason string, err error)
-
-	// EvaluateContextPrecision checks if the retrieved context actually contains the useful information.
-	EvaluateContextPrecision(ctx context.Context, query string, chunks []*core.Chunk) (score float32, reason string, err error)
-}
-
-// ensure interface implementation
-var _ LLMJudge = (*RagasLLMJudge)(nil)
-
-// RagasLLMJudge implements the LLMJudge interface using standard RAGAS-style prompts.
+// RagasLLMJudge implements standard RAGAS-style evaluation using an LLM.
 // It leverages a strong LLM (like GPT-4) to grade the pipeline's output.
 type RagasLLMJudge struct {
 	judgeLLM chat.Client

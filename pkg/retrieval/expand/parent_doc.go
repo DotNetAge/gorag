@@ -12,14 +12,9 @@ import (
 // ensure interface implementation
 var _ core.ResultEnhancer = (*ParentDoc)(nil)
 
-// DocumentStore is an interface for retrieving parent documents.
-type DocumentStore interface {
-	GetByID(ctx context.Context, id string) (*core.Document, error)
-}
-
 // ParentDoc expands retrieved chunks to their full parent documents.
 type ParentDoc struct {
-	docStore  DocumentStore
+	docStore  core.DocStore
 	logger    logging.Logger
 	collector observability.Collector
 }
@@ -46,7 +41,7 @@ func WithParentDocCollector(collector observability.Collector) ParentDocOption {
 }
 
 // NewParentDoc creates a new parent document expander.
-func NewParentDoc(docStore DocumentStore, opts ...ParentDocOption) *ParentDoc {
+func NewParentDoc(docStore core.DocStore, opts ...ParentDocOption) *ParentDoc {
 	e := &ParentDoc{
 		docStore:  docStore,
 		logger:    logging.DefaultNoopLogger(),
@@ -82,7 +77,7 @@ func (e *ParentDoc) Enhance(ctx context.Context, query *core.Query, chunks []*co
 			continue
 		}
 
-		parentDoc, err := e.docStore.GetByID(ctx, chunk.ParentID)
+		parentDoc, err := e.docStore.GetDocument(ctx, chunk.ParentID)
 		if err != nil || parentDoc == nil {
 			expandedChunks = append(expandedChunks, chunk)
 			continue

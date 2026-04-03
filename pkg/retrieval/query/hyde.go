@@ -10,7 +10,7 @@ import (
 )
 
 // ensure interface implementation
-var _ core.HyDEGenerator = (*HyDE)(nil)
+var _ core.Generator = (*HyDE)(nil)
 
 // HyDE generates hypothetical answers to improve search results.
 type HyDE struct {
@@ -22,8 +22,19 @@ func NewHyDE(llm chat.Client) *HyDE {
 	return &HyDE{llm: llm}
 }
 
-// Generate implements core.HyDEGenerator.
-func (h *HyDE) Generate(ctx context.Context, query *core.Query) (string, error) {
+// Generate implements core.Generator.
+func (h *HyDE) Generate(ctx context.Context, query *core.Query, chunks []*core.Chunk) (*core.Result, error) {
+	doc, err := h.GenerateHypotheticalDocument(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &core.Result{
+		Answer: doc,
+	}, nil
+}
+
+// GenerateHypotheticalDocument generates a hypothetical document.
+func (h *HyDE) GenerateHypotheticalDocument(ctx context.Context, query *core.Query) (string, error) {
 	prompt := fmt.Sprintf(`Please write a paragraph answering the following question.
 Write it as if you are a domain expert. Even if you don't know the exact answer, make an educated guess using relevant terminology and keywords.
 Do not include conversational filler like "Here is an answer".
@@ -37,9 +48,4 @@ Question: "%s"`, query.Text)
 	}
 
 	return strings.TrimSpace(response.Content), nil
-}
-
-// GenerateHypotheticalDocument implements core.HyDEGenerator compatibility.
-func (h *HyDE) GenerateHypotheticalDocument(ctx context.Context, query *core.Query) (string, error) {
-	return h.Generate(ctx, query)
 }

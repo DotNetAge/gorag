@@ -1,4 +1,4 @@
-package agent
+package core
 
 import (
 	"context"
@@ -18,13 +18,13 @@ type ToolResult struct {
 type Tool interface {
 	// Name must be unique within an agent
 	Name() string
-	
+
 	// Description provides semantic understanding to the LLM
 	Description() string
-	
+
 	// InputSchema returns JSON schema describing the required arguments
 	InputSchema() map[string]any
-	
+
 	// Call executes the tool logic
 	Call(ctx context.Context, input ToolInput) (*ToolResult, error)
 }

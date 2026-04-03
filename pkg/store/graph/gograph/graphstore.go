@@ -8,7 +8,6 @@ import (
 	api "github.com/DotNetAge/gograph/pkg/api"
 	"github.com/DotNetAge/gograph/pkg/graph"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 )
 
 func propertyValueToAny(pv graph.PropertyValue) any {
@@ -53,7 +52,7 @@ func defaultOptions() *Options {
 	}
 }
 
-func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
+func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -61,7 +60,7 @@ func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
 	return NewGraphStore(options.Path)
 }
 
-func NewGraphStore(path string) (store.GraphStore, error) {
+func NewGraphStore(path string) (core.GraphStore, error) {
 	db, err := api.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open gograph database: %w", err)

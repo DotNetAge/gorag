@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -23,12 +22,12 @@ type boltDocStore struct {
 }
 
 // DefaultDocStore creates a Bolt DocStore using a default local file "gorag_docs.bolt".
-func DefaultDocStore() (store.DocStore, error) {
+func DefaultDocStore() (core.DocStore, error) {
 	return NewDocStore("gorag_docs.bolt")
 }
 
-// NewDocStore creates a new BoltDB based document store.
-func NewDocStore(path string) (store.DocStore, error) {
+// NewDocStore creates a new BoltDB based document core.
+func NewDocStore(path string) (core.DocStore, error) {
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -134,7 +133,7 @@ func (s *boltDocStore) SetChunks(ctx context.Context, chunks []*core.Chunk) erro
 			if err := cb.Put([]byte(chunk.ID), data); err != nil {
 				return err
 			}
-			
+
 			docToChunksMap[chunk.DocumentID] = append(docToChunksMap[chunk.DocumentID], chunk.ID)
 		}
 
@@ -145,11 +144,11 @@ func (s *boltDocStore) SetChunks(ctx context.Context, chunks []*core.Chunk) erro
 			if existingData != nil {
 				_ = json.Unmarshal(existingData, &existingIDs)
 			}
-			
-			// Append new IDs (assuming no duplicates for simplicity, 
+
+			// Append new IDs (assuming no duplicates for simplicity,
 			// in a real scenario we might want to check for duplicates or use a set)
 			existingIDs = append(existingIDs, newChunkIDs...)
-			
+
 			indexData, err := json.Marshal(existingIDs)
 			if err != nil {
 				return err

@@ -5,17 +5,16 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 type docstoreEnrichStep struct {
-	store  store.DocStore
+	store  core.DocStore
 	logger logging.Logger
 }
 
 // EnrichWithDocStore creates a pipeline step to enrich retrieved chunks with full document context.
-func EnrichWithDocStore(s store.DocStore, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
+func EnrichWithDocStore(s core.DocStore, logger logging.Logger) pipeline.Step[*core.RetrievalContext] {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
@@ -47,7 +46,7 @@ func (s *docstoreEnrichStep) Execute(ctx context.Context, context *core.Retrieva
 					continue
 				}
 
-				// Attach parent document content to chunk metadata or replace content 
+				// Attach parent document content to chunk metadata or replace content
 				// depending on strategy. Here we add it to metadata for the generator to decide.
 				if chunk.Metadata == nil {
 					chunk.Metadata = make(map[string]any)

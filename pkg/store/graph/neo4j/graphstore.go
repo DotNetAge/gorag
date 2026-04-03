@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -52,7 +51,7 @@ func defaultOptions() *Options {
 }
 
 // DefaultGraphStore creates a Neo4j GraphStore using default connection settings.
-func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
+func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -60,8 +59,8 @@ func DefaultGraphStore(opts ...Option) (store.GraphStore, error) {
 	return NewGraphStore(options.URI, options.Username, options.Password, options.DBName)
 }
 
-// NewGraphStore creates a new Neo4j based graph store.
-func NewGraphStore(uri, username, password, dbName string) (store.GraphStore, error) {
+// NewGraphStore creates a new Neo4j based graph core.
+func NewGraphStore(uri, username, password, dbName string) (core.GraphStore, error) {
 	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(username, password, ""))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neo4j driver: %w", err)
@@ -109,7 +108,7 @@ func (s *neo4jGraphStore) UpsertEdges(ctx context.Context, edges []*core.Edge) e
 				MERGE (s)-[r:%s {id: $edgeID}]->(t)
 				SET r += $props
 			`, edge.Type)
-			
+
 			_, err := tx.Run(ctx, query, map[string]any{
 				"sourceID": edge.Source,
 				"targetID": edge.Target,
@@ -150,7 +149,7 @@ func (s *neo4jGraphStore) GetNode(ctx context.Context, id string) (*core.Node, e
 	}
 
 	neoNode := result.(neo4j.Node)
-	
+
 	nodeType := "Unknown"
 	for _, label := range neoNode.Labels {
 		if label != "Entity" {
@@ -191,7 +190,7 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 
 		for res.Next(ctx) {
 			record := res.Record()
-			
+
 			if nVal, ok := record.Get("n"); ok && nVal != nil {
 				n := nVal.(neo4j.Node)
 				id := n.Props["id"].(string)
@@ -223,7 +222,7 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 					if edgeID == "" {
 						edgeID = fmt.Sprintf("%s", r.ElementId)
 					}
-					
+
 					if _, exists := edgeMap[edgeID]; !exists {
 						edgeMap[edgeID] = &core.Edge{
 							ID:         edgeID,
@@ -234,7 +233,7 @@ func (s *neo4jGraphStore) GetNeighbors(ctx context.Context, nodeID string, depth
 				}
 			}
 		}
-		
+
 		nodes := make([]*core.Node, 0, len(nodeMap))
 		for _, n := range nodeMap {
 			nodes = append(nodes, n)

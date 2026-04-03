@@ -7,19 +7,18 @@ import (
 	chat "github.com/DotNetAge/gochat/pkg/core"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/agent"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 type agenticRetriever struct {
-	agent    agent.Agent
+	agent    core.Agent
 	pipeline *pipeline.Pipeline[*core.RetrievalContext]
 	logger   logging.Logger
 }
 
 // NewRetriever creates a new Agentic RAG retriever.
 func NewRetriever(
-	a agent.Agent,
+	a core.Agent,
 	opts ...Option,
 ) core.Retriever {
 	options := defaultOptions()
@@ -52,7 +51,7 @@ func (r *agenticRetriever) Retrieve(ctx context.Context, queries []string, topK 
 
 	for _, q := range queries {
 		retrievalCtx := core.NewRetrievalContext(ctx, q)
-		
+
 		// If session ID is provided in metadata, we can use it for memory
 		sessionID, _ := retrievalCtx.Query.Metadata["session_id"].(string)
 		if sessionID != "" {
@@ -74,9 +73,9 @@ func (r *agenticRetriever) Retrieve(ctx context.Context, queries []string, topK 
 			Chunks: allChunks,
 			Answer: retrievalCtx.Answer.Answer,
 		}
-		
+
 		// Attach agent steps to metadata for traceability
-		if steps, ok := retrievalCtx.Agentic.Custom["agent_steps"].([]agent.AgentStep); ok {
+		if steps, ok := retrievalCtx.Agentic.Custom["agent_steps"].([]core.AgentStep); ok {
 			if res.Metadata == nil {
 				res.Metadata = make(map[string]any)
 			}
@@ -89,9 +88,9 @@ func (r *agenticRetriever) Retrieve(ctx context.Context, queries []string, topK 
 	return results, nil
 }
 
-// agentStep is a pipeline step that delegates execution to an agent.
+// agentStep is a pipeline step that delegates execution to an core.
 type agentStep struct {
-	agent  agent.Agent
+	agent  core.Agent
 	logger logging.Logger
 }
 

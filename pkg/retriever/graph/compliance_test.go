@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/core/store"
 	"github.com/stretchr/testify/assert"
 )
 
 type auditMockGraphStore struct {
-	store.GraphStore
+	core.GraphStore
 	delay time.Duration
 }
 
@@ -27,16 +26,16 @@ func TestAuditStandard_Graph_ConcurrentPerformance(t *testing.T) {
 	// 每个查询延迟 100ms
 	mock := &auditMockGraphStore{delay: 100 * time.Millisecond}
 	step := &graphSearchStep{store: mock, depth: 1, limit: 10, logger: nil}
-	
+
 	ctx := context.Background()
 	rctx := core.NewRetrievalContext(ctx, "test")
 	// 模拟提取了 5 个实体
 	rctx.Custom["extracted_entities"] = []string{"e1", "e2", "e3", "e4", "e5"}
-	
+
 	start := time.Now()
 	err := step.Execute(ctx, rctx)
 	duration := time.Since(start)
-	
+
 	assert.NoError(t, err)
 	// 如果是串行，耗时 > 500ms；如果是并发，耗时应约 100ms
 	assert.Less(t, duration, 250*time.Millisecond, "Graph search must be concurrent to save time")
@@ -46,17 +45,17 @@ func TestAuditStandard_Graph_ConcurrentPerformance(t *testing.T) {
 func TestAuditStandard_Graph_EntityLimit(t *testing.T) {
 	mock := &auditMockGraphStore{}
 	step := &graphSearchStep{store: mock, depth: 1, limit: 10, logger: nil}
-	
+
 	ctx := context.Background()
 	rctx := core.NewRetrievalContext(ctx, "test")
-	
+
 	// 模拟“实体爆炸” (100个实体)
 	entities := make([]string, 100)
 	for i := 0; i < 100; i++ {
 		entities[i] = "e"
 	}
 	rctx.Custom["extracted_entities"] = entities
-	
+
 	err := step.Execute(ctx, rctx)
 	assert.NoError(t, err)
 	// 检查生成的 graph_context，确保只有 10 个左右的结果

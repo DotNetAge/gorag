@@ -10,14 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// StepBackGenerator abstracts specific questions into broader background questions.
-type StepBackGenerator interface {
-	GenerateStepBackQuery(ctx context.Context, query *core.Query) (*core.Query, error)
-}
-
-// ensure interface implementation
-var _ StepBackGenerator = (*StepBack)(nil)
-
 // StepBack abstracts queries into higher-level background questions.
 type StepBack struct {
 	llm chat.Client
