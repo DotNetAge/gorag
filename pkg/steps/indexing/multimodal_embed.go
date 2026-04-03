@@ -37,12 +37,15 @@ func (s *multimodalEmbed) Execute(ctx context.Context, state *core.IndexingConte
 	}
 
 	var vectors []*core.Vector
+	var processedChunks []*core.Chunk
 	totalChunks := 0
 
 	for chunk := range state.Chunks {
 		if chunk == nil {
 			continue
 		}
+
+		processedChunks = append(processedChunks, chunk)
 
 		// Check modality
 		modality, _ := chunk.Metadata["modality"].(string)
@@ -88,7 +91,11 @@ func (s *multimodalEmbed) Execute(ctx context.Context, state *core.IndexingConte
 	if state.Vectors == nil {
 		state.Vectors = make([]*core.Vector, 0)
 	}
+	if state.ProcessedChunks == nil {
+		state.ProcessedChunks = make([]*core.Chunk, 0)
+	}
 	state.Vectors = append(state.Vectors, vectors...)
+	state.ProcessedChunks = append(state.ProcessedChunks, processedChunks...)
 	state.TotalChunks += totalChunks
 
 	if s.metrics != nil && totalChunks > 0 {

@@ -44,28 +44,31 @@ func (s *entities) Execute(ctx context.Context, state *core.IndexingContext) err
 		return fmt.Errorf("entity extractor not configured")
 	}
 
-	// Get chunks from state
-	if state.Chunks == nil {
-		return fmt.Errorf("no chunks to extract entities from")
-	}
-
-	// Collect all chunks first
+	// 1. Get chunks from state (prefer ProcessedChunks slice if available, fallback to Chunks channel)
 	var allChunks []*core.Chunk
-	for chunk := range state.Chunks {
-		if chunk != nil {
-			allChunks = append(allChunks, chunk)
+	if len(state.ProcessedChunks) > 0 {
+		allChunks = state.ProcessedChunks
+	} else if state.Chunks != nil {
+		// Collect from channel and re-create it for downstream
+		for chunk := range state.Chunks {
+			if chunk != nil {
+				allChunks = append(allChunks, chunk)
+			}
 		}
+		// Restore channel
+		chunkChan := make(chan *core.Chunk, len(allChunks))
+		for _, chunk := range allChunks {
+			chunkChan <- chunk
+		}
+		close(chunkChan)
+		state.Chunks = chunkChan
 	}
 
-	// Re-create channel for downstream steps
-	chunkChan := make(chan *core.Chunk, len(allChunks))
-	for _, chunk := range allChunks {
-		chunkChan <- chunk
+	if len(allChunks) == 0 {
+		return nil // Nothing to extract from
 	}
-	close(chunkChan)
-	state.Chunks = chunkChan
 
-	// Extract entities from each chunk
+	// 2. Extract entities from each chunk
 	for _, chunk := range allChunks {
 		query := core.NewQuery("", chunk.Content, nil)
 

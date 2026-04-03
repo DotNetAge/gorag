@@ -38,23 +38,29 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 		return fmt.Errorf("triples extractor or graph store not configured")
 	}
 
-	if state.Chunks == nil {
-		return nil
-	}
-
-	// Buffer chunks to allow extraction while maintaining the stream
+	// 1. Get chunks from state (prefer ProcessedChunks slice if available, fallback to Chunks channel)
 	var allChunks []*core.Chunk
-	for chunk := range state.Chunks {
-		allChunks = append(allChunks, chunk)
+	if len(state.ProcessedChunks) > 0 {
+		allChunks = state.ProcessedChunks
+	} else if state.Chunks != nil {
+		// Collect from channel and re-create it for downstream
+		for chunk := range state.Chunks {
+			if chunk != nil {
+				allChunks = append(allChunks, chunk)
+			}
+		}
+		// Restore channel
+		chunkChan := make(chan *core.Chunk, len(allChunks))
+		for _, chunk := range allChunks {
+			chunkChan <- chunk
+		}
+		close(chunkChan)
+		state.Chunks = chunkChan
 	}
 
-	// Restore channel for downstream steps
-	outChan := make(chan *core.Chunk, len(allChunks))
-	for _, c := range allChunks {
-		outChan <- c
+	if len(allChunks) == 0 {
+		return nil // Nothing to extract from
 	}
-	close(outChan)
-	state.Chunks = outChan
 
 	s.logger.Info("Starting automated triples extraction for graph construction", map[string]any{
 		"file":   state.FilePath,

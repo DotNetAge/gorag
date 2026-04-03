@@ -48,12 +48,15 @@ func (s *batch) Execute(ctx context.Context, state *core.IndexingContext) error 
 
 	// Collect and embed all chunks
 	var vectors []*core.Vector
+	var processedChunks []*core.Chunk
 	totalChunks := 0
 
 	for chunk := range state.Chunks {
 		if chunk == nil {
 			continue
 		}
+
+		processedChunks = append(processedChunks, chunk)
 
 		// Generate embedding for chunk content
 		embeddingResults, err := s.embedder.Embed(ctx, []string{chunk.Content})
@@ -78,8 +81,9 @@ func (s *batch) Execute(ctx context.Context, state *core.IndexingContext) error 
 		}
 	}
 
-	// Store vectors in state for StoreStep
+	// Store vectors and processed chunks in state for StoreStep
 	state.Vectors = vectors
+	state.ProcessedChunks = processedChunks
 	state.TotalChunks = totalChunks
 
 	// Record embedding metrics

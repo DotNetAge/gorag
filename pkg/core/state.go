@@ -22,9 +22,10 @@ type IndexingContext struct {
 	Chunks    <-chan *Chunk    `json:"-"`
 
 	// 产出产物
-	Vectors []*Vector `json:"vectors,omitempty"`
-	Nodes   []*Node   `json:"nodes,omitempty"`
-	Edges   []*Edge   `json:"edges,omitempty"`
+	ProcessedChunks []*Chunk  `json:"processed_chunks,omitempty"`
+	Vectors         []*Vector `json:"vectors,omitempty"`
+	Nodes           []*Node   `json:"nodes,omitempty"`
+	Edges           []*Edge   `json:"edges,omitempty"`
 
 	// 统计与指标
 	TotalChunks int            `json:"total_chunks,omitempty"`
