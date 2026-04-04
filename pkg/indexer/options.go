@@ -322,3 +322,13 @@ func WithExtractor(extractor core.EntityExtractor) IndexerOption {
 		idx.extractor = extractor
 	}
 }
+
+// WithTriplesExtractor sets the triples extractor for GraphRAG.
+// This enables automatic knowledge graph construction from documents.
+// When set, IndexDocuments will extract entities and relationships from text
+// and store them in GraphStore with document_id for cascade delete support.
+func WithTriplesExtractor(extractor core.TriplesExtractor) IndexerOption {
+	return func(idx *defaultIndexer) {
+		idx.triplesExtractor = extractor
+	}
+}

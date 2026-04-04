@@ -88,6 +88,11 @@ func NewCrossEncoder(llm chat.Client, opts ...CrossEncoderOption) *CrossEncoder 
 	return r
 }
 
+// Rerank implements core.Reranker interface by delegating to Enhance.
+func (r *CrossEncoder) Rerank(ctx context.Context, query *core.Query, chunks []*core.Chunk) ([]*core.Chunk, error) {
+	return r.Enhance(ctx, query, chunks)
+}
+
 // Enhance implements core.ResultEnhancer.
 func (r *CrossEncoder) Enhance(ctx context.Context, query *core.Query, chunks []*core.Chunk) ([]*core.Chunk, error) {
 	start := time.Now()

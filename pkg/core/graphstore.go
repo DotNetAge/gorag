@@ -7,10 +7,10 @@ import (
 // GraphStore defines the storage foundation for GraphRAG.
 // It tracks Nodes (Entities), Edges (Relationships), and supports semantic property queries.
 type GraphStore interface {
-	// AddNodes inserts or updates entities (e.g., PERSON, ORGANIZATION)
+	// UpsertNodes inserts or updates entities (e.g., PERSON, ORGANIZATION)
 	UpsertNodes(ctx context.Context, nodes []*Node) error
 
-	// AddEdges inserts or updates relationships between entities
+	// UpsertEdges inserts or updates relationships between entities
 	UpsertEdges(ctx context.Context, edges []*Edge) error
 
 	// GetNode retrieves a single node/entity by ID
@@ -18,6 +18,12 @@ type GraphStore interface {
 
 	// GetNeighbors fetches up to 'limit' connected edges and nodes starting from 'nodeID'
 	GetNeighbors(ctx context.Context, nodeID string, depth int, limit int) ([]*Node, []*Edge, error)
+
+	// DeleteNode removes a node by ID
+	DeleteNode(ctx context.Context, id string) error
+
+	// DeleteEdge removes an edge by ID
+	DeleteEdge(ctx context.Context, id string) error
 
 	// Query semantic graph structure. Implementations (Neo4j, Nebula) usually take Cypher/GQL.
 	Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error)

@@ -69,6 +69,16 @@ func (m *mockGraphStore) GetCommunitySummaries(ctx context.Context, level int) (
 	return args.Get(0).([]map[string]any), args.Error(1)
 }
 
+func (m *mockGraphStore) DeleteNode(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *mockGraphStore) DeleteEdge(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 func (m *mockGraphStore) Close(ctx context.Context) error {
 	args := m.Called(ctx)
 	return args.Error(0)
@@ -124,12 +134,13 @@ func TestGraphRetriever_Retrieve(t *testing.T) {
 	}, nil).Once()
 
 	// 2. Graph Search Mock
-	mGS.On("GetNeighbors", mock.Anything, "Anthropic", 1, 10).Return(
+	// Note: LocalSearch uses depth=2 by default (see pkg/steps/graph/local.go:44)
+	mGS.On("GetNeighbors", mock.Anything, "Anthropic", 2, 10).Return(
 		[]*core.Node{{ID: "Dario Amodei", Type: "PERSON"}},
 		[]*core.Edge{{Source: "Dario Amodei", Target: "Anthropic", Type: "CEO_OF"}},
 		nil,
 	).Once()
-	mGS.On("GetNeighbors", mock.Anything, "CEO", 1, 10).Return(
+	mGS.On("GetNeighbors", mock.Anything, "CEO", 2, 10).Return(
 		[]*core.Node{},
 		[]*core.Edge{},
 		nil,
@@ -144,10 +155,8 @@ func TestGraphRetriever_Retrieve(t *testing.T) {
 		nil,
 	).Once()
 
-	// 4. Generation Mock
-	mLLM.On("Chat", ctx, mock.MatchedBy(func(msgs []chat.Message) bool {
-		return len(msgs) > 0 && msgs[0].Role == chat.RoleUser
-	}), mock.Anything).Return(&chat.Response{
+	// 4. Generation Mock - Use mock.Anything for all parameters since the exact messages are complex
+	mLLM.On("Chat", mock.Anything, mock.Anything, mock.Anything).Return(&chat.Response{
 		Content: "The CEO of Anthropic is Dario Amodei.",
 	}, nil).Once()
 

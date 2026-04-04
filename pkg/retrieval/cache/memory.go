@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gorag/pkg/core"
 )
 
@@ -86,14 +87,14 @@ func defaultConfig() *Config {
 }
 
 type InMemorySemanticCache struct {
-	embedder core.Embedder
+	embedder embedding.Provider
 	config   *Config
 	entries  map[string]*cacheEntry
 	order    []string
 	lock     sync.RWMutex
 }
 
-func NewInMemorySemanticCache(embedder core.Embedder, opts ...CacheOption) *InMemorySemanticCache {
+func NewInMemorySemanticCache(embedder embedding.Provider, opts ...CacheOption) *InMemorySemanticCache {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(cfg)
@@ -107,7 +108,7 @@ func NewInMemorySemanticCache(embedder core.Embedder, opts ...CacheOption) *InMe
 	}
 }
 
-func NewInMemorySemanticCacheWithConfig(embedder core.Embedder, cfg *Config) *InMemorySemanticCache {
+func NewInMemorySemanticCacheWithConfig(embedder embedding.Provider, cfg *Config) *InMemorySemanticCache {
 	if cfg == nil {
 		cfg = defaultConfig()
 	}
@@ -125,10 +126,11 @@ func (c *InMemorySemanticCache) CheckCache(ctx context.Context, query *core.Quer
 		return &core.CacheResult{Hit: false}, nil
 	}
 
-	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
-	if err != nil {
+	queryEmbeddingMatrix, err := c.embedder.Embed(ctx, []string{query.Text})
+	if err != nil || len(queryEmbeddingMatrix) == 0 {
 		return nil, err
 	}
+	queryEmbedding := queryEmbeddingMatrix[0]
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -183,10 +185,11 @@ func (c *InMemorySemanticCache) CacheResponse(ctx context.Context, query *core.Q
 		return nil
 	}
 
-	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
-	if err != nil {
+	queryEmbeddingMatrix, err := c.embedder.Embed(ctx, []string{query.Text})
+	if err != nil || len(queryEmbeddingMatrix) == 0 {
 		return err
 	}
+	queryEmbedding := queryEmbeddingMatrix[0]
 
 	c.lock.Lock()
 	defer c.lock.Unlock()

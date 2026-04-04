@@ -259,6 +259,28 @@ func (s *memgraphStore) GetCommunitySummaries(ctx context.Context, level int) ([
 	return s.Query(ctx, query, map[string]any{"level": level})
 }
 
+func (s *memgraphStore) DeleteNode(ctx context.Context, id string) error {
+	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, "MATCH (n {id: $id}) DETACH DELETE n", map[string]any{"id": id})
+		return nil, err
+	})
+	return err
+}
+
+func (s *memgraphStore) DeleteEdge(ctx context.Context, id string) error {
+	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, "MATCH ()-[r {id: $id}]-() DELETE r", map[string]any{"id": id})
+		return nil, err
+	})
+	return err
+}
+
 func (s *memgraphStore) Close(ctx context.Context) error {
 	return s.driver.Close(ctx)
 }

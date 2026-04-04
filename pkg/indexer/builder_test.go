@@ -66,8 +66,10 @@ func TestDefaultIndexer_WithName(t *testing.T) {
 func TestDefaultIndexer_IndexFile_Init(t *testing.T) {
 	tmpDir := t.TempDir()
 	idxIface, err := DefaultIndexer(
+		WithName("test_index_file"),
 		WithParsers(&mockParser{}),
 		WithGoVector("test", filepath.Join(tmpDir, "vectors.db"), 1536),
+		WithBoltDoc(filepath.Join(tmpDir, "docs.bolt")),
 	)
 	require.NoError(t, err)
 	idx := idxIface.(*defaultIndexer)

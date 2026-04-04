@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gochat/pkg/pipeline"
@@ -23,7 +24,8 @@ import (
 	"github.com/DotNetAge/gorag/pkg/indexing/parser/config/types"
 	"github.com/DotNetAge/gorag/pkg/logging"
 	stepinx "github.com/DotNetAge/gorag/pkg/steps/indexing"
-	"github.com/DotNetAge/gorag/pkg/store/doc/sqlite"
+	"github.com/DotNetAge/gorag/pkg/store/doc/bolt"
+	"github.com/DotNetAge/gorag/pkg/store/graph/gograph"
 	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
 	"golang.org/x/sync/errgroup"
 )
@@ -34,22 +36,48 @@ type Indexer interface {
 	indexing.Indexer
 	Init() error
 	Start() error
+	VectorStore() core.VectorStore
+	DocStore() core.DocStore
+	GraphStore() core.GraphStore
+	Embedder() embedding.Provider
+	Chunker() core.SemanticChunker
 }
 
 type defaultIndexer struct {
-	name        string
-	pipeline    *pipeline.Pipeline[*core.IndexingContext]
-	config      Config
-	logger      logging.Logger
-	registry    *types.ParserRegistry
-	watchDirs   []string
-	vectorStore core.VectorStore
-	docStore    core.DocStore
-	graphStore  core.GraphStore
-	chunker     core.SemanticChunker
-	embedder    embedding.Provider
-	extractor   core.EntityExtractor
-	metrics     core.Metrics
+	name             string
+	pipeline         *pipeline.Pipeline[*core.IndexingContext]
+	config           Config
+	logger           logging.Logger
+	registry         *types.ParserRegistry
+	watchDirs        []string
+	vectorStore      core.VectorStore
+	docStore         core.DocStore
+	graphStore       core.GraphStore
+	chunker          core.SemanticChunker
+	embedder         embedding.Provider
+	extractor        core.EntityExtractor
+	triplesExtractor core.TriplesExtractor // LLM-based triple extraction for GraphRAG
+	metrics          core.Metrics
+}
+
+func (idx *defaultIndexer) VectorStore() core.VectorStore {
+	return idx.vectorStore
+}
+
+func (idx *defaultIndexer) DocStore() core.DocStore {
+	return idx.docStore
+}
+
+func (idx *defaultIndexer) GraphStore() core.GraphStore {
+	return idx.graphStore
+}
+
+func (idx *defaultIndexer) Embedder() embedding.Provider {
+	return idx.embedder
+}
+
+func (idx *defaultIndexer) Chunker() core.SemanticChunker {
+	return idx.chunker
 }
 
 // Config defines the configuration for the indexer.
@@ -85,6 +113,11 @@ func (idx *defaultIndexer) Init() error {
 
 	if idx.extractor != nil {
 		p.AddSteps(stepinx.Entities(idx.extractor, idx.logger))
+	}
+
+	// GraphRAG: Extract triples and build knowledge graph
+	if idx.triplesExtractor != nil && idx.graphStore != nil {
+		p.AddStep(stepinx.ExtractTriples(idx.triplesExtractor, idx.graphStore, idx.logger))
 	}
 
 	if idx.vectorStore != nil || idx.docStore != nil || idx.graphStore != nil {
@@ -209,6 +242,319 @@ func (idx *defaultIndexer) IndexDirectory(ctx context.Context, dirPath string, r
 	return g.Wait()
 }
 
+// IndexText indexes plain text content directly without file parsing.
+func (idx *defaultIndexer) IndexText(ctx context.Context, text string, metadata ...map[string]any) error {
+	doc := core.NewDocument("", text, "text", "text/plain", nil)
+	if len(metadata) > 0 {
+		doc.Metadata = metadata[0]
+	}
+	return idx.IndexDocuments(ctx, doc)
+}
+
+// IndexTexts indexes multiple plain text contents in batch.
+func (idx *defaultIndexer) IndexTexts(ctx context.Context, texts []string, metadata ...map[string]any) error {
+	docs := make([]*core.Document, len(texts))
+	for i, text := range texts {
+		doc := core.NewDocument("", text, "text", "text/plain", nil)
+		if len(metadata) > 0 && i < len(metadata) {
+			doc.Metadata = metadata[i]
+		} else if len(metadata) > 0 {
+			doc.Metadata = metadata[0]
+		}
+		docs[i] = doc
+	}
+	return idx.IndexDocuments(ctx, docs...)
+}
+
+// IndexDocuments indexes documents directly into Vector/Doc/Graph stores.
+// This bypasses file parsing and is useful for programmatic document management.
+func (idx *defaultIndexer) IndexDocuments(ctx context.Context, docs ...*core.Document) error {
+	for _, doc := range docs {
+		if err := idx.indexDocument(ctx, doc); err != nil {
+			return fmt.Errorf("failed to index document %s: %w", doc.ID, err)
+		}
+	}
+	return nil
+}
+
+func (idx *defaultIndexer) indexDocument(ctx context.Context, doc *core.Document) error {
+	// Generate ID if not provided
+	if doc.ID == "" {
+		doc.ID = fmt.Sprintf("doc-%d", time.Now().UnixNano())
+	}
+
+	// 1. Chunk the document content
+	var chunks []*core.Chunk
+	if idx.chunker != nil {
+		var err error
+		chunks, err = idx.chunker.Chunk(ctx, doc)
+		if err != nil {
+			return fmt.Errorf("chunking failed: %w", err)
+		}
+	} else {
+		// No chunker: treat entire content as single chunk
+		chunks = []*core.Chunk{{
+			ID:         fmt.Sprintf("%s-chunk-0", doc.ID),
+			DocumentID: doc.ID,
+			Content:    doc.Content,
+			Metadata:   doc.Metadata,
+		}}
+	}
+
+	// Set DocumentID and merge metadata for each chunk
+	for i, chunk := range chunks {
+		if chunk.DocumentID == "" {
+			chunk.DocumentID = doc.ID
+		}
+		if chunk.ID == "" {
+			chunk.ID = fmt.Sprintf("%s-chunk-%d", doc.ID, i)
+		}
+		// Merge document metadata into chunk metadata
+		if chunk.Metadata == nil {
+			chunk.Metadata = make(map[string]any)
+		}
+		for k, v := range doc.Metadata {
+			if _, exists := chunk.Metadata[k]; !exists {
+				chunk.Metadata[k] = v
+			}
+		}
+		chunk.Metadata["source"] = doc.Source
+	}
+
+	// 2. Generate embeddings
+	if idx.embedder != nil && idx.vectorStore != nil {
+		texts := make([]string, len(chunks))
+		for i, c := range chunks {
+			texts[i] = c.Content
+		}
+
+		embeddings, err := idx.embedder.Embed(ctx, texts)
+		if err != nil {
+			return fmt.Errorf("embedding failed: %w", err)
+		}
+
+		// Store vectors using Upsert (batch)
+		vectors := make([]*core.Vector, len(chunks))
+		for i, chunk := range chunks {
+			vectors[i] = &core.Vector{
+				ID:       chunk.ID,
+				Values:   embeddings[i],
+				Metadata: chunk.Metadata,
+			}
+		}
+		if err := idx.vectorStore.Upsert(ctx, vectors); err != nil {
+			return fmt.Errorf("failed to store vectors: %w", err)
+		}
+	}
+
+	// 3. Store document and chunks
+	if idx.docStore != nil {
+		if err := idx.docStore.SetDocument(ctx, doc); err != nil {
+			return fmt.Errorf("failed to store document: %w", err)
+		}
+		if err := idx.docStore.SetChunks(ctx, chunks); err != nil {
+			return fmt.Errorf("failed to store chunks: %w", err)
+		}
+	}
+
+	// 4. Extract and store graph entities (GraphRAG sync)
+	if idx.graphStore != nil && idx.triplesExtractor != nil {
+		nodes, edges := idx.extractGraphEntities(ctx, doc.ID, chunks)
+		if len(nodes) > 0 {
+			if err := idx.graphStore.UpsertNodes(ctx, nodes); err != nil {
+				idx.logger.Warn("failed to store graph nodes", map[string]interface{}{
+					"doc_id": doc.ID,
+					"error":  err.Error(),
+				})
+			} else {
+				idx.logger.Debug("stored graph nodes", map[string]interface{}{
+					"doc_id": doc.ID,
+					"count":  len(nodes),
+				})
+			}
+		}
+		if len(edges) > 0 {
+			if err := idx.graphStore.UpsertEdges(ctx, edges); err != nil {
+				idx.logger.Warn("failed to store graph edges", map[string]interface{}{
+					"doc_id": doc.ID,
+					"error":  err.Error(),
+				})
+			} else {
+				idx.logger.Debug("stored graph edges", map[string]interface{}{
+					"doc_id": doc.ID,
+					"count":  len(edges),
+				})
+			}
+		}
+	}
+
+	return nil
+}
+
+// extractGraphEntities extracts nodes and edges from chunks for graph storage.
+// Each node/edge is tagged with document_id for cascade delete support.
+func (idx *defaultIndexer) extractGraphEntities(ctx context.Context, docID string, chunks []*core.Chunk) ([]*core.Node, []*core.Edge) {
+	nodeMap := make(map[string]*core.Node)
+	var edges []*core.Edge
+
+	for _, chunk := range chunks {
+		triples, err := idx.triplesExtractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			idx.logger.Warn("failed to extract triples from chunk", map[string]interface{}{
+				"chunk_id": chunk.ID,
+				"error":    err.Error(),
+			})
+			continue
+		}
+
+		for _, t := range triples {
+			// Create subject node (deduplicated)
+			if _, exists := nodeMap[t.Subject]; !exists {
+				nodeMap[t.Subject] = &core.Node{
+					ID:   t.Subject,
+					Type: t.SubjectType,
+					Properties: map[string]any{
+						"document_id":  docID,
+						"source_chunk": chunk.ID,
+					},
+				}
+			}
+
+			// Create object node (deduplicated)
+			if _, exists := nodeMap[t.Object]; !exists {
+				nodeMap[t.Object] = &core.Node{
+					ID:   t.Object,
+					Type: t.ObjectType,
+					Properties: map[string]any{
+						"document_id":  docID,
+						"source_chunk": chunk.ID,
+					},
+				}
+			}
+
+			// Create edge
+			edges = append(edges, &core.Edge{
+				ID:     fmt.Sprintf("%s-%s-%s", t.Subject, t.Predicate, t.Object),
+				Type:   t.Predicate,
+				Source: t.Subject,
+				Target: t.Object,
+				Properties: map[string]any{
+					"document_id":  docID,
+					"source_chunk": chunk.ID,
+				},
+			})
+		}
+	}
+
+	nodes := make([]*core.Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		nodes = append(nodes, n)
+	}
+
+	return nodes, edges
+}
+
+// DeleteDocument removes a document and all its associated data across all stores.
+// It performs cascade delete: DocStore → VectorStore → GraphStore
+func (idx *defaultIndexer) DeleteDocument(ctx context.Context, docID string) error {
+	// 1. Get all chunks for this document
+	chunks, err := idx.docStore.GetChunksByDocID(ctx, docID)
+	if err != nil {
+		return fmt.Errorf("failed to get chunks for document %s: %w", docID, err)
+	}
+
+	// 2. Delete vectors for each chunk
+	for _, chunk := range chunks {
+		if idx.vectorStore != nil {
+			if err := idx.vectorStore.Delete(ctx, chunk.ID); err != nil {
+				idx.logger.Warn("failed to delete vector", map[string]interface{}{"chunkID": chunk.ID, "error": err.Error()})
+			}
+		}
+	}
+
+	// 3. Cascade delete graph nodes and edges associated with this document
+	if idx.graphStore != nil {
+		if err := idx.deleteGraphByDocumentID(ctx, docID); err != nil {
+			idx.logger.Warn("failed to delete graph entities", map[string]interface{}{
+				"doc_id": docID,
+				"error":  err.Error(),
+			})
+			// Continue with document deletion even if graph cleanup fails
+		}
+	}
+
+	// 4. Delete document (which also deletes chunks in doc store)
+	if idx.docStore != nil {
+		if err := idx.docStore.DeleteDocument(ctx, docID); err != nil {
+			return fmt.Errorf("failed to delete document %s: %w", docID, err)
+		}
+	}
+
+	return nil
+}
+
+// deleteGraphByDocumentID removes all nodes and edges associated with a document.
+// This implements cascade delete for graph entities.
+func (idx *defaultIndexer) deleteGraphByDocumentID(ctx context.Context, docID string) error {
+	// Query for all edges with this document_id
+	edgesResult, err := idx.graphStore.Query(ctx,
+		"MATCH ()-[r {document_id: $docID}]-() RETURN r.id as id",
+		map[string]any{"docID": docID},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to query edges by document_id: %w", err)
+	}
+
+	// Delete all edges
+	for _, row := range edgesResult {
+		if edgeID, ok := row["id"].(string); ok {
+			if err := idx.graphStore.DeleteEdge(ctx, edgeID); err != nil {
+				idx.logger.Warn("failed to delete edge", map[string]interface{}{
+					"edge_id": edgeID,
+					"error":   err.Error(),
+				})
+			}
+		}
+	}
+
+	// Query for all nodes with this document_id
+	nodesResult, err := idx.graphStore.Query(ctx,
+		"MATCH (n {document_id: $docID}) RETURN n.id as id",
+		map[string]any{"docID": docID},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to query nodes by document_id: %w", err)
+	}
+
+	// Delete all nodes
+	for _, row := range nodesResult {
+		if nodeID, ok := row["id"].(string); ok {
+			if err := idx.graphStore.DeleteNode(ctx, nodeID); err != nil {
+				idx.logger.Warn("failed to delete node", map[string]interface{}{
+					"node_id": nodeID,
+					"error":   err.Error(),
+				})
+			}
+		}
+	}
+
+	idx.logger.Info("cascade deleted graph entities", map[string]interface{}{
+		"doc_id":      docID,
+		"edges_count": len(edgesResult),
+		"nodes_count": len(nodesResult),
+	})
+
+	return nil
+}
+
+// GetDocument retrieves a document by its ID.
+func (idx *defaultIndexer) GetDocument(ctx context.Context, docID string) (*core.Document, error) {
+	if idx.docStore == nil {
+		return nil, fmt.Errorf("doc store not configured")
+	}
+	return idx.docStore.GetDocument(ctx, docID)
+}
+
 // NewVectorIndexer creates a simple text-vector pipeline for basic RAG setups.
 //
 // Parameters:
@@ -328,6 +674,52 @@ func NewMultimodalGraphIndexer(
 	return idx, nil
 }
 
+// createDefaultStores creates default vector and doc stores for indexers.
+// This helper function reduces code duplication across DefaultNativeIndexer, DefaultAdvancedIndexer, and DefaultGraphIndexer.
+func createDefaultStores(idx *defaultIndexer, workDir string) error {
+	if idx.vectorStore == nil {
+		vecName := "gorag_vectors.db"
+		if idx.name != "" {
+			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
+		}
+		vecPath := filepath.Join(workDir, vecName)
+		dimension := 1536
+		if idx.embedder != nil {
+			dimension = idx.embedder.Dimension()
+		}
+
+		colName := "gorag"
+		if idx.name != "" {
+			colName = idx.name
+		}
+
+		vStore, err := govector.NewStore(
+			govector.WithDBPath(vecPath),
+			govector.WithDimension(dimension),
+			govector.WithCollection(colName),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create default vector store: %w", err)
+		}
+		idx.vectorStore = vStore
+	}
+
+	if idx.docStore == nil {
+		docFileName := "gorag_docs.bolt"
+		if idx.name != "" {
+			docFileName = fmt.Sprintf("gorag_docs_%s.bolt", idx.name)
+		}
+		docPath := filepath.Join(workDir, docFileName)
+		dStore, err := bolt.NewDocStore(docPath)
+		if err != nil {
+			return fmt.Errorf("failed to create default doc store: %w", err)
+		}
+		idx.docStore = dStore
+	}
+
+	return nil
+}
+
 // DefaultNativeIndexer creates a light-weight, local-first Indexer.
 // It uses default TokenChunker, local SQLite and GoVector stores, suitable for quick prototyping and testing.
 func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
@@ -361,44 +753,9 @@ func DefaultNativeIndexer(opts ...IndexerOption) (Indexer, error) {
 		idx.chunker = chunker.NewSemanticChunker(tkChunker, 1000, 250, 50)
 	}
 
-	if idx.vectorStore == nil {
-		vecName := "gorag_vectors.db"
-		if idx.name != "" {
-			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
-		}
-		vecPath := filepath.Join(workDir, vecName)
-		dimension := 1536
-		if idx.embedder != nil {
-			dimension = idx.embedder.Dimension()
-		}
-
-		colName := "gorag"
-		if idx.name != "" {
-			colName = idx.name
-		}
-
-		vStore, err := govector.NewStore(
-			govector.WithDBPath(vecPath),
-			govector.WithDimension(dimension),
-			govector.WithCollection(colName),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create default vector store: %w", err)
-		}
-		idx.vectorStore = vStore
-	}
-
-	if idx.docStore == nil {
-		docFileName := "gorag_docs.db"
-		if idx.name != "" {
-			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
-		}
-		docPath := filepath.Join(workDir, docFileName)
-		dStore, err := sqlite.NewDocStore(docPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create default doc store: %w", err)
-		}
-		idx.docStore = dStore
+	// Create default stores using helper function
+	if err := createDefaultStores(idx, workDir); err != nil {
+		return nil, err
 	}
 
 	if err := idx.Init(); err != nil {
@@ -424,41 +781,9 @@ func DefaultAdvancedIndexer(opts ...IndexerOption) (Indexer, error) {
 		opt(idx)
 	}
 
-	// Fallback logic
-	if idx.vectorStore == nil {
-		vecName := "gorag_vectors.db"
-		if idx.name != "" {
-			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
-		}
-		dimension := 1536
-		if idx.embedder != nil {
-			dimension = idx.embedder.Dimension()
-		}
-		colName := "gorag"
-		if idx.name != "" {
-			colName = idx.name
-		}
-
-		vStore, err := govector.NewStore(
-			govector.WithDBPath(vecName),
-			govector.WithDimension(dimension),
-			govector.WithCollection(colName),
-		)
-		if err != nil {
-			return nil, err
-		}
-		idx.vectorStore = vStore
-	}
-	if idx.docStore == nil {
-		docFileName := "gorag_docs.db"
-		if idx.name != "" {
-			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
-		}
-		dStore, err := sqlite.NewDocStore(docFileName)
-		if err != nil {
-			return nil, err
-		}
-		idx.docStore = dStore
+	// Create default stores using helper function
+	if err := createDefaultStores(idx, "./data"); err != nil {
+		return nil, err
 	}
 
 	if err := idx.Init(); err != nil {
@@ -484,44 +809,21 @@ func DefaultGraphIndexer(opts ...IndexerOption) (Indexer, error) {
 		opt(idx)
 	}
 
-	if idx.vectorStore == nil {
-		vecName := "gorag_vectors.db"
-		if idx.name != "" {
-			vecName = fmt.Sprintf("gorag_vectors_%s.db", idx.name)
-		}
-		dimension := 1536
-		if idx.embedder != nil {
-			dimension = idx.embedder.Dimension()
-		}
-		colName := "gorag"
-		if idx.name != "" {
-			colName = idx.name
-		}
-
-		vStore, err := govector.NewStore(
-			govector.WithDBPath(vecName),
-			govector.WithDimension(dimension),
-			govector.WithCollection(colName),
-		)
-		if err != nil {
-			return nil, err
-		}
-		idx.vectorStore = vStore
-	}
-	if idx.docStore == nil {
-		docFileName := "gorag_docs.db"
-		if idx.name != "" {
-			docFileName = fmt.Sprintf("gorag_docs_%s.db", idx.name)
-		}
-		dStore, err := sqlite.NewDocStore(docFileName)
-		if err != nil {
-			return nil, err
-		}
-		idx.docStore = dStore
+	// Create default stores using helper function
+	if err := createDefaultStores(idx, "./data"); err != nil {
+		return nil, err
 	}
 
 	if idx.graphStore == nil {
-		return nil, fmt.Errorf("GraphStore is required when GraphRAG is enabled")
+		graphName := "gorag_graph.db"
+		if idx.name != "" {
+			graphName = fmt.Sprintf("gorag_graph_%s.db", idx.name)
+		}
+		gStore, err := gograph.NewGraphStore(graphName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default graph store: %w", err)
+		}
+		idx.graphStore = gStore
 	}
 
 	if err := idx.Init(); err != nil {

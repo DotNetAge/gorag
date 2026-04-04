@@ -27,6 +27,10 @@ type IndexingContext struct {
 	Nodes           []*Node   `json:"nodes,omitempty"`
 	Edges           []*Edge   `json:"edges,omitempty"`
 
+	// GraphRAG 索引产物
+	Triples     []*Triple     `json:"triples,omitempty"`      // Extracted triples
+	Communities []*Community  `json:"communities,omitempty"`  // Detected communities
+
 	// 统计与指标
 	TotalChunks int            `json:"total_chunks,omitempty"`
 	Custom      map[string]any `json:"custom,omitempty"`
@@ -60,6 +64,14 @@ type RetrievalContext struct {
 	ParallelResults map[string][]*Chunk `json:"parallel_results"` // 命名的中间结果
 	RerankScores    []float32           `json:"rerank_scores,omitempty"`
 	Filters         map[string]any      `json:"filters,omitempty"`
+
+	// GraphRAG 检索状态
+	SearchMode        SearchMode          `json:"search_mode,omitempty"`
+	ExtractedEntities []string            `json:"extracted_entities,omitempty"`
+	GraphNodes        []*Node             `json:"graph_nodes,omitempty"`
+	GraphEdges        []*Edge             `json:"graph_edges,omitempty"`
+	GraphContext      string              `json:"graph_context,omitempty"`
+	CommunityMatches  []*CommunityMatch   `json:"community_matches,omitempty"`
 
 	// 代理与高级 RAG 状态
 	Agentic *AgenticContext `json:"agentic,omitempty"`

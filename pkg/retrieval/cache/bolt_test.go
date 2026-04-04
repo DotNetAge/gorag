@@ -22,30 +22,23 @@ func newMockEmbedderForBolt() *mockEmbedderForBolt {
 	}
 }
 
-func (m *mockEmbedderForBolt) Embed(ctx context.Context, text string) ([]float32, error) {
+func (m *mockEmbedderForBolt) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	if vec, ok := m.embeddings[text]; ok {
-		return vec, nil
-	}
-	vec := make([]float32, m.dimension)
-	h := fnvHash(text)
-	for i := 0; i < m.dimension; i++ {
-		vec[i] = float32((h>>uint(i*3))&0xFF) / 255.0
-	}
-	m.embeddings[text] = vec
-	return vec, nil
-}
-
-func (m *mockEmbedderForBolt) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	result := make([][]float32, 0, len(texts))
-	for _, text := range texts {
-		vec, err := m.Embed(ctx, text)
-		if err != nil {
-			return nil, err
+	result := make([][]float32, len(texts))
+	for i, text := range texts {
+		if vec, ok := m.embeddings[text]; ok {
+			result[i] = vec
+			continue
 		}
-		result = append(result, vec)
+		vec := make([]float32, m.dimension)
+		h := fnvHash(text)
+		for j := 0; j < m.dimension; j++ {
+			vec[j] = float32((h>>uint(j*3))&0xFF) / 255.0
+		}
+		m.embeddings[text] = vec
+		result[i] = vec
 	}
 	return result, nil
 }

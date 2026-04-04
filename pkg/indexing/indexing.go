@@ -18,4 +18,20 @@ type Indexer interface {
 
 	// IndexDirectory concurrently processes an entire directory.
 	IndexDirectory(ctx context.Context, dirPath string, recursive bool) error
+
+	// IndexText indexes plain text content directly (no file parsing required).
+	// This is useful for programmatic document management from APIs, databases, etc.
+	IndexText(ctx context.Context, text string, metadata ...map[string]any) error
+
+	// IndexTexts indexes multiple plain text contents in batch.
+	IndexTexts(ctx context.Context, texts []string, metadata ...map[string]any) error
+
+	// IndexDocuments indexes documents directly into Vector/Doc/Graph stores.
+	IndexDocuments(ctx context.Context, docs ...*core.Document) error
+
+	// DeleteDocument removes a document and all its associated chunks and vectors.
+	DeleteDocument(ctx context.Context, docID string) error
+
+	// GetDocument retrieves a document by its ID.
+	GetDocument(ctx context.Context, docID string) (*core.Document, error)
 }

@@ -1,16 +1,134 @@
 # GraphRAG 检索器
 
-GraphRAG 将基于向量的检索与知识图谱的结构化信息相结合，能够提供更具上下文准确性和全面性的答案，尤其适用于复杂或涉及多条关系路径的查询。
+GraphRAG 是一种基于知识图谱的检索增强生成技术，遵循 Microsoft GraphRAG 架构设计。它将文本数据转化为知识图谱，支持三种搜索模式：
 
-## 流水线结构
+| 搜索模式 | 适用场景 | 数据依赖 |
+|---------|---------|---------|
+| **Local** | 具体问题、实体关系查询 | 图遍历 |
+| **Global** | 宏观主题、概览性问题 | 社区摘要 |
+| **Hybrid** | 复杂问题、需要上下文 | 图 + 向量 + 社区 |
 
-GraphRAG 的工作流程通常包含以下步骤：
+## 核心概念
 
-1.  **实体提取 (Entity Extraction)**：识别用户查询中的关键实体。
-2.  **向量搜索**: 搜索相关的文档分块（同传统 RAG）。
-3.  **图谱遍历 (Graph Traversal)**: 在 GraphStore 中搜索相关实体、关系以及子图结构。
-4.  **上下文增强 (DocStore Enrichment)**: 利用 DocStore 根据检索到的分块 ID 或实体关联，召回完整的 **父文档 (Parent Document)** 或原文证据，提供更丰富的背景。
-5.  **生成**: 利用合并后的信息生成更全面的响应。
+### 图作为索引层
+
+**关键设计**：图数据是原始文本的索引，而非独立存储。
+
+```
+原始文档 → 文本块 → 实体抽取 → 节点（绑定 SourceChunkIDs）
+                      ↓
+                关系抽取 → 边（绑定 SourceChunkIDs）
+                      ↓
+                社区检测 → 社区摘要
+```
+
+### 检索流程
+
+```
+用户查询 → 实体抽取 → [Local/Global/Hybrid] → 获取 SourceChunkIDs → 返回文本
+```
+
+## 搜索模式详解
+
+### Local Search（局部搜索）
+
+从查询中提取实体，在图中遍历获取相关节点和关系。
+
+**适用场景**：
+- "张三在哪个公司工作？"
+- "项目 A 使用了哪些技术栈？"
+
+```go
+retriever, _ := graph.DefaultGraphRetriever(
+    graph.WithGraphStore(graphStore),
+    graph.WithSearchMode(core.SearchModeLocal),
+    graph.WithDepth(2),  // 遍历深度
+)
+```
+
+### Global Search（全局搜索）
+
+基于社区摘要进行语义匹配，适用于宏观问题。
+
+**适用场景**：
+- "这份报告主要讲了哪些主题？"
+- "项目中涉及的核心技术有哪些？"
+
+```go
+retriever, _ := graph.DefaultGraphRetriever(
+    graph.WithGraphStore(graphStore),
+    graph.WithEmbedder(embedder), // 必需
+    graph.WithSearchMode(core.SearchModeGlobal),
+)
+```
+
+### Hybrid Search（混合搜索）
+
+融合 Local、Global 和 Vector 三路召回。
+
+**适用场景**：
+- "张三的项目涉及哪些技术？公司在这方面的投入如何？"
+
+```go
+retriever, _ := graph.DefaultGraphRetriever(
+    graph.WithGraphStore(graphStore),
+    graph.WithVectorStore(vectorStore),
+    graph.WithEmbedder(embedder),
+    graph.WithSearchMode(core.SearchModeHybrid),
+)
+```
+
+## 实体提取策略
+
+GraphRAG 支持多种实体提取策略，可根据可用资源和性能需求灵活选择：
+
+| 策略 | 依赖 | 延迟 | 准确性 | 适用场景 |
+|------|------|------|--------|---------|
+| **LLM** | LLM 客户端 | 高 (500-2000ms) | 最高 (95%+) | 复杂查询、专业领域 |
+| **Vector** | Embedder + GraphStore | 中 (20-100ms) | 中高 (70-80%) | 语义相似场景、实时系统 |
+| **Keyword** | 无 | 低 (1-10ms) | 中等 (50-60%) | 高性能要求、简单查询 |
+
+### 策略选择
+
+```go
+import (
+    "github.com/DotNetAge/gorag/pkg/pattern"
+    "github.com/DotNetAge/gorag/pkg/retriever/graph"
+)
+
+// 策略 1: LLM 提取（最准确，需要 LLM）
+rag, _ := pattern.GraphRAG("my-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    pattern.WithLLM(llmClient),
+    pattern.WithExtractionStrategy(pattern.ExtractionStrategyLLM),
+)
+
+// 策略 2: 向量匹配（需要 Embedder，无需 LLM）
+rag, _ := pattern.GraphRAG("my-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    pattern.WithExtractionStrategy(pattern.ExtractionStrategyVector),
+)
+
+// 策略 3: 关键词提取（无依赖，最快）
+rag, _ := pattern.GraphRAG("my-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    pattern.WithExtractionStrategy(pattern.ExtractionStrategyKeyword),
+)
+
+// 策略 4: 自动选择（默认，根据可用资源自动选择最佳策略）
+rag, _ := pattern.GraphRAG("my-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    // 默认为 auto，无需显式设置
+)
+```
+
+### 自动选择逻辑（默认）
+
+当使用 `ExtractionStrategyAuto`（默认）时，系统按以下优先级选择策略：
+
+1. **LLM 策略** - 如果配置了 LLM 客户端
+2. **Vector 策略** - 如果配置了 Embedder 和 GraphStore
+3. **Keyword 策略** - 作为兜底方案，无任何依赖
 
 ## 适用场景
 

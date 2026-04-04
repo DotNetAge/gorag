@@ -44,8 +44,6 @@ func (s *multiFactory) Execute(ctx context.Context, state *core.IndexingContext)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
-
 	// Build metadata map
 	metadataMap := map[string]any{
 		"source":   state.Metadata.Source,
@@ -57,11 +55,24 @@ func (s *multiFactory) Execute(ctx context.Context, state *core.IndexingContext)
 	// Stream parse the file using the thread-safe, newly created parser instance
 	docChan, err := parser.ParseStream(ctx, file, metadataMap)
 	if err != nil {
+		file.Close()
 		return fmt.Errorf("failed to parse file: %w", err)
 	}
 
-	// Pass parsed documents to next step via channel
-	state.Documents = docChan
+	// Pass parsed documents to next step via channel.
+	// Since parser.ParseStream starts a goroutine to read from the file, we CANNOT close it here.
+	// We must delegate the closure to the parser or wrap the file.
+	// We'll wrap the channel to close the file when the parser finishes.
+	wrappedDocChan := make(chan *core.Document)
+	go func() {
+		defer file.Close()
+		for doc := range docChan {
+			wrappedDocChan <- doc
+		}
+		close(wrappedDocChan)
+	}()
+
+	state.Documents = wrappedDocChan
 
 	return nil
 }
@@ -115,8 +126,6 @@ func (s *multi) Execute(ctx context.Context, state *core.IndexingContext) error 
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
-
 	// Build metadata map
 	metadataMap := map[string]any{
 		"source":   state.Metadata.Source,
@@ -128,11 +137,21 @@ func (s *multi) Execute(ctx context.Context, state *core.IndexingContext) error 
 	// Stream parse the file
 	docChan, err := parser.ParseStream(ctx, file, metadataMap)
 	if err != nil {
+		file.Close()
 		return fmt.Errorf("failed to parse file: %w", err)
 	}
 
+	wrappedDocChan := make(chan *core.Document)
+	go func() {
+		defer file.Close()
+		for doc := range docChan {
+			wrappedDocChan <- doc
+		}
+		close(wrappedDocChan)
+	}()
+
 	// Pass parsed documents to next step via channel
-	state.Documents = docChan
+	state.Documents = wrappedDocChan
 
 	return nil
 }

@@ -14,11 +14,31 @@ type mockDocStore struct {
 	err error
 }
 
-func (m *mockDocStore) GetByID(ctx context.Context, id string) (*core.Document, error) {
+func (m *mockDocStore) SetDocument(ctx context.Context, doc *core.Document) error {
+	return nil
+}
+
+func (m *mockDocStore) GetDocument(ctx context.Context, docID string) (*core.Document, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.doc, nil
+}
+
+func (m *mockDocStore) DeleteDocument(ctx context.Context, docID string) error {
+	return nil
+}
+
+func (m *mockDocStore) SetChunks(ctx context.Context, chunks []*core.Chunk) error {
+	return nil
+}
+
+func (m *mockDocStore) GetChunk(ctx context.Context, chunkID string) (*core.Chunk, error) {
+	return nil, nil
+}
+
+func (m *mockDocStore) GetChunksByDocID(ctx context.Context, docID string) ([]*core.Chunk, error) {
+	return nil, nil
 }
 
 type mockCollectorForExpand struct{}

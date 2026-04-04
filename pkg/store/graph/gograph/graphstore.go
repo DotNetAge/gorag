@@ -316,6 +316,18 @@ func (s *gographStore) GetCommunitySummaries(ctx context.Context, level int) ([]
 	return results, nil
 }
 
+func (s *gographStore) DeleteNode(ctx context.Context, id string) error {
+	// Use Cypher DETACH DELETE to remove node and its edges
+	_, err := s.db.Exec(ctx, "MATCH (n {ID: $id}) DETACH DELETE n", map[string]any{"id": id})
+	return err
+}
+
+func (s *gographStore) DeleteEdge(ctx context.Context, id string) error {
+	// Use Cypher to delete edge by ID
+	_, err := s.db.Exec(ctx, "MATCH ()-[r {ID: $id}]-() DELETE r", map[string]any{"id": id})
+	return err
+}
+
 func (s *gographStore) Close(ctx context.Context) error {
 	return s.db.Close()
 }

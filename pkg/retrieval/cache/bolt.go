@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/DotNetAge/gochat/pkg/embedding"
 	"github.com/DotNetAge/gorag/pkg/core"
 	bolt "go.etcd.io/bbolt"
 )
@@ -19,7 +20,7 @@ const (
 )
 
 type BoltSemanticCache struct {
-	embedder  core.Embedder
+	embedder  embedding.Provider
 	config    *Config
 	db        *bolt.DB
 	threshold float32
@@ -29,6 +30,9 @@ type BoltOption func(*BoltSemanticCache)
 
 func WithBoltDBPath(path string) BoltOption {
 	return func(c *BoltSemanticCache) {
+		if path != "" {
+			c.config.DBPath = path
+		}
 	}
 }
 
@@ -40,11 +44,11 @@ func WithBoltThreshold(threshold float32) BoltOption {
 	}
 }
 
-func DefaultBoltSemanticCache(embedder core.Embedder) (*BoltSemanticCache, error) {
+func DefaultBoltSemanticCache(embedder embedding.Provider) (*BoltSemanticCache, error) {
 	return NewBoltSemanticCache(embedder, WithBoltDBPath("gorag_cache.db"))
 }
 
-func NewBoltSemanticCache(embedder core.Embedder, opts ...BoltOption) (*BoltSemanticCache, error) {
+func NewBoltSemanticCache(embedder embedding.Provider, opts ...BoltOption) (*BoltSemanticCache, error) {
 	cfg := defaultConfig()
 	cache := &BoltSemanticCache{
 		embedder:  embedder,
@@ -88,10 +92,11 @@ func (c *BoltSemanticCache) CheckCache(ctx context.Context, query *core.Query) (
 		return &core.CacheResult{Hit: false}, nil
 	}
 
-	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
-	if err != nil {
+	queryEmbeddingMatrix, err := c.embedder.Embed(ctx, []string{query.Text})
+	if err != nil || len(queryEmbeddingMatrix) == 0 {
 		return nil, err
 	}
+	queryEmbedding := queryEmbeddingMatrix[0]
 
 	var bestMatch *boltCacheEntry
 	var highestSim float32 = -1.0
@@ -143,10 +148,11 @@ func (c *BoltSemanticCache) CacheResponse(ctx context.Context, query *core.Query
 		return nil
 	}
 
-	queryEmbedding, err := c.embedder.Embed(ctx, query.Text)
-	if err != nil {
+	queryEmbeddingMatrix, err := c.embedder.Embed(ctx, []string{query.Text})
+	if err != nil || len(queryEmbeddingMatrix) == 0 {
 		return err
 	}
+	queryEmbedding := queryEmbeddingMatrix[0]
 
 	entry := boltCacheEntry{
 		Key:       query.Text,

@@ -1,140 +1,151 @@
 <div align="center">
   <h1>🦖 GoRAG</h1>
-  <p><b>工业级、高性能、模块化 Go 语言 RAG 专家框架</b></p>
+  <p><b>工业级、高性能、模块化的 Go 语言 RAG 框架</b></p>
   
   [![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
-  [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
   [![Documentation](https://img.shields.io/badge/docs-gorag.rayainfo.cn-e53734.svg)](https://gorag.rayainfo.cn)
-
 
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
 
 ---
 
-**GoRAG** 是一个专为大规模 AI 工程设计的生产级 RAG（检索增强生成）框架。不同于复杂的“黑盒”框架，GoRAG 提供了一个 **透明、基于流水线 (Pipeline) 的架构**，将 Go 的原生并发优势与前沿的 RAG 模式深度结合。
+**GoRAG** 是一个生产就绪的检索增强生成（RAG）框架，采用**三层架构**设计，满足不同层次开发者的需求。
 
-从具备自动三元组提取能力的 **GraphRAG**，到具备自我修正能力的 **Agentic RAG**，GoRAG 致力于帮助开发者将 AI 应用从“实验脚本”快速推进到“生产服务”。
+## 🏗️ 三层架构
 
-## ✨ 为什么选择 GoRAG？
+```mermaid
+graph TB
+    subgraph Pattern层["Pattern 层（应用层）"]
+        P1["NativeRAG<br/>向量检索专家"]
+        P2["GraphRAG<br/>图谱推理专家"]
+    end
+    
+    subgraph Pipeline层["Pipeline 层（组装层）"]
+        I["Indexer<br/>索引器"]
+        R["Retriever<br/>召回器"]
+        D["Repository<br/>数据仓库"]
+    end
+    
+    subgraph Step层["Step 层（功能层）"]
+        S1["独立功能模块<br/>查询重写/分块/嵌入..."]
+    end
+    
+    Pattern层 --> Pipeline层
+    Pipeline层 --> Step层
+```
 
-- 🚀 **性能至上**: 内置高性能并发 Worker 和 `O(1)` 内存效率的流式解析器。轻松应对 TB 级知识库索引。
-- 🏗️ **透明流水线架构**: 基于 `gochat/pkg/pipeline`。每个检索步骤都清晰、可追踪且可插拔，告别深层继承与黑盒逻辑。
-- 🧠 **智能意图路由**: 根据用户意图，自动在向量检索 (Vector)、图检索 (Graph) 或全局汇总 (Global) 策略间进行最优调度。
-- 🕸️ **进阶 GraphRAG**: 原生支持 **Neo4j**、**SQLite (Zero-CGO)** 和 **BoltDB**。内置 LLM 驱动的知识图谱自动构建引擎。
-- 🔭 **全链路可观测性**: 针对所有核心 Retriever 和 Step 的分布式追踪。精准掌握每一毫秒时间与每一个 Token 的去向。
-- 📊 **企业级评测协议**: 内置标准化的评测指标计算 (RAGAS 风格)，包括 **忠实度 (Faithfulness)**、**答案相关性** 和 **上下文精准度**。
+| 层次 | 谁使用 | 职责 |
+|------|--------|------|
+| **Pattern 层** | 一般开发者 | 选择 RAG 模式，配置 Options |
+| **Pipeline 层** | 高级开发者 | 组装 Indexer/Retriever/Repository |
+| **Step 层** | 底层开发者 | 扩展独立功能模块 |
 
 ---
 
-## 🧰 RAG “专家”生态
+## ✨ 核心特性
 
-GoRAG 不仅仅提供工具，更将**最佳实践**固化为标准组件：
-
-| 检索策略         | 适用场景       | 核心特性                      |
-| ---------------- | -------------- | ----------------------------- |
-| **Native RAG**   | 标准语义搜索   | 纯向量、高速、低成本          |
-| **Graph RAG**    | 复杂关系推理   | 实体、三元组、多跳推理        |
-| **Self-RAG**     | 高精度要求场景 | 自我反思、幻觉检测            |
-| **CRAG**         | 处理模糊查询   | 质量评估、自动回退至 Web 搜索 |
-| **Fusion RAG**   | 多维度复杂问题 | 查询重写、RRF 排序融合        |
-| **Smart Router** | 动态工作负载   | 基于意图的自动分流调度        |
+- 🚀 **性能优先**：并发处理和流式解析，O(1) 内存效率
+- 🏗️ **Pipeline 架构**：每个步骤明确、可追踪、可插拔
+- 🧠 **三阶段增强**：查询增强 → 检索 → 结果增强
+- 🕸️ **高级 GraphRAG**：原生支持 Neo4j、SQLite、BoltDB
+- 🔭 **内置可观测性**：全面的分布式追踪
+- 📦 **零依赖**：纯 Go 实现，模型自动下载
 
 ---
 
-## 🚀 快速开始：1 分钟构建工业级 RAG
+## 🚀 快速开始
 
-GoRAG 针对不同的工业应用规模，提供了 **成对 (Paired)** 且经过优化的预设方案。无需手动组装复杂的 Pipeline，只需选择适合你的层级即可。
+### NativeRAG（向量检索）
 
-### 1. NativeRAG (最适合 AI Agent & 本地知识库)
-*纯 Go 实现，零依赖 (SQLite + GoVector)。支持一键开启多模态能力。*
+适合文档问答和语义搜索：
 
 ```go
-import (
-    "github.com/DotNetAge/gorag/pkg/indexer"
-    "github.com/DotNetAge/gorag/pkg/retriever/native"
+import "github.com/DotNetAge/gorag/pkg/pattern"
+
+// 创建 NativeRAG（自动配置）
+rag, _ := pattern.NativeRAG("my-app",
+    pattern.WithBGE("bge-small-zh-v1.5"),
 )
 
-// 1. 索引文档 (Native 模式使用本地 SQLite/GoVector)
-idx, _ := indexer.DefaultNativeIndexer("./data", false) 
-idx.IndexDirectory(ctx, "./docs", true)
+// 索引文档
+rag.IndexDirectory(ctx, "./docs", true)
 
-// 2. 与你的知识库对话
-r, _ := native.DefaultNativeRetriever("./data", embedder, llm)
-results, _ := r.Retrieve(ctx, []string{"什么是 GoRAG?"}, 5)
-fmt.Println(results[0].Answer)
+// 检索
+results, _ := rag.Retrieve(ctx, []string{"GoRAG 是什么？"}, 5)
 ```
 
-### 2. AdvancedRAG (企业级 / 高召回率)
-*面向分布式架构 (Milvus/Qdrant)。内置 **RAG-Fusion** 最佳实践。*
+### GraphRAG（知识图谱）
+
+适合复杂关系推理：
 
 ```go
-import (
-    "github.com/DotNetAge/gorag/pkg/indexer"
-    "github.com/DotNetAge/gorag/pkg/retriever/advanced"
+rag, _ := pattern.GraphRAG("knowledge-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    pattern.WithNeoGraph("neo4j://localhost:7687", "neo4j", "password", "neo4j"),
 )
 
-// 1. 并发索引至生产级向量库 (如 Milvus)
-idx, _ := indexer.DefaultAdvancedIndexer(milvusStore, sqliteDocStore)
-idx.IndexDirectory(ctx, "./kb/enterprise", true)
+// 添加节点和边
+rag.AddNode(ctx, &core.Node{ID: "person-1", Type: "Person", ...})
+rag.AddEdge(ctx, &core.Edge{Source: "person-1", Target: "company-1", ...})
 
-// 2. 使用 RAG-Fusion + RRF 算法进行高精度检索
-r := advanced.DefaultAdvancedRetriever(milvusStore, embedder, llm)
-results, _ := r.Retrieve(ctx, []string{"对比架构 A 与架构 B 的优劣"}, 10)
-```
-
-### 3. GraphRAG (深度推理 / 复杂关系)
-*自动构建知识图谱 (Neo4j)，支持向量与图谱的混合检索。*
-
-```go
-import (
-    "github.com/DotNetAge/gorag/pkg/indexer"
-    "github.com/DotNetAge/gorag/pkg/retriever/graph"
-)
-
-// 1. 索引并自动提取 (主体, 谓语, 客体) 三元组
-idx, _ := indexer.DefaultGraphIndexer(vStore, docStore, neo4jStore, extractor)
-idx.IndexFile(ctx, "financial_report.pdf")
-
-// 2. 混合检索 (相似度检索 + 图谱多跳关联)
-r := graph.DefaultGraphRetriever(vStore, neo4jStore, embedder, llm)
-results, _ := r.Retrieve(ctx, []string{"实体 X 与实体 Y 之间有什么关联？"}, 5)
+// 查询邻居
+neighbors, edges, _ := rag.GetNeighbors(ctx, "person-1", 1, 10)
 ```
 
 ---
 
-## 🔭 内置工业级可观测性
+## 📚 文档
 
-拒绝“盲飞”。GoRAG 原生支持 **Prometheus** 和 **OpenTelemetry**，助你实时监控生产环境中的 RAG 性能。
+### 入门指南
+
+- [快速入门](./QUICKSTART.md) - 15 分钟掌握 Pattern 层
+- [NativeRAG 详解](./docs/pattern/native-rag.md) - 三阶段增强架构
+- [GraphRAG 详解](./docs/pattern/graph-rag.md) - 知识图谱推理
+- [配置选项手册](./docs/pattern/options.md) - 所有配置选项
+
+### 进阶主题
+
+- [开发指南](./DEVELOPMENT.md) - Pipeline 层开发
+- [Indexer 开发](./docs/pipeline/indexer.md) - 构建自定义索引器
+- [Retriever 开发](./docs/pipeline/retriever.md) - 构建自定义检索器
+
+### Step 层
+
+- [Step 开发指南](./docs/steps/creating-steps.md) - 创建新步骤
+
+---
+
+## 🔭 内置可观测性
 
 ```go
-idx, _ := indexer.DefaultAdvancedIndexer(vStore, dStore, 
-    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true), // 工业级日志
-    indexer.WithPrometheusMetrics(":8080"),                   // 监控指标
-    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),// 链路追踪
+idx, _ := indexer.DefaultAdvancedIndexer(
+    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true),
+    indexer.WithPrometheusMetrics(":8080"),
+    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),
 )
 ```
 
 ---
 
-## ⚡ 技术规范与标准
-...
+## ⚡ 技术标准
+
+- **Go 1.24+**：最新语言特性
+- **Zero-CGO SQLite**：无痛交叉编译
+- **清晰架构**：接口与实现严格分离
+- **模块化 Steps**：可在任何自定义 Pipeline 中复用
 
 ---
 
-## ⚡ 技术规范与标准
+## 🤝 贡献
 
-- **Go 1.24+**: 拥抱最新的 Go 语言特性。
-- **Zero-CGO SQLite**: 采用 `modernc.org/sqlite`，实现无痛苦的跨平台交叉编译。
-- **整洁架构**: 严格分离接口 (`pkg/core`) 与具体实现。
-- **模块化 Step**: 所有核心步骤（如 `hyde`, `rerank`, `fuse`, `prune`）均可在自定义 Pipeline 中复用。
+我们致力于为 Go 生态系统构建最强大的 AI 基础设施。
 
-## 🤝 参与贡献
-我们致力于构建 Go 生态最强大的 AI 基础设施。无论是增加新的 `VectorStore` 驱动，还是改进 `Parser`，我们都欢迎您的 PR！
-- 请参考 [贡献指南](CONTRIBUTING.md)。
+- 查看 [贡献指南](CONTRIBUTING.md)
 
-## 📄 许可协议
-GoRAG 采用 [MIT License](LICENSE) 开源协议。
+## 📄 许可证
+
+GoRAG 基于 [MIT 许可证](LICENSE) 发布。

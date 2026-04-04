@@ -7,16 +7,8 @@ import (
 	"strings"
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
+	"github.com/DotNetAge/gorag/pkg/core"
 )
-
-// Triple represents a relationship between two entities.
-type Triple struct {
-	Subject     string `json:"subject"`
-	Predicate   string `json:"predicate"`
-	Object      string `json:"object"`
-	SubjectType string `json:"subject_type"`
-	ObjectType  string `json:"object_type"`
-}
 
 const triplesExtractionPrompt = `You are an expert in information extraction and knowledge graph construction.
 Your task is to extract all significant entities and their relationships from the provided text.
@@ -46,7 +38,7 @@ func NewTriplesExtractor(llm chat.Client) *TriplesExtractor {
 	return &TriplesExtractor{llm: llm}
 }
 
-func (e *TriplesExtractor) Extract(ctx context.Context, text string) ([]Triple, error) {
+func (e *TriplesExtractor) Extract(ctx context.Context, text string) ([]core.Triple, error) {
 	prompt := strings.Replace(triplesExtractionPrompt, "{{.Text}}", text, 1)
 
 	messages := []chat.Message{
@@ -69,7 +61,7 @@ func (e *TriplesExtractor) Extract(ctx context.Context, text string) ([]Triple, 
 	}
 	cleanJSON = strings.TrimSpace(cleanJSON)
 
-	var triples []Triple
+	var triples []core.Triple
 	if err := json.Unmarshal([]byte(cleanJSON), &triples); err != nil {
 		return nil, fmt.Errorf("failed to parse triples JSON: %w\nContent: %s", err, cleanJSON)
 	}

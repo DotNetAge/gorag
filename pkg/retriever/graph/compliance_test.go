@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/pkg/core"
+	graphstep "github.com/DotNetAge/gorag/pkg/steps/graph"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,7 +26,10 @@ func (m *auditMockGraphStore) GetNeighbors(ctx context.Context, id string, depth
 func TestAuditStandard_Graph_ConcurrentPerformance(t *testing.T) {
 	// 每个查询延迟 100ms
 	mock := &auditMockGraphStore{delay: 100 * time.Millisecond}
-	step := &graphSearchStep{store: mock, depth: 1, limit: 10, logger: nil}
+	step := graphstep.NewLocalSearch(mock,
+		graphstep.WithDepth(1),
+		graphstep.WithLimit(10),
+	)
 
 	ctx := context.Background()
 	rctx := core.NewRetrievalContext(ctx, "test")
@@ -44,14 +48,17 @@ func TestAuditStandard_Graph_ConcurrentPerformance(t *testing.T) {
 // AuditStandard_Graph_EntityLimit 审计标准：处理的实体数量必须受限
 func TestAuditStandard_Graph_EntityLimit(t *testing.T) {
 	mock := &auditMockGraphStore{}
-	step := &graphSearchStep{store: mock, depth: 1, limit: 10, logger: nil}
+	step := graphstep.NewLocalSearch(mock,
+		graphstep.WithDepth(1),
+		graphstep.WithLimit(10),
+	)
 
 	ctx := context.Background()
 	rctx := core.NewRetrievalContext(ctx, "test")
 
-	// 模拟“实体爆炸” (100个实体)
+	// 模拟"实体爆炸" (100个实体)
 	entities := make([]string, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		entities[i] = "e"
 	}
 	rctx.Custom["extracted_entities"] = entities
@@ -60,4 +67,5 @@ func TestAuditStandard_Graph_EntityLimit(t *testing.T) {
 	assert.NoError(t, err)
 	// 检查生成的 graph_context，确保只有 10 个左右的结果
 	// (具体的 limit 我们在代码中设置的是 10)
+	assert.NotNil(t, rctx.GraphContext, "Graph context should be generated")
 }

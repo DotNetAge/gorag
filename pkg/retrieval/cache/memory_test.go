@@ -23,20 +23,25 @@ func newMockEmbedder() *mockEmbedder {
 	}
 }
 
-func (m *mockEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (m *mockEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	if vec, ok := m.embeddings[text]; ok {
-		return vec, nil
+	result := make([][]float32, len(texts))
+	for i, text := range texts {
+		if vec, ok := m.embeddings[text]; ok {
+			result[i] = vec
+			continue
+		}
+		vec := make([]float32, m.dimension)
+		h := fnvHash(text)
+		for j := 0; j < m.dimension; j++ {
+			vec[j] = float32((h>>uint(j*3))&0xFF) / 255.0
+		}
+		m.embeddings[text] = vec
+		result[i] = vec
 	}
-	vec := make([]float32, m.dimension)
-	h := fnvHash(text)
-	for i := 0; i < m.dimension; i++ {
-		vec[i] = float32((h>>uint(i*3))&0xFF) / 255.0
-	}
-	m.embeddings[text] = vec
-	return vec, nil
+	return result, nil
 }
 
 func fnvHash(s string) uint64 {
@@ -46,18 +51,6 @@ func fnvHash(s string) uint64 {
 		h *= 1099511628211
 	}
 	return h
-}
-
-func (m *mockEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	result := make([][]float32, 0, len(texts))
-	for _, text := range texts {
-		vec, err := m.Embed(ctx, text)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, vec)
-	}
-	return result, nil
 }
 
 func (m *mockEmbedder) Dimension() int {

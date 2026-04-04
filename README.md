@@ -6,7 +6,6 @@
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
-  [![codecov](https://codecov.io/gh/DotNetAge/gorag/graph/badge.svg?token=placeholder)](https://codecov.io/gh/DotNetAge/gorag)
   [![Documentation](https://img.shields.io/badge/docs-gorag.rayainfo.cn-e53734.svg)](https://gorag.rayainfo.cn)
 
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
@@ -14,111 +13,139 @@
 
 ---
 
-**GoRAG** is a production-ready Retrieval-Augmented Generation (RAG) framework built for high-scale AI engineering. Unlike complex "black-box" frameworks, GoRAG provides a **transparent, pipeline-based architecture** that combines Go's native concurrency with advanced RAG patterns.
+**GoRAG** is a production-ready Retrieval-Augmented Generation (RAG) framework built for high-scale AI engineering. It features a **three-layer architecture** that serves developers at all skill levels.
 
-From **GraphRAG** with automated triple extraction to **Agentic RAG** with self-correction, GoRAG is designed to move your AI applications from "prototype" to "production" with zero friction.
+## 🏗️ Three-Layer Architecture
 
-## ✨ Why GoRAG?
-
-- 🚀 **Performance First**: Built-in concurrent workers and streaming parsers with `O(1)` memory efficiency. Perfect for indexing TB-scale knowledge bases.
-- 🏗️ **Pipeline-Based Architecture**: Powered by `gochat/pkg/pipeline`. Every retrieval step is explicit, traceable, and pluggable. No more "hidden magic" or deep inheritance hell.
-- 🧠 **Smart Intent Routing**: Automatically dispatches queries to the most suitable retrieval strategy (Vector, Graph, or Global) based on user intent.
-- 🕸️ **Advanced GraphRAG**: Native support for **Neo4j**, **SQLite (Zero-CGO)**, and **BoltDB**. Includes automated LLM-driven knowledge graph construction.
-- 🔭 **Built-in Observability**: Comprehensive distributed tracing across all core retrievers and steps. See exactly where your time and tokens go.
-- 📊 **Enterprise-Grade Evaluation**: Built-in benchmarking protocol for **Faithfulness**, **Answer Relevance**, and **Context Precision** (RAGAS-style).
-
----
-
-## 🧰 The RAG "Expert" Ecosystem
-
-GoRAG doesn't just give you tools; it gives you **pre-optimized strategies** as first-class citizens:
-
-| Strategy         | When to use                    | Key Features                               |
-| ---------------- | ------------------------------ | ------------------------------------------ |
-| **Native RAG**   | Standard semantic search       | Vector-only, fast, low cost                |
-| **Graph RAG**    | Complex relationship reasoning | Entities, Triples, Multi-hop reasoning     |
-| **Self-RAG**     | High accuracy requirements     | Self-reflection, Hallucination detection   |
-| **CRAG**         | Handling ambiguous queries     | Quality evaluation, fallback to Web Search |
-| **Fusion RAG**   | Multi-faceted queries          | Query rewriting, RRF fusion                |
-| **Smart Router** | Dynamic workloads              | Intent-based automatic dispatching         |
-
----
-
-## 🚀 Quick Start: Build Industrial RAG in 1 Minute
-
-GoRAG provides a unified **`RAG` application interface** that bundles Indexing and Retrieval into one seamless entity. Choose your preset and start building.
-
-### 1. NativeRAG (Perfect for AI Agents & Local Knowledge Bases)
-*Pure Go, zero-dependencies (SQLite + GoVector). One-line setup.*
-
-```go
-import "github.com/DotNetAge/gorag"
-
-// 1. One line to create a complete local RAG app
-app, _ := gorag.DefaultNativeRAG(gorag.WithWorkDir("./my_kb"))
-
-// 2. Feed it documents
-app.IndexDirectory(ctx, "./docs", true)
-
-// 3. Ask questions!
-res, _ := app.Search(ctx, "What is GoRAG?", 5)
-fmt.Println(res.Answer)
+```mermaid
+graph TB
+    subgraph Pattern层["Pattern Layer (Application)"]
+        P1["NativeRAG<br/>Vector Retrieval"]
+        P2["GraphRAG<br/>Knowledge Graph"]
+    end
+    
+    subgraph Pipeline层["Pipeline Layer (Assembly)"]
+        I["Indexer"]
+        R["Retriever"]
+        D["Repository"]
+    end
+    
+    subgraph Step层["Step Layer (Function)"]
+        S1["Independent Modules<br/>Rewrite/Chunk/Embed..."]
+    end
+    
+    Pattern层 --> Pipeline层
+    Pipeline层 --> Step层
 ```
 
-### 2. AdvancedRAG (Enterprise-Grade / High Recall)
-*Designed for distributed scale. Bundles RAG-Fusion + RRF best practices.*
+| Layer | Who Uses | Responsibility |
+|-------|----------|----------------|
+| **Pattern** | Application Developers | Choose RAG mode, configure Options |
+| **Pipeline** | Advanced Developers | Assemble Indexer/Retriever/Repository |
+| **Step** | Framework Developers | Extend independent modules |
+
+---
+
+## ✨ Key Features
+
+- 🚀 **Performance First**: Concurrent workers and streaming parsers with `O(1)` memory efficiency
+- 🏗️ **Pipeline-Based Architecture**: Every step is explicit, traceable, and pluggable
+- 🧠 **Three-Phase Enhancement**: Query enhancement → Retrieval → Result enhancement
+- 🕸️ **Advanced GraphRAG**: Native support for Neo4j, SQLite, and BoltDB
+- 🔭 **Built-in Observability**: Comprehensive distributed tracing
+- 📦 **Zero Dependencies**: Pure Go implementation with auto-download models
+
+---
+
+## 🚀 Quick Start
+
+### NativeRAG (Vector Retrieval)
+
+Best for document QA and semantic search:
 
 ```go
-// Connect to enterprise Milvus and start an Advanced RAG app
-app, _ := gorag.DefaultAdvancedRAG(
-    gorag.WithMilvus("milvus:19530", "kb_collection"),
-    gorag.WithOpenAI("sk-xxxx"),
+import "github.com/DotNetAge/gorag/pkg/pattern"
+
+// Create a NativeRAG with auto-configuration
+rag, _ := pattern.NativeRAG("my-app",
+    pattern.WithBGE("bge-small-zh-v1.5"),
 )
 
-app.IndexDirectory(ctx, "./enterprise_docs", true)
-res, _ := app.Search(ctx, "Compare architecture A vs B", 10)
+// Index documents
+rag.IndexDirectory(ctx, "./docs", true)
+
+// Retrieve
+results, _ := rag.Retrieve(ctx, []string{"What is GoRAG?"}, 5)
 ```
 
-### 3. GraphRAG (Deep Reasoning / Relational)
-*Automated Knowledge Graph construction with hybrid vector-graph search.*
+### GraphRAG (Knowledge Graph)
+
+Best for complex relationship reasoning:
 
 ```go
-// Bundles Neo4j relationship reasoning with Vector search
-app, _ := gorag.DefaultGraphRAG(
-    gorag.WithMilvus("milvus:19530", "kb_collection"),
-    gorag.WithNeo4j("neo4j://localhost", "user", "pass"),
+rag, _ := pattern.GraphRAG("knowledge-graph",
+    pattern.WithBGE("bge-small-zh-v1.5"),
+    pattern.WithNeoGraph("neo4j://localhost:7687", "neo4j", "password", "neo4j"),
 )
 
-app.IndexFile(ctx, "corporate_report.pdf")
-res, _ := app.Search(ctx, "How are entity X and Y related?", 5)
+// Add nodes and edges
+rag.AddNode(ctx, &core.Node{ID: "person-1", Type: "Person", ...})
+rag.AddEdge(ctx, &core.Edge{Source: "person-1", Target: "company-1", ...})
+
+// Query neighbors
+neighbors, edges, _ := rag.GetNeighbors(ctx, "person-1", 1, 10)
 ```
 
 ---
 
-## 🔭 Built-in Industrial Observability
+## 📚 Documentation
 
-Stop flying blind. GoRAG natively supports **Prometheus** and **OpenTelemetry** to monitor your RAG pipelines in production.
+### Getting Started
+
+- [Quick Start Guide](./QUICKSTART.md) - Pattern layer in 15 minutes
+- [NativeRAG Details](./docs/pattern/native-rag.md) - Three-phase enhancement
+- [GraphRAG Details](./docs/pattern/graph-rag.md) - Knowledge graph reasoning
+- [Options Reference](./docs/pattern/options.md) - All configuration options
+
+### Advanced Topics
+
+- [Development Guide](./DEVELOPMENT.md) - Pipeline layer development
+- [Indexer Development](./docs/pipeline/indexer.md) - Build custom indexers
+- [Retriever Development](./docs/pipeline/retriever.md) - Build custom retrievers
+
+### Step Layer
+
+- [Step Development Guide](./docs/steps/creating-steps.md) - Create new steps
+
+---
+
+## 🔭 Built-in Observability
 
 ```go
-idx, _ := indexer.DefaultAdvancedIndexer(vStore, dStore, 
-    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true), // Industrial Logging
-    indexer.WithPrometheusMetrics(":8080"),                   // Metrics
-    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),// Distributed Tracing
+idx, _ := indexer.DefaultAdvancedIndexer(
+    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true),
+    indexer.WithPrometheusMetrics(":8080"),
+    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),
 )
 ```
 
 ---
 
-## ⚡ Technical Integrity & Standards
+## ⚡ Technical Standards
 
-- **Go 1.24+**: Leveraging the latest language features.
-- **Zero-CGO SQLite**: Using `modernc.org/sqlite` for painless cross-compilation.
-- **Clean Architecture**: Strict separation of interfaces (`pkg/core`) and implementations.
-- **Modular Steps**: Reuse `hyde`, `rerank`, `fuse`, or `prune` steps in any custom pipeline.
+- **Go 1.24+**: Latest language features
+- **Zero-CGO SQLite**: Painless cross-compilation
+- **Clean Architecture**: Strict separation of interfaces and implementations
+- **Modular Steps**: Reuse steps in any custom pipeline
+
+---
 
 ## 🤝 Contributing
-We aim to build the most robust AI infrastructure for the Go ecosystem. Whether it's a new `VectorStore` driver or an improved `Parser`, your PRs are welcome! 
-- Check our [Contributing Guidelines](CONTRIBUTING.md).
+
+We aim to build the most robust AI infrastructure for the Go ecosystem.
+
+- Check our [Contributing Guidelines](CONTRIBUTING.md)
 
 ## 📄 License
+
 GoRAG is licensed under the [MIT License](LICENSE).

@@ -1,3 +1,5 @@
+// Package graph provides GraphRAG retrieval implementation following Microsoft GraphRAG architecture.
+// It supports three search modes: Local, Global, and Hybrid.
 package graph
 
 import (
@@ -5,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"text/template"
 
 	chat "github.com/DotNetAge/gochat/pkg/core"
@@ -16,9 +17,9 @@ import (
 	"github.com/DotNetAge/gorag/pkg/observability"
 	"github.com/DotNetAge/gorag/pkg/retrieval/query"
 	"github.com/DotNetAge/gorag/pkg/steps/enrich"
+	graphstep "github.com/DotNetAge/gorag/pkg/steps/graph"
 	"github.com/DotNetAge/gorag/pkg/steps/vector"
 	"github.com/DotNetAge/gorag/pkg/store/vector/govector"
-	"golang.org/x/sync/errgroup"
 )
 
 const defaultGraphRAGPrompt = `You are a helpful and professional AI assistant.
@@ -41,8 +42,8 @@ type graphRetriever struct {
 	tracer   observability.Tracer
 }
 
-// DefaultGraphRetriever creates a Knowledge-Graph enabled retriever.
-// It implements hybrid search combining vector similarity and graph neighbor traversal.
+// DefaultGraphRetriever creates a GraphRAG retriever with default settings.
+// It automatically selects search mode based on available components.
 func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
@@ -74,16 +75,30 @@ func DefaultGraphRetriever(opts ...Option) (core.Retriever, error) {
 		)
 	}
 
-	// 1.5 Fallback to default graph store if none provided
+	// 2. GraphStore is required
 	if options.graphStore == nil {
 		return nil, fmt.Errorf("GraphStore is required for GraphRAG retriever")
 	}
 
-	// 2. Initialize the retriever using the expanded Options
-	return NewRetriever(options.vectorStore, options.graphStore, options.embedder, options.llm, opts...), nil
+	// 3. Auto-select search mode if not specified
+	if options.searchMode == "" {
+		options.searchMode = core.SearchModeLocal
+	}
+
+	return NewRetriever(
+		options.vectorStore,
+		options.graphStore,
+		options.embedder,
+		options.llm,
+		opts...,
+	), nil
 }
 
-// NewRetriever creates a new GraphRAG retriever.
+// NewRetriever creates a new GraphRAG retriever with configurable search mode.
+// Following Microsoft GraphRAG architecture:
+// - Local: Entity-centric graph traversal (best for specific questions)
+// - Global: Community-based search (best for thematic questions)
+// - Hybrid: Combines local, global, and vector search
 func NewRetriever(
 	vectorStore core.VectorStore,
 	graphStore core.GraphStore,
@@ -110,40 +125,59 @@ func NewRetriever(
 
 	p := pipeline.New[*core.RetrievalContext]()
 
-	// 1. Entity Extraction
-	if options.llm != nil {
+	// ===== Step 1: Entity Extraction =====
+	// All modes need entity extraction from query
+	extractor := resolveEntityExtractor(options)
+	if extractor != nil {
 		p.AddStep(&entityExtractionStep{
-			extractor: query.NewEntityExtractor(options.llm),
-			logger:    options.logger,
+			extractor:   extractor,
+			logger:      options.logger,
+			failOnError: false,
 		})
 	}
 
-	// 2. Graph Search
-	p.AddStep(&graphSearchStep{
-		store:  graphStore,
-		depth:  options.depth,
-		limit:  options.limit,
-		logger: options.logger,
-	})
+	// ===== Step 2: Graph Search (Mode-specific) =====
+	switch options.searchMode {
+	case core.SearchModeGlobal:
+		// Global search: Community-based retrieval
+		p.AddStep(graphstep.NewGlobalSearch(graphStore, embedder,
+			graphstep.WithGlobalTopK(options.topK),
+		))
 
-	// 2.5 Custom Steps (e.g. Cypher reasoning)
+	case core.SearchModeHybrid:
+		// Hybrid search: Local + Global + Vector
+		p.AddStep(graphstep.NewHybridSearch(graphStore, vectorStore, embedder,
+			graphstep.WithHybridTopK(options.topK),
+			graphstep.WithHybridDepth(options.depth),
+		))
+
+	default: // SearchModeLocal
+		// Local search: Graph traversal from entities
+		p.AddStep(graphstep.NewLocalSearch(graphStore,
+			graphstep.WithDepth(options.depth),
+			graphstep.WithLimit(options.limit),
+		))
+
+		// Add vector search for hybrid-like behavior
+		if options.embedder != nil {
+			p.AddStep(vector.Search(vectorStore, embedder, vector.SearchOptions{
+				TopK: options.topK,
+			}))
+		}
+	}
+
+	// ===== Step 3: Custom Steps =====
 	for _, step := range options.customSteps {
 		p.AddStep(step)
 	}
 
-	// 3. Vector Search (for hybrid retrieval)
-	if options.embedder != nil {
-		p.AddStep(vector.Search(vectorStore, options.embedder, vector.SearchOptions{
-			TopK: options.topK,
-		}))
-	}
-
-	// 3.5 DocStore Enrichment (PDR)
+	// ===== Step 4: Enrichment =====
+	// Retrieve full chunk content from DocStore
 	if options.docStore != nil {
 		p.AddStep(enrich.EnrichWithDocStore(options.docStore, options.logger))
 	}
 
-	// 4. Generation
+	// ===== Step 5: Generation =====
 	if options.llm != nil {
 		p.AddStep(&graphGenerationStep{
 			llm:            options.llm,
@@ -157,6 +191,8 @@ func NewRetriever(
 		tracer:   options.tracer,
 	}
 }
+
+// Retrieve executes the GraphRAG pipeline for each query.
 func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK int) ([]*core.RetrievalResult, error) {
 	results := make([]*core.RetrievalResult, 0, len(queries))
 
@@ -164,7 +200,7 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 		retrievalCtx := core.NewRetrievalContext(ctx, q)
 		retrievalCtx.Tracer = r.tracer
 
-		// Start root span for retrieval
+		// Start root span
 		retrievalCtx.Ctx, retrievalCtx.Span = r.tracer.StartSpan(retrievalCtx.Ctx, "GraphRAG.Retrieve")
 		retrievalCtx.Span.SetTag("query", q)
 
@@ -176,6 +212,7 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 
 		retrievalCtx.Span.End()
 
+		// Collect all chunks
 		var allChunks []*core.Chunk
 		for _, group := range retrievalCtx.RetrievedChunks {
 			allChunks = append(allChunks, group...)
@@ -192,30 +229,23 @@ func (r *graphRetriever) Retrieve(ctx context.Context, queries []string, topK in
 	return results, nil
 }
 
-// entityExtractionStep extracts entities from query and stores them in context.
+// ===== Entity Extraction Step =====
+
 type entityExtractionStep struct {
 	extractor   core.EntityExtractor
 	logger      logging.Logger
 	failOnError bool
 }
 
-type EntityExtractionOption func(*entityExtractionStep)
-
-func WithFailOnError(fail bool) EntityExtractionOption {
-	return func(s *entityExtractionStep) {
-		s.failOnError = fail
-	}
-}
-
 func (s *entityExtractionStep) Name() string {
 	return "EntityExtraction"
 }
 
-func (s *entityExtractionStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
-	_, span := context.Tracer.StartSpan(ctx, "GraphRAG.ExtractEntities")
+func (s *entityExtractionStep) Execute(ctx context.Context, rctx *core.RetrievalContext) error {
+	_, span := rctx.Tracer.StartSpan(ctx, "GraphRAG.ExtractEntities")
 	defer span.End()
 
-	res, err := s.extractor.Extract(ctx, context.Query)
+	res, err := s.extractor.Extract(ctx, rctx.Query)
 	if err != nil {
 		s.logger.Error("failed to extract entities", err)
 		span.LogEvent("error", map[string]any{"error": err.Error()})
@@ -226,111 +256,13 @@ func (s *entityExtractionStep) Execute(ctx context.Context, context *core.Retrie
 	}
 
 	span.LogEvent("entities_extracted", map[string]any{"count": len(res.Entities), "entities": res.Entities})
-	context.Custom["extracted_entities"] = res.Entities
+	rctx.ExtractedEntities = res.Entities
+	rctx.Custom["extracted_entities"] = res.Entities
 	return nil
 }
 
-// graphSearchStep searches the knowledge graph using extracted entities.
-type graphSearchStep struct {
-	store  core.GraphStore
-	depth  int
-	limit  int
-	logger logging.Logger
-}
+// ===== Generation Step =====
 
-func (s *graphSearchStep) Name() string {
-	return "GraphSearch"
-}
-
-func (s *graphSearchStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
-	if s.store == nil {
-		if s.logger != nil {
-			s.logger.Warn("GraphStore is nil, skipping graph search step", nil)
-		}
-		return nil
-	}
-
-	tracer := context.Tracer
-	if tracer == nil {
-		tracer = observability.DefaultNoopTracer()
-	}
-
-	_, span := tracer.StartSpan(ctx, "GraphSearch")
-	defer span.End()
-
-	entities, ok := context.Custom["extracted_entities"].([]string)
-	if !ok || len(entities) == 0 {
-		span.LogEvent("no_entities_found", nil)
-		return nil
-	}
-
-	// Industrial Gate: Limit number of entities to process to prevent resource exhaustion
-	const maxEntities = 10
-	if len(entities) > maxEntities {
-		if s.logger != nil {
-			s.logger.Debug("too many entities extracted, limiting to top", map[string]any{"total": len(entities), "limit": maxEntities})
-		}
-		entities = entities[:maxEntities]
-	}
-
-	span.SetTag("entities_count", len(entities))
-
-	// Concurrent Fetching
-	g, gctx := errgroup.WithContext(ctx)
-	results := make(chan string, len(entities))
-
-	for _, entity := range entities {
-		e := entity // capture
-		g.Go(func() error {
-			nodes, edges, err := s.store.GetNeighbors(gctx, e, s.depth, s.limit)
-			if err != nil {
-				if s.logger != nil {
-					s.logger.Warn("failed to get neighbors for entity", map[string]any{
-						"entity": e,
-						"error":  err,
-					})
-				}
-				return nil // Non-fatal for individual entity
-			}
-
-			if len(nodes) > 0 {
-				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("Entity: %s\n", e))
-				for _, node := range nodes {
-					if node.ID != e {
-						sb.WriteString(fmt.Sprintf("- Node: %s (Type: %s)\n", node.ID, node.Type))
-					}
-				}
-				for _, edge := range edges {
-					sb.WriteString(fmt.Sprintf("- Relationship: %s --(%s)--> %s\n", edge.Source, edge.Type, edge.Target))
-				}
-				results <- sb.String()
-			}
-			return nil
-		})
-	}
-
-	// Close results chan when all workers done
-	go func() {
-		_ = g.Wait()
-		close(results)
-	}()
-
-	var graphContext strings.Builder
-	for res := range results {
-		graphContext.WriteString(res)
-		graphContext.WriteString("\n")
-	}
-
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	context.Custom["graph_context"] = graphContext.String()
-	return nil
-}
-
-// Custom step for GraphRAG generation to handle both chunks and graph context
 type graphGenerationStep struct {
 	llm            chat.Client
 	promptTemplate string
@@ -341,27 +273,25 @@ func (s *graphGenerationStep) Name() string {
 	return "GraphGeneration"
 }
 
-func (s *graphGenerationStep) Execute(ctx context.Context, context *core.RetrievalContext) error {
+func (s *graphGenerationStep) Execute(ctx context.Context, rctx *core.RetrievalContext) error {
 	// Build chunks context
-	var chunksBuilder strings.Builder
-	i := 1
-	for _, group := range context.RetrievedChunks {
+	var chunksText string
+	for i, group := range rctx.RetrievedChunks {
 		for _, chunk := range group {
-			chunksBuilder.WriteString(fmt.Sprintf("--- Document %d --\n%s\n\n", i, chunk.Content))
-			i++
+			chunksText += fmt.Sprintf("--- Document %d ---\n%s\n\n", i+1, chunk.Content)
 		}
 	}
 
-	graphCtx, _ := context.Custom["graph_context"].(string)
+	graphCtx := rctx.GraphContext
 
 	data := struct {
 		Chunks string
 		Graph  string
 		Query  string
 	}{
-		Chunks: chunksBuilder.String(),
+		Chunks: chunksText,
 		Graph:  graphCtx,
-		Query:  context.Query.Text,
+		Query:  rctx.Query.Text,
 	}
 
 	tmpl, err := template.New("graph_rag").Parse(s.promptTemplate)
@@ -375,122 +305,51 @@ func (s *graphGenerationStep) Execute(ctx context.Context, context *core.Retriev
 	}
 
 	messages := []chat.Message{
+		chat.NewSystemMessage("You are a helpful AI assistant specialized in answering questions based on provided context."),
 		chat.NewUserMessage(buf.String()),
 	}
 
 	resp, err := s.llm.Chat(ctx, messages)
 	if err != nil {
-		return fmt.Errorf("LLM chat failed: %w", err)
+		return fmt.Errorf("LLM generation failed: %w", err)
 	}
 
-	context.Answer = &core.Result{
+	rctx.Answer = &core.Result{
 		Answer: resp.Content,
 	}
-
 	return nil
 }
 
-// Options for GraphRAG retriever
-type Options struct {
-	name           string
-	topK           int
-	depth          int
-	limit          int
-	promptTemplate string
-	docStore       core.DocStore
-	logger         logging.Logger
-	tracer         observability.Tracer
-	embedder       embedding.Provider
-	llm            chat.Client
-	vectorStore    core.VectorStore
-	graphStore     core.GraphStore
-	customSteps    []pipeline.Step[*core.RetrievalContext]
-}
+// ===== Entity Extractor Resolution =====
 
-func WithName(name string) Option {
-	return func(o *Options) { o.name = name }
-}
-
-func WithVectorStore(s core.VectorStore) Option {
-	return func(o *Options) { o.vectorStore = s }
-}
-
-func WithGraphStore(s core.GraphStore) Option {
-	return func(o *Options) { o.graphStore = s }
-}
-func defaultOptions() *Options {
-	return &Options{
-		topK:           5,
-		depth:          1,
-		limit:          10,
-		promptTemplate: defaultGraphRAGPrompt,
-		tracer:         observability.DefaultNoopTracer(),
-		customSteps:    make([]pipeline.Step[*core.RetrievalContext], 0),
+func resolveEntityExtractor(opts *Options) core.EntityExtractor {
+	// 1. Use custom extractor if provided
+	if opts.entityExtractor != nil {
+		return opts.entityExtractor
 	}
-}
 
-type Option func(*Options)
-
-func WithEmbedder(e embedding.Provider) Option {
-	return func(o *Options) {
-		o.embedder = e
-	}
-}
-
-func WithLLM(l chat.Client) Option {
-	return func(o *Options) {
-		o.llm = l
-	}
-}
-
-func WithTopK(k int) Option {
-	return func(o *Options) {
-		o.topK = k
-	}
-}
-
-func WithDepth(d int) Option {
-	return func(o *Options) {
-		o.depth = d
-	}
-}
-
-func WithLimit(l int) Option {
-	return func(o *Options) {
-		o.limit = l
-	}
-}
-
-func WithDocStore(s core.DocStore) Option {
-	return func(o *Options) {
-		o.docStore = s
-	}
-}
-
-func WithPromptTemplate(t string) Option {
-	return func(o *Options) {
-		if t != "" {
-			o.promptTemplate = t
+	// 2. Resolve based on strategy
+	switch opts.extractionStrategy {
+	case ExtractionStrategyLLM:
+		if opts.llm != nil {
+			return query.NewEntityExtractor(opts.llm)
 		}
-	}
-}
-
-func WithLogger(l logging.Logger) Option {
-	return func(o *Options) {
-		o.logger = l
-	}
-}
-
-func WithTracer(t observability.Tracer) Option {
-	return func(o *Options) {
-		o.tracer = t
-	}
-}
-
-func WithCustomStep(step pipeline.Step[*core.RetrievalContext]) Option {
-	return func(o *Options) {
-		if step != nil {
-			o.customSteps = append(o.customSteps, step)
+	case ExtractionStrategyVector:
+		if opts.embedder != nil && opts.graphStore != nil {
+			return query.NewVectorExtractor(opts.graphStore, opts.embedder)
 		}
+	case ExtractionStrategyKeyword:
+		return query.NewKeywordExtractor()
+	case ExtractionStrategyAuto:
+		// Auto-select: LLM > Vector > Keyword
+		if opts.llm != nil {
+			return query.NewEntityExtractor(opts.llm)
+		}
+		if opts.embedder != nil && opts.graphStore != nil {
+			return query.NewVectorExtractor(opts.graphStore, opts.embedder)
+		}
+		return query.NewKeywordExtractor()
 	}
+
+	return nil
 }

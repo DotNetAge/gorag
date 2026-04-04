@@ -6,19 +6,19 @@ import (
 
 	"github.com/DotNetAge/gochat/pkg/pipeline"
 	"github.com/DotNetAge/gorag/pkg/core"
-	"github.com/DotNetAge/gorag/pkg/indexing/parser/base"
 	"github.com/DotNetAge/gorag/pkg/logging"
 )
 
 type triples struct {
-	extractor *base.TriplesExtractor
+	extractor core.TriplesExtractor
 	store     core.GraphStore
 	logger    logging.Logger
 }
 
 // ExtractTriples creates a new step for automated knowledge graph construction.
 // It extracts triples (Subject-Predicate-Object) from chunks and upserts them into the GraphStore.
-func ExtractTriples(extractor *base.TriplesExtractor, graphStore core.GraphStore, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
+// Following Microsoft GraphRAG design: nodes and edges are bound to source chunks.
+func ExtractTriples(extractor core.TriplesExtractor, graphStore core.GraphStore, logger logging.Logger) pipeline.Step[*core.IndexingContext] {
 	if logger == nil {
 		logger = logging.DefaultNoopLogger()
 	}
@@ -67,6 +67,7 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 		"chunks": len(allChunks),
 	})
 
+	var allTriples []*core.Triple
 	for _, chunk := range allChunks {
 		extracted, err := s.extractor.Extract(ctx, chunk.Content)
 		if err != nil {
@@ -78,43 +79,43 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 		}
 
 		for _, t := range extracted {
-			// 1. Upsert Subject Node
+			// Bind source information to triple
+			t.SourceChunkID = chunk.ID
+			t.SourceDocID = chunk.DocumentID
+			allTriples = append(allTriples, &t)
+
+			// 1. Upsert Subject Node with source binding
 			subNode := &core.Node{
 				ID:   t.Subject,
 				Type: t.SubjectType,
-				Properties: map[string]any{
-					"source_chunk": chunk.ID,
-					"source_file":  state.FilePath,
-				},
+				SourceChunkIDs: []string{chunk.ID},
+				SourceDocIDs:   []string{chunk.DocumentID},
 			}
 			if err := s.store.UpsertNodes(ctx, []*core.Node{subNode}); err != nil {
 				s.logger.Error("Failed to upsert subject node", err)
 				continue
 			}
 
-			// 2. Upsert Object Node
+			// 2. Upsert Object Node with source binding
 			objNode := &core.Node{
 				ID:   t.Object,
 				Type: t.ObjectType,
-				Properties: map[string]any{
-					"source_chunk": chunk.ID,
-					"source_file":  state.FilePath,
-				},
+				SourceChunkIDs: []string{chunk.ID},
+				SourceDocIDs:   []string{chunk.DocumentID},
 			}
 			if err := s.store.UpsertNodes(ctx, []*core.Node{objNode}); err != nil {
 				s.logger.Error("Failed to upsert object node", err)
 				continue
 			}
 
-			// 3. Upsert Edge
+			// 3. Upsert Edge with source binding
 			edge := &core.Edge{
 				ID:     fmt.Sprintf("%s-%s-%s", t.Subject, t.Predicate, t.Object),
 				Type:   t.Predicate,
 				Source: t.Subject,
 				Target: t.Object,
-				Properties: map[string]any{
-					"source_chunk": chunk.ID,
-				},
+				SourceChunkIDs: []string{chunk.ID},
+				SourceDocIDs:   []string{chunk.DocumentID},
 			}
 			if err := s.store.UpsertEdges(ctx, []*core.Edge{edge}); err != nil {
 				s.logger.Error("Failed to upsert edge", err)
@@ -122,6 +123,12 @@ func (s *triples) Execute(ctx context.Context, state *core.IndexingContext) erro
 		}
 	}
 
-	s.logger.Info("Graph construction completed for file", map[string]any{"file": state.FilePath})
+	// Store triples in state for downstream steps
+	state.Triples = allTriples
+
+	s.logger.Info("Graph construction completed for file", map[string]any{
+		"file":    state.FilePath,
+		"triples": len(allTriples),
+	})
 	return nil
 }

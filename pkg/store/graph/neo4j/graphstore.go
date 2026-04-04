@@ -282,6 +282,28 @@ func (s *neo4jGraphStore) GetCommunitySummaries(ctx context.Context, level int) 
 	return s.Query(ctx, query, map[string]any{"level": level})
 }
 
+func (s *neo4jGraphStore) DeleteNode(ctx context.Context, id string) error {
+	session := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.dbName})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, "MATCH (n:Entity {id: $id}) DETACH DELETE n", map[string]any{"id": id})
+		return nil, err
+	})
+	return err
+}
+
+func (s *neo4jGraphStore) DeleteEdge(ctx context.Context, id string) error {
+	session := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.dbName})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, "MATCH ()-[r {id: $id}]-() DELETE r", map[string]any{"id": id})
+		return nil, err
+	})
+	return err
+}
+
 func (s *neo4jGraphStore) Close(ctx context.Context) error {
 	return s.driver.Close(ctx)
 }
