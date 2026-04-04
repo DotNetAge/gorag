@@ -1,3 +1,6 @@
+// Package query provides query processing components for the RAG system.
+// It includes query decomposition, rewriting, expansion, and classification capabilities
+// to improve retrieval quality and handle complex user queries.
 package query
 
 import (
@@ -13,7 +16,6 @@ import (
 	"github.com/DotNetAge/gorag/pkg/observability"
 )
 
-// ensure interface implementation
 var _ core.QueryDecomposer = (*Decomposer)(nil)
 
 const defaultDecompositionPrompt = `You are an expert at breaking down complex questions into simpler sub-questions.
@@ -35,7 +37,24 @@ Output your response as a valid JSON object with this exact structure:
   "is_complex": true/false
 }`
 
-// Decomposer is the implementation of core.QueryDecomposer.
+// Decomposer implements core.QueryDecomposer to break down complex queries.
+// It uses an LLM to analyze queries and generate simpler sub-queries that can be
+// processed independently, enabling multi-hop retrieval for complex questions.
+//
+// Query decomposition is useful for:
+//   - Multi-hop questions: "What is the revenue of the company that acquired GitHub?"
+//   - Comparative questions: "Compare the features of Product A and Product B"
+//   - Temporal questions: "How has the market changed since 2020?"
+//
+// Example:
+//
+//	llm := openai.NewClient(apiKey)
+//	decomposer := query.NewDecomposer(llm,
+//	    query.WithMaxSubQueries(3),
+//	    query.WithDecomposerLogger(logger),
+//	)
+//	result, err := decomposer.Decompose(ctx, query)
+//	// result.SubQueries contains ["What company acquired GitHub?", "What is the revenue of that company?"]
 type Decomposer struct {
 	llm            chat.Client
 	promptTemplate string
@@ -47,7 +66,20 @@ type Decomposer struct {
 // DecomposerOption configures a Decomposer instance.
 type DecomposerOption func(*Decomposer)
 
-// WithDecompositionPromptTemplate overrides the default decomposition prompt.
+// WithDecompositionPromptTemplate sets a custom prompt template for decomposition.
+// The template should contain one %s placeholder for the query text.
+//
+// Parameters:
+//   - tmpl: Custom prompt template (must contain %s placeholder)
+//
+// Returns:
+//   - DecomposerOption: Configuration function
+//
+// Example:
+//
+//	decomposer := query.NewDecomposer(llm,
+//	    query.WithDecompositionPromptTemplate("Custom prompt: %s"),
+//	)
 func WithDecompositionPromptTemplate(tmpl string) DecomposerOption {
 	return func(d *Decomposer) {
 		if tmpl != "" {
@@ -57,6 +89,13 @@ func WithDecompositionPromptTemplate(tmpl string) DecomposerOption {
 }
 
 // WithMaxSubQueries sets the maximum number of sub-queries to generate.
+// Default is 5. If decomposition produces more, they are truncated.
+//
+// Parameters:
+//   - max: Maximum number of sub-queries (must be > 0)
+//
+// Returns:
+//   - DecomposerOption: Configuration function
 func WithMaxSubQueries(max int) DecomposerOption {
 	return func(d *Decomposer) {
 		if max > 0 {
@@ -65,7 +104,13 @@ func WithMaxSubQueries(max int) DecomposerOption {
 	}
 }
 
-// WithDecomposerLogger sets a structured logger.
+// WithDecomposerLogger sets a structured logger for the decomposer.
+//
+// Parameters:
+//   - logger: Logger implementation (if nil, no-op logger is used)
+//
+// Returns:
+//   - DecomposerOption: Configuration function
 func WithDecomposerLogger(logger logging.Logger) DecomposerOption {
 	return func(d *Decomposer) {
 		if logger != nil {
@@ -74,7 +119,13 @@ func WithDecomposerLogger(logger logging.Logger) DecomposerOption {
 	}
 }
 
-// WithDecomposerCollector sets an observability collector.
+// WithDecomposerCollector sets an observability collector for metrics.
+//
+// Parameters:
+//   - collector: Metrics collector (if nil, no-op collector is used)
+//
+// Returns:
+//   - DecomposerOption: Configuration function
 func WithDecomposerCollector(collector observability.Collector) DecomposerOption {
 	return func(d *Decomposer) {
 		if collector != nil {
@@ -83,7 +134,22 @@ func WithDecomposerCollector(collector observability.Collector) DecomposerOption
 	}
 }
 
-// NewDecomposer creates a new query decomposer.
+// NewDecomposer creates a new query decomposer with the given LLM client.
+// The decomposer uses default settings unless modified by options.
+//
+// Parameters:
+//   - llm: LLM client for generating decompositions
+//   - opts: Optional configuration functions
+//
+// Returns:
+//   - *Decomposer: Configured decomposer instance
+//
+// Example:
+//
+//	decomposer := query.NewDecomposer(llm,
+//	    query.WithMaxSubQueries(3),
+//	    query.WithDecomposerLogger(logger),
+//	)
 func NewDecomposer(llm chat.Client, opts ...DecomposerOption) *Decomposer {
 	d := &Decomposer{
 		llm:            llm,
@@ -99,6 +165,23 @@ func NewDecomposer(llm chat.Client, opts ...DecomposerOption) *Decomposer {
 }
 
 // Decompose breaks down a complex query into simpler sub-queries.
+// It uses the configured LLM to analyze the query and generate sub-queries
+// that can be answered independently.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - query: The query to decompose
+//
+// Returns:
+//   - *core.DecompositionResult: Contains sub-queries, reasoning, and complexity flag
+//   - error: Any error that occurred during decomposition
+//
+// The result includes:
+//   - SubQueries: List of simpler questions
+//   - Reasoning: Explanation of the decomposition strategy
+//   - IsComplex: Whether the original query was deemed complex
+//
+// If decomposition fails or the query is simple, returns the original query as a single sub-query.
 func (d *Decomposer) Decompose(ctx context.Context, query *core.Query) (*core.DecompositionResult, error) {
 	start := time.Now()
 	defer func() {

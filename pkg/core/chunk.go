@@ -51,6 +51,11 @@ func NewChunk(id, documentID, content string, startIndex, endIndex int, metadata
 	}
 }
 
+// SetVectorID associates a vector store ID with this chunk.
+// This ID is used to link the chunk to its embedding in the vector store.
+//
+// Parameters:
+//   - vectorID: The unique identifier from the vector store
 func (c *Chunk) SetVectorID(vectorID string) {
 	c.VectorID = vectorID
 }
