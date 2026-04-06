@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/DotNetAge/gochat v0.1.10
-	github.com/DotNetAge/gograph v0.1.0
+	github.com/DotNetAge/gograph v0.2.1
 	github.com/DotNetAge/govector v0.1.3
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/google/uuid v1.6.0
