@@ -48,3 +48,5 @@ specs
 CLAUDE.md
 GEMINI.md
 data/
+models/
+inputs/
