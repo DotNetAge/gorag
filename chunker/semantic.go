@@ -44,7 +44,15 @@ func (c *SemanticChunker) Chunk(
 
 	// Fallback to sentence chunking if no embedder
 	if c.embedder == nil {
-		return NewSentenceChunker(WithMaxSentences(c.maxSentences)).Chunk(structured, entities)
+		chunks, err := NewSentenceChunker(WithMaxSentences(c.maxSentences)).Chunk(structured, entities)
+		if err != nil {
+			return nil, err
+		}
+		// Append image chunks
+		if imgChunks := ExtractImageChunks(structured); len(imgChunks) > 0 {
+			chunks = append(chunks, imgChunks...)
+		}
+		return chunks, nil
 	}
 
 	// 1. Split into sentences
@@ -67,7 +75,12 @@ func (c *SemanticChunker) Chunk(
 	embeddings, err := embedBatch(c.embedder, sentenceTexts)
 	if err != nil {
 		// Fallback to sentence chunking on embed error
-		return sentences, nil
+		chunks := sentences
+		// Append image chunks
+		if imgChunks := ExtractImageChunks(structured); len(imgChunks) > 0 {
+			chunks = append(chunks, imgChunks...)
+		}
+		return chunks, nil
 	}
 
 	// 3. Calculate similarity between adjacent sentences
@@ -77,7 +90,13 @@ func (c *SemanticChunker) Chunk(
 	breakPoints := c.detectTopicChanges(similarities)
 
 	// 5. Create chunks based on break points
-	chunks := c.createChunksFromBreakPoints(sentences, breakPoints)
+	chunks := c.createChunksFromBreakPoints(sentences, breakPoints, structured.RawDoc.GetMimeType())
+
+	// 6. Append image chunks as sub-chunks
+	imageChunks := ExtractImageChunks(structured)
+	if len(imageChunks) > 0 {
+		chunks = append(chunks, imageChunks...)
+	}
 
 	return chunks, nil
 }
@@ -129,6 +148,7 @@ func (c *SemanticChunker) detectTopicChanges(similarities []float32) []int {
 func (c *SemanticChunker) createChunksFromBreakPoints(
 	sentences []*core.Chunk,
 	breakPoints []int,
+	mimeType string,
 ) []*core.Chunk {
 	if len(sentences) == 0 {
 		return []*core.Chunk{}
@@ -145,7 +165,7 @@ func (c *SemanticChunker) createChunksFromBreakPoints(
 	for _, bp := range breakPoints {
 		if bp > start && bp <= len(sentences) {
 			// Merge sentences from start to bp-1
-			chunk := c.mergeSentences(sentences[start:bp], len(chunks))
+			chunk := c.mergeSentences(sentences[start:bp], len(chunks), mimeType)
 			chunks = append(chunks, chunk)
 			start = bp
 		}
@@ -153,7 +173,7 @@ func (c *SemanticChunker) createChunksFromBreakPoints(
 
 	// Handle remaining sentences
 	if start < len(sentences) {
-		chunk := c.mergeSentences(sentences[start:], len(chunks))
+		chunk := c.mergeSentences(sentences[start:], len(chunks), mimeType)
 		chunks = append(chunks, chunk)
 	}
 
@@ -161,7 +181,7 @@ func (c *SemanticChunker) createChunksFromBreakPoints(
 }
 
 // mergeSentences merges multiple sentences into a single chunk
-func (c *SemanticChunker) mergeSentences(sentences []*core.Chunk, index int) *core.Chunk {
+func (c *SemanticChunker) mergeSentences(sentences []*core.Chunk, index int, mimeType string) *core.Chunk {
 	if len(sentences) == 0 {
 		return nil
 	}
@@ -189,7 +209,7 @@ func (c *SemanticChunker) mergeSentences(sentences []*core.Chunk, index int) *co
 		ID:       GenerateChunkID(first.DocID, index, content),
 		ParentID: "",
 		DocID:    first.DocID,
-		MIMEType: "text",
+		MIMEType: mimeType,
 		Content:  content,
 		Metadata: first.Metadata,
 		ChunkMeta: core.ChunkMeta{

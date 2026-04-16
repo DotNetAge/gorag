@@ -101,12 +101,19 @@ func NewVocabTokenizerFromFile(vocabPath string, maxLength int) (*VocabTokenizer
 	}
 	defer file.Close()
 
-	// 检测文件格式
-	content, _ := bufio.NewReader(file).ReadBytes(0)
+	// 先读取文件内容用于格式检测
+	content, err := bufio.NewReader(file).ReadBytes(0)
+	if err != nil && len(content) == 0 {
+		return nil, fmt.Errorf("failed to read vocab file: %w", err)
+	}
 	file.Seek(0, 0)
 
 	// 尝试解析为 tokenizer.json (HuggingFace格式)
-	if strings.HasSuffix(vocabPath, "tokenizer.json") || strings.HasPrefix(string(content), "{\"version\"") {
+	// 格式检测：路径以 tokenizer.json 结尾 或 内容以 {"version" 开头
+	isTokenizerJSON := strings.HasSuffix(vocabPath, "tokenizer.json") ||
+		(len(content) > 10 && bytes.HasPrefix(bytes.TrimSpace(content), []byte("{\"version\"")))
+
+	if isTokenizerJSON {
 		vocab, err := loadVocabFromTokenizerJSON(bytes.NewReader(content))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse tokenizer.json: %w", err)
@@ -171,10 +178,10 @@ func loadVocabFromTokenizerJSON(r *bytes.Reader) (map[string]int, error) {
 
 // buildTokenizer 构建 VocabTokenizer
 func buildTokenizer(vocab map[string]int, reverse map[int]string, maxLength int) *VocabTokenizer {
-	unkID := vocab["[UNK]"]
-	clsID := vocab["[CLS]"]
-	sepID := vocab["[SEP]"]
-	padID := vocab["[PAD]"]
+	unkID := getSpecialTokenID(vocab, "[UNK]", 100)
+	clsID := getSpecialTokenID(vocab, "[CLS]", 101)
+	sepID := getSpecialTokenID(vocab, "[SEP]", 102)
+	padID := getSpecialTokenID(vocab, "[PAD]", 0)
 
 	return &VocabTokenizer{
 		vocab:     vocab,
@@ -185,6 +192,14 @@ func buildTokenizer(vocab map[string]int, reverse map[int]string, maxLength int)
 		padID:     padID,
 		maxLength: maxLength,
 	}
+}
+
+// getSpecialTokenID 安全获取特殊 token ID，不存在时返回默认值
+func getSpecialTokenID(vocab map[string]int, token string, defaultID int) int {
+	if id, ok := vocab[token]; ok {
+		return id
+	}
+	return defaultID
 }
 
 // Tokenize 将文本转换为 BERT 输入特征
@@ -236,20 +251,70 @@ func (t *VocabTokenizer) Tokenize(text string) (inputIDs []int64, attentionMask 
 func (t *VocabTokenizer) tokenize(text string) []string {
 	var tokens []string
 
-	// 简单按空格和标点分割
+	// 改进的分词：处理英文单词、数字串、标点符号
 	var current string
-	for _, r := range text {
+	for i, r := range text {
 		if unicode.IsSpace(r) || unicode.IsPunct(r) {
+			// 遇到分隔符，先处理当前积累的 token
+			if current != "" {
+				// 英文单词整体处理
+				if isASCIIAlphaString(current) {
+					tokens = append(tokens, current)
+				} else {
+					// 中文或其他字符按字符分词后做 wordpiece
+					for _, c := range current {
+						tokens = append(tokens, string(c))
+					}
+				}
+				current = ""
+			}
+			// 跳过分隔符
+		} else if unicode.IsDigit(r) {
+			// 数字：积累连续数字串
+			start := i
+			for j := i; j < len(text); j++ {
+				if !unicode.IsDigit(rune(text[j])) {
+					break
+				}
+				i = j
+			}
+			numStr := text[start : i+1]
 			if current != "" {
 				tokens = append(tokens, current)
 				current = ""
 			}
+			// 数字串整体作为一个 token
+			tokens = append(tokens, numStr)
+		} else if isASCIIAlphaRune(r) {
+			// 英文/拉丁字母：积累连续字母串
+			start := i
+			for j := i; j < len(text); j++ {
+				if !isASCIIAlphaRune(rune(text[j])) {
+					break
+				}
+				i = j
+			}
+			word := text[start : i+1]
+			if current != "" {
+				tokens = append(tokens, current)
+				current = ""
+			}
+			tokens = append(tokens, word)
 		} else {
+			// 中文或其他字符：积累连续字符
 			current += string(r)
 		}
 	}
+
+	// 处理最后剩余的 token
 	if current != "" {
-		tokens = append(tokens, current)
+		if isASCIIAlphaString(current) {
+			tokens = append(tokens, current)
+		} else {
+			for _, c := range current {
+				tokens = append(tokens, string(c))
+			}
+		}
 	}
 
 	// 对每个 token 进行 Wordpiece
@@ -259,6 +324,21 @@ func (t *VocabTokenizer) tokenize(text string) []string {
 	}
 
 	return result
+}
+
+// isASCIIAlphaString 检查字符串是否只包含 ASCII 字母
+func isASCIIAlphaString(s string) bool {
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// isASCIIAlphaRune 检查 rune 是否为 ASCII 字母
+func isASCIIAlphaRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
 // wordpieceTokens 将 token 拆分为子词 token 列表
@@ -302,6 +382,8 @@ func (t *VocabTokenizer) wordpieceTokens(token string) []string {
 				tokens = append(tokens, "[UNK]")
 				start++
 			} else {
+				// 剩余字符无法匹配，追加 [UNK] 而非直接丢弃
+				tokens = append(tokens, "[UNK]")
 				break
 			}
 		}
@@ -313,4 +395,11 @@ func (t *VocabTokenizer) wordpieceTokens(token string) []string {
 // VocabSize 返回词汇表大小
 func (t *VocabTokenizer) VocabSize() int {
 	return len(t.vocab)
+}
+
+// Close 关闭分词器（用于释放资源）
+func (t *VocabTokenizer) Close() error {
+	// 当前 VocabTokenizer 不持有需要关闭的资源
+	// 保留此方法以备未来扩展
+	return nil
 }

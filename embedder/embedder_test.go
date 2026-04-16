@@ -2,6 +2,7 @@ package embedder
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
@@ -19,9 +20,9 @@ func TestVocabTokenizer(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		text     string
-		wantLen  int // 期望的 token 数量（大致）
+		name    string
+		text    string
+		wantLen int // 期望的 token 数量（大致）
 	}{
 		{"Chinese", "你好世界", 4},
 		{"English", "hello world", 3},
@@ -108,7 +109,8 @@ func TestONNXEmbedder_Text(t *testing.T) {
 		t.Skipf("Skipping test: ONNX model not found at %s", testONNXName)
 	}
 
-	embedder, err := NewChineseClipEmbedder(WithModelDir(testModelDir), WithModel("onnx/"+testONNXName))
+	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
+	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
 	if err != nil {
 		t.Fatalf("Failed to create embedder: %v", err)
 	}
@@ -154,7 +156,8 @@ func TestONNXEmbedder_Image(t *testing.T) {
 		t.Skipf("Skipping test: ONNX model not found at %s", testONNXName)
 	}
 
-	embedder, err := NewChineseClipEmbedder(WithModelDir(testModelDir), WithModel("onnx/"+testONNXName))
+	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
+	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
 	if err != nil {
 		t.Fatalf("Failed to create embedder: %v", err)
 	}
@@ -201,7 +204,8 @@ func TestONNXEmbedder_Bulk(t *testing.T) {
 		t.Skipf("Skipping test: ONNX model not found at %s", testONNXName)
 	}
 
-	embedder, err := NewChineseClipEmbedder(WithModelDir(testModelDir), WithModel("onnx/"+testONNXName))
+	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
+	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
 	if err != nil {
 		t.Fatalf("Failed to create embedder: %v", err)
 	}

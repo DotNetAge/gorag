@@ -1,6 +1,8 @@
 package chunker
 
 import (
+	"strings"
+
 	"github.com/DotNetAge/gorag/core"
 )
 
@@ -69,6 +71,10 @@ func (c *ParentDocChunker) Chunk(
 		return nil, err
 	}
 
+	// Filter out image chunks from parents and children (they will be added at the end)
+	parents = filterOutImageChunks(parents)
+	children = filterOutImageChunks(children)
+
 	// 3. Establish parent-child relationships
 	c.establishParentChildRelationships(parents, children)
 
@@ -95,7 +101,12 @@ func (c *ParentDocChunker) Chunk(
 	allChunks = append(allChunks, parents...)
 	allChunks = append(allChunks, children...)
 
-	// 6. Re-index chunks
+	// 6. Append image chunks as sub-chunks
+	if imgChunks := ExtractImageChunks(structured); len(imgChunks) > 0 {
+		allChunks = append(allChunks, imgChunks...)
+	}
+
+	// 7. Re-index chunks
 	for i, chunk := range allChunks {
 		chunk.ChunkMeta.Index = i
 	}
@@ -152,4 +163,15 @@ func (c *ParentDocChunker) findParentForChild(
 	}
 
 	return bestParent
+}
+
+// filterOutImageChunks filters out image chunks from the given chunks
+func filterOutImageChunks(chunks []*core.Chunk) []*core.Chunk {
+	var result []*core.Chunk
+	for _, chunk := range chunks {
+		if !strings.HasPrefix(chunk.MIMEType, "image") {
+			result = append(result, chunk)
+		}
+	}
+	return result
 }

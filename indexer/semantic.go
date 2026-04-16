@@ -2,8 +2,10 @@ package indexer
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/query"
 )
 
 // 使用向量数据库和向量模型进行索引及检索
@@ -30,12 +32,15 @@ func (s *semanticIndexer) Type() string {
 }
 
 func (s *semanticIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+	if content == "" {
+		return nil, fmt.Errorf("content cannot be empty")
+	}
 	chunks, err := GetChunks(content)
 	if err != nil {
 		return nil, err
 	}
 	if len(chunks) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no chunks generated from content")
 	}
 	for _, chunk := range chunks {
 		if err := s.indexAndStore(ctx, chunk); err != nil {
@@ -46,12 +51,15 @@ func (s *semanticIndexer) Add(ctx context.Context, content string) (*core.Chunk,
 }
 
 func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("file path cannot be empty")
+	}
 	chunks, err := GetFileChunks(filePath)
 	if err != nil {
 		return nil, err
 	}
 	if len(chunks) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no chunks generated from file")
 	}
 	for _, chunk := range chunks {
 		if err := s.indexAndStore(ctx, chunk); err != nil {
@@ -73,7 +81,10 @@ func (s *semanticIndexer) indexAndStore(ctx context.Context, chunk *core.Chunk) 
 func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit, error) {
 	// 1. 从查询获取向量 - 优先使用 Query 中的预计算向量，否则实时计算
 	var queryVector []float32
-	query := q.(*semanticQuery)
+	query, ok := q.(*query.SemanticQuery)
+	if !ok {
+		return nil, fmt.Errorf("invalid query type: expected *semanticQuery, got %T", q)
+	}
 
 	if query.Vector() != nil {
 		queryVector = query.Vector().Values
@@ -201,5 +212,5 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 }
 
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
-	return SemanticQuery(terms, s.embedder)
+	return query.NewSemanticQuery(terms, s.embedder)
 }

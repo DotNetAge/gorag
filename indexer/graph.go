@@ -3,8 +3,12 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/query"
 )
 
 // GraphSearchResult 图搜索结果，用于序列化为 Hit.Content
@@ -83,20 +87,20 @@ func (g *graphIndexer) AddFile(ctx context.Context, filePath string) (*core.Chun
 
 // NewQuery 创建图查询（实现 core.Indexer 接口）
 func (g *graphIndexer) NewQuery(terms string) core.Query {
-	return GraphQuery(terms)
+	return query.NewGraphQuery(terms)
 }
 
 // Search 执行图搜索（实现 core.Indexer 接口）
 // 流程：实体提取 → 图遍历 → 节点/边序列化 → Hit
-func (g *graphIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit, error) {
+func (g *graphIndexer) Search(ctx context.Context, qry core.Query) ([]core.Hit, error) {
 	if g.extractor == nil {
 		return nil, nil
 	}
 
 	// 1. 从查询中提取实体
 	queryChunk := &core.Chunk{
-		ID:      "query_" + query.Raw(),
-		Content: query.Raw(),
+		ID:      "query_" + qry.Raw(),
+		Content: qry.Raw(),
 	}
 
 	entityNodes, _, err := g.extractor.Extract(ctx, queryChunk)
@@ -111,12 +115,12 @@ func (g *graphIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit
 	}
 
 	// 获取 depth 和 limit（如果有）
-	gq, ok := query.(*graphQuery)
+	gq, ok := qry.(*query.GraphQuery)
 	depth := 1
 	limit := 10
 	if ok {
-		depth = gq.depth
-		limit = gq.limit
+		depth = gq.Depth
+		limit = gq.Limit
 	}
 
 	// 2. 收集所有关联的 chunkID 和 docID
@@ -140,18 +144,38 @@ func (g *graphIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit
 		}
 	}
 
-	// 3. 获取关联的边
-	relations := make([]*core.Edge, 0)
+	// 3. 并发获取关联的边
+	type edgeResult struct {
+		edges []*core.Edge
+		err   error
+	}
+	edgeCh := make(chan edgeResult, len(entities))
+	var wg sync.WaitGroup
 	for _, entity := range entities {
-		_, edges, err := g.store.GetNeighbors(ctx, entity.ID, depth, limit)
-		if err == nil {
-			relations = append(relations, edges...)
+		wg.Add(1)
+		go func(entityID string) {
+			defer wg.Done()
+			_, edges, err := g.store.GetNeighbors(ctx, entityID, depth, limit)
+			edgeCh <- edgeResult{edges: edges, err: err}
+		}(entity.ID)
+	}
+
+	// 并发收集结果
+	go func() {
+		wg.Wait()
+		close(edgeCh)
+	}()
+
+	relations := make([]*core.Edge, 0)
+	for result := range edgeCh {
+		if result.err == nil {
+			relations = append(relations, result.edges...)
 		}
 	}
 
 	// 4. 构建 GraphSearchResult 并序列化为 JSON
 	result := GraphSearchResult{
-		Query:     query.Raw(),
+		Query:     qry.Raw(),
 		Entities:  entities,
 		Relations: relations,
 		ChunkIDs:  chunkIDs,
@@ -160,24 +184,48 @@ func (g *graphIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit
 
 	content, err := json.Marshal(result)
 	if err != nil {
-		content = []byte(`{"error": "failed to serialize graph result"}`)
+		// 记录错误但继续处理，返回降级结果
+		var buf strings.Builder
+		fmt.Fprintf(&buf, `{"error": "failed to serialize graph result: %v"}`, err)
+		content = []byte(buf.String())
 	}
 
-	// 5. 构建 Hit，按 docID 分组返回
-	hits := make([]core.Hit, 0, len(docIDs))
-	seenDocHit := make(map[string]bool)
+	// 5. 构建 Hit，按 chunkID 分组返回（与 semantic/fulltext 索引器的 ID 格式对齐）
+	hits := make([]core.Hit, 0, len(chunkIDs))
+	seenChunkHit := make(map[string]bool)
 
-	for _, docID := range docIDs {
-		if seenDocHit[docID] {
+	// 基于匹配实体数和关系数计算相关性分数
+	baseScore := float32(0.5)
+	entityBonus := float32(len(entities)) * 0.05
+	relationBonus := float32(len(relations)) * 0.02
+	graphScore := baseScore + entityBonus + relationBonus
+	if graphScore > 1.0 {
+		graphScore = 1.0
+	}
+
+	for _, chunkID := range chunkIDs {
+		if seenChunkHit[chunkID] {
 			continue
 		}
-		seenDocHit[docID] = true
+		seenChunkHit[chunkID] = true
 
-		// 筛选属于此 docID 的 entities 和 relations
+		docID := ""
+		for _, e := range entities {
+			for _, cid := range e.SourceChunkIDs {
+				if cid == chunkID && len(e.SourceDocIDs) > 0 {
+					docID = e.SourceDocIDs[0]
+					break
+				}
+			}
+			if docID != "" {
+				break
+			}
+		}
+
 		docEntities := make([]*core.Node, 0)
 		for _, e := range entities {
-			for _, sid := range e.SourceDocIDs {
-				if sid == docID {
+			for _, cid := range e.SourceChunkIDs {
+				if cid == chunkID {
 					docEntities = append(docEntities, e)
 					break
 				}
@@ -186,36 +234,47 @@ func (g *graphIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit
 
 		docRelations := make([]*core.Edge, 0)
 		for _, r := range relations {
-			for _, sid := range r.SourceDocIDs {
-				if sid == docID {
+			for _, cid := range r.SourceChunkIDs {
+				if cid == chunkID {
 					docRelations = append(docRelations, r)
 					break
 				}
 			}
 		}
 
-		docResult := GraphSearchResult{
-			Query:     query.Raw(),
+		chunkResult := GraphSearchResult{
+			Query:     qry.Raw(),
 			Entities:  docEntities,
 			Relations: docRelations,
-			ChunkIDs:  chunkIDs,
+			ChunkIDs:  []string{chunkID},
 			DocIDs:    []string{docID},
 		}
 
-		docContent, _ := json.Marshal(docResult)
+		chunkContent, _ := json.Marshal(chunkResult)
 		hits = append(hits, core.Hit{
-			ID:      docID,
-			Score:   1.0,
+			ID:      chunkID,
+			Score:   graphScore,
 			DocID:   docID,
-			Content: string(docContent),
+			Content: string(chunkContent),
 		})
 	}
 
-	// 如果没有 docID，至少返回一个包含所有信息的 Hit
-	if len(hits) == 0 {
+	// 如果没有 chunkID，至少返回一个包含所有信息的 Hit
+	if len(hits) == 0 && len(entities) > 0 {
+		chunkID := ""
+		if len(entities[0].SourceChunkIDs) > 0 {
+			chunkID = entities[0].SourceChunkIDs[0]
+		}
+		fallbackScore := float32(0.5)
+		if len(entities) > 0 {
+			fallbackScore += float32(len(entities)) * 0.05
+			if fallbackScore > 1.0 {
+				fallbackScore = 1.0
+			}
+		}
 		hits = append(hits, core.Hit{
-			ID:      entities[0].SourceChunkIDs[0],
-			Score:   1.0,
+			ID:      chunkID,
+			Score:   fallbackScore,
 			DocID:   "",
 			Content: string(content),
 		})

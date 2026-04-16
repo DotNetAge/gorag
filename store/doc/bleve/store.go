@@ -1,27 +1,29 @@
-package doc
+package bleve
 
 import (
 	"os"
 	"sync"
 
 	"github.com/DotNetAge/gorag/core"
-	"github.com/blevesearch/bleve"
+	blevedb "github.com/blevesearch/bleve"
 )
 
 // BleveStore 基于 bleve 的全文搜索引擎
 type BleveStore struct {
 	dbPath string
-	index  bleve.Index
+	index  blevedb.Index
 	mu     sync.RWMutex
 }
 
+// var _ core.FullTextStore = &BleveStore{}
+
 // NewBleveStore 创建或打开 bleve 索引
-func NewBleveStore(dbPath string) (*BleveStore, error) {
+func NewBleveStore(dbPath string) (core.FullTextStore, error) {
 	store := &BleveStore{dbPath: dbPath}
 
 	// 如果索引已存在，直接打开
 	if _, err := os.Stat(dbPath); err == nil {
-		index, err := bleve.Open(dbPath)
+		index, err := blevedb.Open(dbPath)
 		if err != nil {
 			return nil, err
 		}
@@ -30,7 +32,7 @@ func NewBleveStore(dbPath string) (*BleveStore, error) {
 	}
 
 	// 否则创建新索引（使用默认映射，bleve 会自动处理 Chunk 结构）
-	index, err := bleve.New(dbPath, bleve.NewIndexMapping())
+	index, err := blevedb.New(dbPath, blevedb.NewIndexMapping())
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +51,15 @@ func (s *BleveStore) Index(chunk *core.Chunk) error {
 }
 
 // SearchResult 全文搜索结果
-type SearchResult struct {
-	ID       string
-	Score    float64
-	DocID    string
-	Content  string
-}
+// type SearchResult struct {
+// 	ID      string
+// 	Score   float64
+// 	DocID   string
+// 	Content string
+// }
 
 // Search 执行全文搜索，返回匹配的 chunk 信息
-func (s *BleveStore) Search(query string, topK int) ([]SearchResult, error) {
+func (s *BleveStore) Search(query string, topK int) ([]core.FullTextSearchResult, error) {
 	if query == "" {
 		return nil, nil
 	}
@@ -65,8 +67,8 @@ func (s *BleveStore) Search(query string, topK int) ([]SearchResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	queryObj := bleve.NewQueryStringQuery(query)
-	searchRequest := bleve.NewSearchRequest(queryObj)
+	queryObj := blevedb.NewQueryStringQuery(query)
+	searchRequest := blevedb.NewSearchRequest(queryObj)
 	searchRequest.Size = topK
 	searchRequest.Fields = []string{"doc_id", "content"}
 
@@ -75,9 +77,9 @@ func (s *BleveStore) Search(query string, topK int) ([]SearchResult, error) {
 		return nil, err
 	}
 
-	results := make([]SearchResult, 0, len(result.Hits))
+	results := make([]core.FullTextSearchResult, 0, len(result.Hits))
 	for _, hit := range result.Hits {
-		sr := SearchResult{
+		sr := core.FullTextSearchResult{
 			ID:    hit.ID,
 			Score: hit.Score,
 		}

@@ -133,6 +133,11 @@ func (c *ParagraphChunker) Chunk(
 		chunks = append(chunks, chunk)
 	}
 
+	// Append image chunks as sub-chunks
+	if imgChunks := ExtractImageChunks(structured); len(imgChunks) > 0 {
+		chunks = append(chunks, imgChunks...)
+	}
+
 	return chunks, nil
 }
 

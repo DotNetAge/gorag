@@ -6,6 +6,7 @@ import (
 	"github.com/DotNetAge/gorag/core"
 )
 
+// TODO: 这是一个过度设计的类，在项目中并没有在任何地方被应用；
 // ChunkingAdvisor recommends chunk strategies based on content type and metadata
 type ChunkingAdvisor interface {
 	// RecommendStrategy recommends a chunk strategy

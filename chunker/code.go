@@ -55,7 +55,7 @@ func (c *CodeChunker) Chunk(
 	for i, chunk := range chunks {
 		chunk.ID = GenerateChunkID(structured.RawDoc.GetID(), i, chunk.Content)
 		chunk.DocID = structured.RawDoc.GetID()
-		chunk.MIMEType = "code"
+		chunk.MIMEType = structured.RawDoc.GetMimeType()
 		chunk.Metadata = c.mergeMetadata(structured.RawDoc.GetMeta(), chunk.Metadata)
 		chunk.ChunkMeta.Index = i
 	}

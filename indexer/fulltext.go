@@ -3,19 +3,26 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/query"
 	bledoc "github.com/DotNetAge/gorag/store/doc/bleve"
 )
 
 // fulltextIndexer 基于 bleve 的全文索引器
 type fulltextIndexer struct {
-	store *bledoc.BleveStore
+	store core.FullTextStore
+}
+
+func NewFulltextIndexer(store core.FullTextStore) (core.Indexer, error) {
+	return &fulltextIndexer{store: store}, nil
 }
 
 // NewFulltextIndexer 创建全文索引器
-func NewFulltextIndexer(dbPath string) (core.Indexer, error) {
+func NewFulltextIndexerWithFile(dbPath string) (core.Indexer, error) {
 	store, err := bledoc.NewBleveStore(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bleve store: %w", err)
@@ -32,12 +39,15 @@ func (f *fulltextIndexer) Type() string {
 }
 
 func (f *fulltextIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+	if content == "" {
+		return nil, fmt.Errorf("content cannot be empty")
+	}
 	chunks, err := GetChunks(content)
 	if err != nil {
 		return nil, err
 	}
 	if len(chunks) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no chunks generated from content")
 	}
 	for _, chunk := range chunks {
 		if err := f.store.Index(chunk); err != nil {
@@ -48,7 +58,16 @@ func (f *fulltextIndexer) Add(ctx context.Context, content string) (*core.Chunk,
 }
 
 func (f *fulltextIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
-	chunks, err := GetFileChunks(filePath)
+	// 安全检查：防止路径遍历攻击
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid file path: %w", err)
+	}
+	// 检查是否包含危险路径组件
+	if strings.Contains(absPath, "..") {
+		return nil, fmt.Errorf("file path contains invalid components")
+	}
+	chunks, err := GetFileChunks(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +158,7 @@ func (f *safeFulltextIndexer) Remove(ctx context.Context, chunkID string) error 
 
 // NewSafeFulltextIndexer 创建线程安全的全文索引器
 func NewSafeFulltextIndexer(dbPath string) (core.Indexer, error) {
-	inner, err := NewFulltextIndexer(dbPath)
+	inner, err := NewFulltextIndexerWithFile(dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +166,9 @@ func NewSafeFulltextIndexer(dbPath string) (core.Indexer, error) {
 }
 
 func (s *safeFulltextIndexer) NewQuery(terms string) core.Query {
-	return FulltextQuery(terms)
+	return query.NewFulltextQuery(terms)
 }
 
 func (s *fulltextIndexer) NewQuery(terms string) core.Query {
-	return FulltextQuery(terms)
+	return query.NewFulltextQuery(terms)
 }

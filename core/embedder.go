@@ -12,4 +12,9 @@ type Embedder interface {
 
 	// Bulk 批量计算 Chunk 的向量表示
 	Bulk(chunks []*Chunk) ([]*Vector, error)
+
+	Dim() int
+
+	// 是否支持多模态
+	Multimoding() bool
 }

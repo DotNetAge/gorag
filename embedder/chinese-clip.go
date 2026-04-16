@@ -1,9 +1,10 @@
 package embedder
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/DotNetAge/gorag/core"
@@ -11,31 +12,18 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-const (
-	defaultModelDir  = "./models"
-	defaultModelName = "model.onnx"
-)
-
 // ChineseClipOption 是 ChineseClipEmbedder 的配置选项
 type ChineseClipOption func(*chineseClipConfig)
 
 type chineseClipConfig struct {
-	modelDir  string
-	modelName string
+	modelFile string
 	vocabPath string // 空则使用内嵌 vocab
 }
 
-// WithModel 设置模型名称 (不含路径)
-func WithModel(name string) ChineseClipOption {
+// WithModelFile 设置模型目录
+func WithModelFile(filePath string) ChineseClipOption {
 	return func(c *chineseClipConfig) {
-		c.modelName = name
-	}
-}
-
-// WithModelDir 设置模型目录
-func WithModelDir(dir string) ChineseClipOption {
-	return func(c *chineseClipConfig) {
-		c.modelDir = dir
+		c.modelFile = filePath
 	}
 }
 
@@ -48,12 +36,15 @@ func WithVocab(path string) ChineseClipOption {
 
 // ChineseClipEmbedder 使用 onnxruntime-go 进行 Chinese-CLIP ONNX 模型推理
 type ChineseClipEmbedder struct {
-	modelPath      string          // ONNX 模型路径
-	tokenizer      *VocabTokenizer // 分词器 (vocab 内嵌)
-	imageProcessor *ImageProcessor // 图像预处理器
-	inputNames     []string        // 输入节点名称
-	outputNames    []string        // 输出节点名称
-	imageSize      int             // ViT 图像尺寸 (固定 224)
+	modelFile      string               // ONNX 模型路径
+	tokenizer      *VocabTokenizer      // 分词器 (vocab 内嵌)
+	imageProcessor *ImageProcessor      // 图像预处理器
+	inputNames     []string             // 输入节点名称
+	outputNames    []string             // 输出节点名称
+	imageSize      int                  // ViT 图像尺寸 (固定 224)
+	seqLength      int                  // 文本序列长度
+	textSession    *ort.AdvancedSession // 复用的文本 ONNX session
+	imageSession   *ort.AdvancedSession // 复用的图像 ONNX session
 	mu             sync.RWMutex
 }
 
@@ -61,8 +52,8 @@ type ChineseClipEmbedder struct {
 // 默认从 ./models/model.onnx 加载模型，可通过 WithModel/WithModelDir 自定义
 func NewChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, error) {
 	cfg := &chineseClipConfig{
-		modelDir:  defaultModelDir,
-		modelName: defaultModelName,
+		// modelDir:  defaultModelDir,
+		// modelName: defaultModelName,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -81,20 +72,22 @@ func NewChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, er
 		// 使用外部 vocab 文件
 		tokenizer, err = NewVocabTokenizerFromFile(cfg.vocabPath, 52)
 		if err != nil {
-			ort.DestroyEnvironment()
+			// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+			// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
 			return nil, fmt.Errorf("failed to load external vocab: %w", err)
 		}
 	} else {
 		// 使用内嵌 vocab
 		tokenizer, err = NewVocabTokenizer(52)
 		if err != nil {
-			ort.DestroyEnvironment()
+			// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+			// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
 			return nil, fmt.Errorf("failed to load embedded vocab: %w", err)
 		}
 	}
 
-	// 确定模型路径
-	modelPath := filepath.Join(cfg.modelDir, cfg.modelName)
+	// TODO: 如果模型文件不存在就返回nil
+	modelFile := cfg.modelFile
 
 	// Chinese-CLIP ONNX 模型的输入输出是固定的
 	// 这是一个统一的多模态模型，需要同时提供两种输入
@@ -103,32 +96,165 @@ func NewChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, er
 	// 注意: 运行时根据提供的输入决定使用哪个编码器
 	inputNames := []string{"input_ids", "attention_mask", "pixel_values"}
 	outputNames := []string{"text_embeds"}
+	seqLength := 52
 
 	// 验证模型是否可以正常加载
-	if err := validateSession(modelPath, inputNames, outputNames); err != nil {
+	validated := false
+	if err := validateSession(modelFile, inputNames, outputNames); err != nil {
 		// 如果验证失败，尝试其他输入组合
 		altInputs := [][]string{
 			{"input_ids"},
 			{"input_ids", "attention_mask", "token_type_ids"},
 		}
 		for _, inputs := range altInputs {
-			if err := validateSession(modelPath, inputs, outputNames); err == nil {
+			if err := validateSession(modelFile, inputs, outputNames); err == nil {
 				inputNames = inputs
+				validated = true
 				break
 			}
 		}
+	} else {
+		validated = true
+	}
+
+	// 如果所有验证都失败，返回错误
+	if !validated {
+		tokenizer.Close()
+		// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+		// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
+		return nil, fmt.Errorf("failed to validate Chinese-CLIP model with any input configuration")
+	}
+
+	// 创建可复用的文本 session
+	textSession, err := createChineseClipTextSession(modelFile, inputNames, outputNames, seqLength)
+	if err != nil {
+		tokenizer.Close()
+		// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+		// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
+		return nil, fmt.Errorf("failed to create Chinese-CLIP text session: %w", err)
+	}
+
+	// 创建可复用的图像 session
+	imageSession, err := createChineseClipImageSession(modelFile, inputNames, []string{"image_embeds"}, seqLength, ViTImageSize)
+	if err != nil {
+		textSession.Destroy()
+		tokenizer.Close()
+		// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+		// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
+		return nil, fmt.Errorf("failed to create Chinese-CLIP image session: %w", err)
 	}
 
 	e := &ChineseClipEmbedder{
-		modelPath:      modelPath,
+		modelFile:      modelFile,
 		tokenizer:      tokenizer,
 		imageProcessor: NewImageProcessor(ViTImageSize),
 		inputNames:     inputNames,
 		outputNames:    outputNames,
 		imageSize:      ViTImageSize,
+		seqLength:      seqLength,
+		textSession:    textSession,
+		imageSession:   imageSession,
 	}
 
 	return e, nil
+}
+
+// createChineseClipTextSession 创建可复用的文本 session
+func createChineseClipTextSession(modelPath string, inputNames, outputNames []string, seqLength int) (*ort.AdvancedSession, error) {
+	batchSize := 1
+
+	inputs := make([]ort.Value, len(inputNames))
+	for i, name := range inputNames {
+		var err error
+		if name == "pixel_values" {
+			inputs[i], err = ort.NewEmptyTensor[float32](ort.NewShape(int64(batchSize), 3, 224, 224))
+		} else {
+			inputs[i], err = ort.NewEmptyTensor[int64](ort.NewShape(int64(batchSize), int64(seqLength)))
+		}
+		if err != nil {
+			for j := 0; j < i; j++ {
+				inputs[j].Destroy()
+			}
+			return nil, err
+		}
+	}
+
+	outputs := make([]ort.Value, len(outputNames))
+	for i := range outputNames {
+		var err error
+		outputs[i], err = ort.NewEmptyTensor[float32](ort.NewShape(int64(batchSize), 512))
+		if err != nil {
+			for j := 0; j < len(inputs); j++ {
+				inputs[j].Destroy()
+			}
+			for j := 0; j < i; j++ {
+				outputs[j].Destroy()
+			}
+			return nil, err
+		}
+	}
+
+	session, err := ort.NewAdvancedSession(modelPath, inputNames, outputNames, inputs, outputs, nil)
+	if err != nil {
+		for j := 0; j < len(inputs); j++ {
+			inputs[j].Destroy()
+		}
+		for j := 0; j < len(outputs); j++ {
+			outputs[j].Destroy()
+		}
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// createChineseClipImageSession 创建可复用的图像 session
+func createChineseClipImageSession(modelPath string, inputNames, outputNames []string, seqLength, imageSize int) (*ort.AdvancedSession, error) {
+	batchSize := 1
+
+	inputs := make([]ort.Value, len(inputNames))
+	for i, name := range inputNames {
+		var err error
+		if name == "pixel_values" {
+			inputs[i], err = ort.NewEmptyTensor[float32](ort.NewShape(int64(batchSize), 3, int64(imageSize), int64(imageSize)))
+		} else {
+			inputs[i], err = ort.NewEmptyTensor[int64](ort.NewShape(int64(batchSize), int64(seqLength)))
+		}
+		if err != nil {
+			for j := 0; j < i; j++ {
+				inputs[j].Destroy()
+			}
+			return nil, err
+		}
+	}
+
+	outputs := make([]ort.Value, len(outputNames))
+	for i := range outputNames {
+		var err error
+		outputs[i], err = ort.NewEmptyTensor[float32](ort.NewShape(int64(batchSize), 512))
+		if err != nil {
+			for j := 0; j < len(inputs); j++ {
+				inputs[j].Destroy()
+			}
+			for j := 0; j < i; j++ {
+				outputs[j].Destroy()
+			}
+			return nil, err
+		}
+	}
+
+	session, err := ort.NewAdvancedSession(modelPath, inputNames, outputNames, inputs, outputs, nil)
+	if err != nil {
+		for j := 0; j < len(inputs); j++ {
+			inputs[j].Destroy()
+		}
+		for j := 0; j < len(outputs); j++ {
+			outputs[j].Destroy()
+		}
+		return nil, err
+	}
+
+	return session, nil
 }
 
 // validateSession 验证 session 是否可以创建
@@ -181,6 +307,9 @@ func validateSession(modelPath string, inputNames, outputNames []string) error {
 
 // Calc 计算单个 chunk 的向量
 func (e *ChineseClipEmbedder) Calc(chunk *core.Chunk) (*core.Vector, error) {
+	if chunk == nil || chunk.Content == "" {
+		return nil, nil
+	}
 	vectors, err := e.Bulk([]*core.Chunk{chunk})
 	if err != nil {
 		return nil, err
@@ -193,11 +322,14 @@ func (e *ChineseClipEmbedder) Calc(chunk *core.Chunk) (*core.Vector, error) {
 
 // CalcText 计算文本的向量
 func (e *ChineseClipEmbedder) CalcText(text string) (*core.Vector, error) {
+	if text == "" {
+		return nil, nil
+	}
 	embeddings, err := e.embedTexts([]string{text})
 	if err != nil {
 		return nil, err
 	}
-	if len(embeddings) == 0 {
+	if len(embeddings) == 0 || len(embeddings[0]) == 0 {
 		return nil, nil
 	}
 	return &core.Vector{
@@ -207,43 +339,90 @@ func (e *ChineseClipEmbedder) CalcText(text string) (*core.Vector, error) {
 }
 
 // Bulk 批量计算 chunks 的向量
+// 根据 MIMEType 判断类型：图片使用 embedImages，文本使用 embedTexts
 func (e *ChineseClipEmbedder) Bulk(chunks []*core.Chunk) ([]*core.Vector, error) {
 	if len(chunks) == 0 {
 		return []*core.Vector{}, nil
 	}
 
-	texts := make([]string, len(chunks))
-	for i, chunk := range chunks {
-		texts[i] = chunk.Content
-	}
-
-	embeddings, err := e.embedTexts(texts)
-	if err != nil {
-		return nil, err
-	}
-
-	vectors := make([]*core.Vector, len(chunks))
-	for i, chunk := range chunks {
-		meta := make(map[string]any)
-		if chunk.Metadata != nil {
-			for k, v := range chunk.Metadata {
-				meta[k] = v
-			}
+	// 分离文本 chunks 和图片 chunks
+	var textChunks []*core.Chunk
+	var imageChunks []*core.Chunk
+	for _, chunk := range chunks {
+		if isImageMimeType(chunk.MIMEType) {
+			imageChunks = append(imageChunks, chunk)
+		} else {
+			textChunks = append(textChunks, chunk)
 		}
-		meta["doc_id"] = chunk.DocID
-		meta["parent_id"] = chunk.ParentID
-		meta["content"] = chunk.Content
-		meta["mime_type"] = chunk.MIMEType
+	}
 
-		vectors[i] = &core.Vector{
-			ID:       uuid.NewString(),
-			Values:   embeddings[i],
-			ChunkID:  chunk.ID,
-			Metadata: meta,
+	vectors := make([]*core.Vector, 0, len(chunks))
+
+	// 处理文本 chunks
+	if len(textChunks) > 0 {
+		texts := make([]string, len(textChunks))
+		for i, chunk := range textChunks {
+			texts[i] = chunk.Content
+		}
+		textEmbeddings, err := e.embedTexts(texts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to embed text chunks: %w", err)
+		}
+		for i, chunk := range textChunks {
+			vectors = append(vectors, e.newVector(chunk, textEmbeddings[i]))
+		}
+	}
+
+	// 处理图片 chunks（Content 是无头 base64）
+	if len(imageChunks) > 0 {
+		images := make([][]byte, len(imageChunks))
+		for i, chunk := range imageChunks {
+			// base64 解码（无头 base64）
+			imgData, err := base64.StdEncoding.DecodeString(chunk.Content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode base64 for chunk %s: %w", chunk.ID, err)
+			}
+			images[i] = imgData
+		}
+		imageEmbeddings, err := e.embedImages(images)
+		if err != nil {
+			return nil, fmt.Errorf("failed to embed image chunks: %w", err)
+		}
+		for i, chunk := range imageChunks {
+			vectors = append(vectors, e.newVector(chunk, imageEmbeddings[i]))
 		}
 	}
 
 	return vectors, nil
+}
+
+// newVector 从 chunk 和 embedding 创建 Vector
+func (e *ChineseClipEmbedder) newVector(chunk *core.Chunk, embedding []float32) *core.Vector {
+	meta := make(map[string]any)
+	if chunk.Metadata != nil {
+		for k, v := range chunk.Metadata {
+			meta[k] = v
+		}
+	}
+	meta["doc_id"] = chunk.DocID
+	meta["parent_id"] = chunk.ParentID
+	meta["content"] = chunk.Content
+	meta["mime_type"] = chunk.MIMEType
+
+	return &core.Vector{
+		ID:       uuid.NewString(),
+		Values:   embedding,
+		ChunkID:  chunk.ID,
+		Metadata: meta,
+	}
+}
+
+// isImageMimeType 判断 MIMEType 是否为图片类型
+func isImageMimeType(mimeType string) bool {
+	if mimeType == "" {
+		return false
+	}
+	return strings.HasPrefix(mimeType, "image")
 }
 
 // CalcImage 计算图片的向量
@@ -266,6 +445,10 @@ func (e *ChineseClipEmbedder) CalcImages(data [][]byte) ([][]float32, error) {
 	return e.embedImages(data)
 }
 
+func (e *ChineseClipEmbedder) Multimoding() bool {
+	return true
+}
+
 // embedTexts 对文本进行向量化
 func (e *ChineseClipEmbedder) embedTexts(texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
@@ -273,10 +456,15 @@ func (e *ChineseClipEmbedder) embedTexts(texts []string) ([][]float32, error) {
 	}
 
 	e.mu.RLock()
-	defer e.mu.RUnlock()
+	session := e.textSession
+	e.mu.RUnlock()
+
+	if session == nil {
+		return nil, fmt.Errorf("Chinese-CLIP text session not initialized")
+	}
 
 	batchSize := len(texts)
-	maxLen := e.tokenizer.maxLength
+	maxLen := e.seqLength
 
 	// 分词
 	allInputIDs := make([][]int64, batchSize)
@@ -294,16 +482,12 @@ func (e *ChineseClipEmbedder) embedTexts(texts []string) ([][]float32, error) {
 	// 构建输入张量 (int64 类型)
 	inputData := make([]int64, batchSize*maxLen)
 	for i := range allInputIDs {
-		for j := range allInputIDs[i] {
-			inputData[i*maxLen+j] = allInputIDs[i][j]
-		}
+		copy(inputData[i*maxLen:], allInputIDs[i])
 	}
 
 	maskData := make([]int64, batchSize*maxLen)
 	for i := range allMasks {
-		for j := range allMasks[i] {
-			maskData[i*maxLen+j] = allMasks[i][j]
-		}
+		copy(maskData[i*maxLen:], allMasks[i])
 	}
 
 	// 创建张量 (int64 类型)
@@ -338,20 +522,7 @@ func (e *ChineseClipEmbedder) embedTexts(texts []string) ([][]float32, error) {
 	}
 	defer outputTensor.Destroy()
 
-	// 推理 - Chinese-CLIP 统一模型需要三种输入
-	session, err := ort.NewAdvancedSession(
-		e.modelPath,
-		e.inputNames,
-		e.outputNames,
-		[]ort.Value{inputTensor, maskTensor, pixelTensor},
-		[]ort.Value{outputTensor},
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-	defer session.Destroy()
-
+	// 使用复用的 session 推理
 	if err := session.Run(); err != nil {
 		return nil, fmt.Errorf("inference failed: %w", err)
 	}
@@ -379,11 +550,16 @@ func (e *ChineseClipEmbedder) embedImages(images [][]byte) ([][]float32, error) 
 	}
 
 	e.mu.RLock()
-	defer e.mu.RUnlock()
+	session := e.imageSession
+	e.mu.RUnlock()
+
+	if session == nil {
+		return nil, fmt.Errorf("Chinese-CLIP image session not initialized")
+	}
 
 	batchSize := len(images)
 	imageSize := e.imageSize
-	maxLen := 52 // Chinese-CLIP 默认序列长度
+	maxLen := e.seqLength
 
 	// 1. 预处理所有图像
 	allTensorData := make([][]float32, batchSize)
@@ -416,8 +592,6 @@ func (e *ChineseClipEmbedder) embedImages(images [][]byte) ([][]float32, error) 
 	}
 
 	// 4. 创建 ONNX 输入 (与文本编码相同的输入节点)
-	imageOutputNames := []string{"image_embeds"}
-
 	// pixel_values
 	pixelShape := ort.NewShape(int64(batchSize), 3, int64(imageSize), int64(imageSize))
 	pixelTensor, err := ort.NewTensor(pixelShape, pixelData)
@@ -450,20 +624,7 @@ func (e *ChineseClipEmbedder) embedImages(images [][]byte) ([][]float32, error) 
 	}
 	defer outputTensor.Destroy()
 
-	// 6. ONNX 推理
-	session, err := ort.NewAdvancedSession(
-		e.modelPath,
-		e.inputNames,
-		imageOutputNames,
-		[]ort.Value{inputTensor, maskTensor, pixelTensor},
-		[]ort.Value{outputTensor},
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create image session: %w", err)
-	}
-	defer session.Destroy()
-
+	// 6. 使用复用的 session 推理
 	if err := session.Run(); err != nil {
 		return nil, fmt.Errorf("image inference failed: %w", err)
 	}
@@ -482,7 +643,21 @@ func (e *ChineseClipEmbedder) embedImages(images [][]byte) ([][]float32, error) 
 
 // Close 释放资源
 func (e *ChineseClipEmbedder) Close() error {
-	ort.DestroyEnvironment()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.textSession != nil {
+		e.textSession.Destroy()
+		e.textSession = nil
+	}
+	if e.imageSession != nil {
+		e.imageSession.Destroy()
+		e.imageSession = nil
+	}
+	if e.tokenizer != nil {
+		e.tokenizer.Close()
+	}
+	// 注意: ort.DestroyEnvironment() 采用引用计数机制，
+	// 多次调用会导致崩溃，因此统一由调用方管理环境生命周期
 	return nil
 }
 
@@ -518,4 +693,8 @@ func getORTSharedLibraryPath() string {
 
 	// 默认路径
 	return "/usr/local/lib/libonnxruntime.dylib"
+}
+
+func (e *ChineseClipEmbedder) Dim() int {
+	return 512
 }
