@@ -48,7 +48,6 @@ func NewParentDocChunker(opts ...Option) *ParentDocChunker {
 // Returns all chunks (parent + child), with child chunks linked to parents via ParentID
 func (c *ParentDocChunker) Chunk(
 	structured *core.StructuredDocument,
-	entities []*core.Entity,
 ) ([]*core.Chunk, error) {
 	if structured == nil || structured.RawDoc == nil {
 		return []*core.Chunk{}, nil
@@ -60,13 +59,13 @@ func (c *ParentDocChunker) Chunk(
 	}
 
 	// 1. Generate parent chunks
-	parents, err := c.parentChunker.Chunk(structured, entities)
+	parents, err := c.parentChunker.Chunk(structured)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2. Generate child chunks
-	children, err := c.childChunker.Chunk(structured, entities)
+	children, err := c.childChunker.Chunk(structured)
 	if err != nil {
 		return nil, err
 	}

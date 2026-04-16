@@ -111,8 +111,32 @@ func (f *fulltextIndexer) Remove(ctx context.Context, chunkID string) error {
 	return f.store.Delete(chunkID)
 }
 
+// IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
+func (f *fulltextIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+	if chunk == nil {
+		return fmt.Errorf("chunk cannot be nil")
+	}
+	return f.store.Index(chunk)
+}
+
+// IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface)
+func (f *fulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	for _, chunk := range chunks {
+		if err := f.store.Index(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // 私有：确保实现 core.Indexer 接口
 var _ core.Indexer = (*fulltextIndexer)(nil)
+
+// Ensure implementation of core.ChunkIndexer interface
+var _ core.ChunkIndexer = (*fulltextIndexer)(nil)
 
 // safeFulltextIndexer 线程安全的包装器
 type safeFulltextIndexer struct {
@@ -154,6 +178,18 @@ func (f *safeFulltextIndexer) Remove(ctx context.Context, chunkID string) error 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inner.Remove(ctx, chunkID)
+}
+
+func (f *safeFulltextIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.IndexChunk(ctx, chunk)
+}
+
+func (f *safeFulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.IndexChunks(ctx, chunks)
 }
 
 // NewSafeFulltextIndexer 创建线程安全的全文索引器

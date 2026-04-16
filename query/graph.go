@@ -1,6 +1,8 @@
 package query
 
-import "github.com/DotNetAge/gorag/core"
+import (
+	"github.com/DotNetAge/gorag/core"
+)
 
 // GraphQuery 图查询
 type GraphQuery struct {

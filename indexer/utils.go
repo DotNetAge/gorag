@@ -172,7 +172,7 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		return nil, err
 	}
 
-	chunks, err := chunkerInstance.Chunk(doc, nil)
+	chunks, err := chunkerInstance.Chunk(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		return nil, err
 	}
 
-	chunks, err := chunkerInstance.Chunk(doc, nil)
+	chunks, err := chunkerInstance.Chunk(doc)
 	if err != nil {
 		return nil, err
 	}

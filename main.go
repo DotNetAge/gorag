@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/DotNetAge/gochat/client/openai"
+	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedder"
 	"github.com/DotNetAge/gorag/indexer"
-	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/store/doc/bleve"
 	"github.com/DotNetAge/gorag/store/graph/gograph"
 	"github.com/DotNetAge/gorag/store/vector/govector"
@@ -17,35 +18,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GoRAG 的服务应用入口
-type IndexingService struct {
-	dataDir string   // 索引数据目录
-	watchs  []string // 监控的文件目录
-	indexer *HybridIndexer
-	logger  logging.Logger
-}
-
-func Start(dataDir string) *IndexingService {
-	return &IndexingService{
-		dataDir: dataDir,
-		watchs:  []string{},
-	}
-}
-
-func (i *IndexingService) Watch() {
-	// 监控指定文件目录，
-	// TODO: 当文件发生变更时就进行自动索引；
-	// TODO: 首次启动时进行全量索引
-}
-
 type Config struct {
-	Name      string // RAG 名称
-	Type      string // 索引器类型：hybrid, semantic, graph
-	ModelFile string // 向量化模型
+	Name      string `yaml:"name"`       // RAG 名称
+	Type      string `yaml:"type"`       // 索引器类型：hybrid, semantic, graph
+	ModelFile string `yaml:"model_file"` // 向量化模型
 }
 
 const (
-	configFileName = "config.yml"
+	configFileName   = "config.yml"
+	GORAG_MODEL_PATH = "GORAG_MODEL_PATH"
+	GORAG_BASE_URL   = "GORAG_BASE_URL"
+	GORAG_API_KEY    = "GORAG_API_KEY"
+	GORAG_AUTH_TOKEN = "GORAG_AUTH_TOKEN"
+	GORAG_MODEL      = "GORAG_MODEL"
 )
 
 // New 创建新的 RAG 索引实例
@@ -149,7 +134,7 @@ func saveConfig(dataDir string, cfg *Config) error {
 // modelFile: 模型文件路径，如 "onnx/model.onnx"
 // 返回模型文件的完整路径
 func CheckModel(modelId, modelFile string) (string, error) {
-	baseDir := os.Getenv("GORAG_MODEL_PATH")
+	baseDir := os.Getenv(GORAG_MODEL_PATH)
 	if baseDir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -269,7 +254,9 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 
-	idx, err := NewHybridIndexer(vectorStore, graphStore, fullTextStore, clip)
+	llm := createLLM()
+
+	idx, err := NewHybridIndexer(vectorStore, graphStore, fullTextStore, llm, clip)
 	if err != nil {
 		slog.Error("Failed to init indexer", "error", err)
 		return nil, err
@@ -279,6 +266,30 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 
 func getName(dataDir string) string {
 	return filepath.Dir(dataDir)
+}
+
+func createLLM() chat.Client {
+	baseURL := os.Getenv(GORAG_BASE_URL)
+	apiKey := os.Getenv(GORAG_API_KEY)
+	authToken := os.Getenv(GORAG_AUTH_TOKEN)
+	model := os.Getenv(GORAG_MODEL)
+
+	if model == "" || baseURL == "" {
+		return nil
+	}
+
+	c, err := openai.NewOpenAI(chat.Config{
+		APIKey:    apiKey,
+		Model:     model,
+		BaseURL:   baseURL,
+		AuthToken: authToken,
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	return c
 }
 
 func createVectorDB(dataDir, modelFile string) (core.VectorStore, error) {

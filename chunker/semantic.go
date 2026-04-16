@@ -31,7 +31,6 @@ func NewSemanticChunker(embedder core.Embedder, opts ...Option) *SemanticChunker
 // Chunk implements the Chunker interface
 func (c *SemanticChunker) Chunk(
 	structured *core.StructuredDocument,
-	entities []*core.Entity,
 ) ([]*core.Chunk, error) {
 	if structured == nil || structured.RawDoc == nil {
 		return []*core.Chunk{}, nil
@@ -44,7 +43,7 @@ func (c *SemanticChunker) Chunk(
 
 	// Fallback to sentence chunking if no embedder
 	if c.embedder == nil {
-		chunks, err := NewSentenceChunker(WithMaxSentences(c.maxSentences)).Chunk(structured, entities)
+		chunks, err := NewSentenceChunker(WithMaxSentences(c.maxSentences)).Chunk(structured)
 		if err != nil {
 			return nil, err
 		}
@@ -57,7 +56,7 @@ func (c *SemanticChunker) Chunk(
 
 	// 1. Split into sentences
 	sentenceChunker := NewSentenceChunker()
-	sentences, err := sentenceChunker.Chunk(structured, entities)
+	sentences, err := sentenceChunker.Chunk(structured)
 	if err != nil {
 		return nil, err
 	}

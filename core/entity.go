@@ -100,24 +100,6 @@ func (s *StructuredDocument) SetValue(key string, value any) *StructuredDocument
 	return s
 }
 
-// Entity 实体结构，统一承载所有类型实体（人名、机构、术语、商品等）
-type Entity struct {
-	ID         string         `json:"id"`         // 实体全局唯一ID（如 UUID）
-	Name       string         `json:"name"`       // 实体名称（清洗后的纯文本）
-	EntityType string         `json:"entityType"` // 实体类型（PERSON/ORG/TERM/SKU/OBJECT 等）
-	Confidence float32        `json:"confidence"` // 实体抽取置信度（0~1，来自抽取模型/规则）
-	SourceNode string         `json:"sourceNode"` // 实体来源的 StructureNode ID（追溯实体位置）
-	Features   map[string]any `json:"features"`   // 实体扩展特征（如实体长度、出现次数、语义向量等）
-}
-
-// Relation 实体关系结构（预留扩展，用于知识图谱）
-type Relation struct {
-	ID        string  `json:"id"`        // 关系唯一ID
-	Subject   *Entity `json:"subject"`   // 主体实体（关系发起方）
-	Predicate string  `json:"predicate"` // 关系类型（如“就职于”“属于”“包含”）
-	Object    *Entity `json:"object"`    // 客体实体（关系接收方）
-	Score     float32 `json:"score"`     // 关系抽取置信度（0~1）
-}
 
 // ChunkMeta Chunk 固定元数据（分块相关位置、层级信息）
 type ChunkMeta struct {

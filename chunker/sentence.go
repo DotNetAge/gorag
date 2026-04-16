@@ -37,7 +37,6 @@ func NewSentenceChunker(opts ...Option) *SentenceChunker {
 // Chunk implements the Chunker interface
 func (c *SentenceChunker) Chunk(
 	structured *core.StructuredDocument,
-	entities []*core.Entity,
 ) ([]*core.Chunk, error) {
 	if structured == nil || structured.RawDoc == nil {
 		return []*core.Chunk{}, nil

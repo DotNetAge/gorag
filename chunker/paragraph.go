@@ -29,7 +29,6 @@ func NewParagraphChunker(opts ...Option) *ParagraphChunker {
 // Chunk implements the Chunker interface
 func (c *ParagraphChunker) Chunk(
 	structured *core.StructuredDocument,
-	entities []*core.Entity,
 ) ([]*core.Chunk, error) {
 	if structured == nil || structured.RawDoc == nil {
 		return []*core.Chunk{}, nil

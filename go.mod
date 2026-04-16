@@ -4,14 +4,15 @@ go 1.25.1
 
 require (
 	github.com/BurntSushi/toml v1.2.1
-	github.com/DotNetAge/gochat v0.1.10
+	github.com/DotNetAge/gochat v0.2.0
 	github.com/DotNetAge/gograph v0.2.1
 	github.com/DotNetAge/govector v0.1.4
 	github.com/blevesearch/bleve v1.0.14
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-ego/gse v1.0.2
-	github.com/gomlx/go-huggingface v0.3.4
 	github.com/google/uuid v1.6.0
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
+	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/unidoc/unioffice v1.39.0
 	github.com/unidoc/unipdf/v3 v3.55.0
@@ -48,14 +49,13 @@ require (
 	github.com/coder/hnsw v0.6.1 // indirect
 	github.com/couchbase/vellum v1.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/glycerine/go-unsnap-stream v0.0.0-20181221182339-f9677308dec2 // indirect
-	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/renameio v1.0.1 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.16.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -71,6 +71,7 @@ require (
 	github.com/richardlehane/msoleps v1.0.3 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/steveyen/gtreap v0.1.0 // indirect
 	github.com/tinylib/msgp v1.1.0 // indirect
 	github.com/unidoc/pkcs7 v0.2.0 // indirect

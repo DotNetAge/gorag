@@ -4,13 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DotNetAge/gochat/pkg/client/ollama"
+	"github.com/DotNetAge/gochat/client/ollama"
+	chat "github.com/DotNetAge/gochat/core"
+
 	goragCore "github.com/DotNetAge/gorag/core"
 )
 
 // TestCompressWithLLM 验证 LLM 压缩流程（使用 ollama 真实客户端）
 func TestCompressWithLLM(t *testing.T) {
-	llm, err := ollama.New(ollama.Config{})
+	llm, err := ollama.NewOllamaClient(chat.Config{})
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}
@@ -45,7 +47,7 @@ func TestCompressWithLLM(t *testing.T) {
 
 // TestCompressSortsByScore 验证按分数排序后取 top N 再压缩
 func TestCompressSortsByScore(t *testing.T) {
-	llm, err := ollama.New(ollama.Config{})
+	llm, err := ollama.NewOllamaClient(chat.Config{})
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestCompressSortsByScore(t *testing.T) {
 
 // TestCompressDoesNotMutateInput 验证不修改输入切片
 func TestCompressDoesNotMutateInput(t *testing.T) {
-	llm, _ := ollama.New(ollama.Config{})
+	llm, _ := ollama.NewOllamaClient(chat.Config{})
 	// c := NewCompresser(llm).WithLimit(1)
 	hits := []goragCore.Hit{{ID: "a", Score: 0.9, Content: "原始内容"}}
 	originalContent := hits[0].Content
@@ -85,7 +87,7 @@ func TestCompressDoesNotMutateInput(t *testing.T) {
 
 // TestCompressPreservesKeyInformation 验证压缩后保留关键信息
 func TestCompressPreservesKeyInformation(t *testing.T) {
-	llm, err := ollama.New(ollama.Config{})
+	llm, err := ollama.NewOllamaClient(chat.Config{})
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}

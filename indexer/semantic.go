@@ -211,6 +211,30 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 	return s.db.Delete(ctx, chunkID)
 }
 
+// IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
+func (s *semanticIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+	if chunk == nil {
+		return fmt.Errorf("chunk cannot be nil")
+	}
+	return s.indexAndStore(ctx, chunk)
+}
+
+// IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface)
+func (s *semanticIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	for _, chunk := range chunks {
+		if err := s.indexAndStore(ctx, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
 	return query.NewSemanticQuery(terms, s.embedder)
 }
+
+// Ensure implementation of core.ChunkIndexer interface
+var _ core.ChunkIndexer = (*semanticIndexer)(nil)

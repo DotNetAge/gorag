@@ -31,7 +31,6 @@ func NewCodeChunker(opts ...Option) *CodeChunker {
 // Chunk 实现分块接口
 func (c *CodeChunker) Chunk(
 	structured *core.StructuredDocument,
-	entities []*core.Entity,
 ) ([]*core.Chunk, error) {
 	if structured == nil || structured.RawDoc == nil {
 		return []*core.Chunk{}, nil
@@ -44,7 +43,7 @@ func (c *CodeChunker) Chunk(
 
 	// 如果没有结构化信息，降级为固定大小分块
 	if structured.Root == nil {
-		return NewFixedSizeChunker(WithChunkSize(c.options.ChunkSize)).Chunk(structured, entities)
+		return NewFixedSizeChunker(WithChunkSize(c.options.ChunkSize)).Chunk(structured)
 	}
 
 	// 遍历结构树，提取代码块

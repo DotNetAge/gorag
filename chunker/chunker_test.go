@@ -60,7 +60,7 @@ func TestFixedSizeChunker(t *testing.T) {
 				Root:   nil,
 			}
 
-			chunks, err := chunker.Chunk(structured, nil)
+			chunks, err := chunker.Chunk(structured)
 			if err != nil {
 				t.Fatalf("Chunk() error = %v", err)
 			}
@@ -120,7 +120,7 @@ func TestRecursiveChunker(t *testing.T) {
 				Root:   nil,
 			}
 
-			chunks, err := chunker.Chunk(structured, nil)
+			chunks, err := chunker.Chunk(structured)
 			if err != nil {
 				t.Fatalf("Chunk() error = %v", err)
 			}
@@ -173,7 +173,7 @@ func TestSentenceChunker(t *testing.T) {
 				Root:   nil,
 			}
 
-			chunks, err := chunker.Chunk(structured, nil)
+			chunks, err := chunker.Chunk(structured)
 			if err != nil {
 				t.Fatalf("Chunk() error = %v", err)
 			}
@@ -217,7 +217,7 @@ func TestParagraphChunker(t *testing.T) {
 				Root:   nil,
 			}
 
-			chunks, err := chunker.Chunk(structured, nil)
+			chunks, err := chunker.Chunk(structured)
 			if err != nil {
 				t.Fatalf("Chunk() error = %v", err)
 			}
@@ -270,7 +270,7 @@ func helper() int {
 	}
 
 	chunker := NewCodeChunker()
-	chunks, err := chunker.Chunk(structured, nil)
+	chunks, err := chunker.Chunk(structured)
 	if err != nil {
 		t.Fatalf("Chunk() error = %v", err)
 	}
@@ -305,7 +305,7 @@ func TestParentDocChunker(t *testing.T) {
 		WithChildSize(50),
 	)
 
-	chunks, err := chunker.Chunk(structured, nil)
+	chunks, err := chunker.Chunk(structured)
 	if err != nil {
 		t.Fatalf("Chunk() error = %v", err)
 	}
@@ -386,51 +386,6 @@ func TestChunkingFactory(t *testing.T) {
 	_, err := factory.CreateChunker("unsupported")
 	if err == nil {
 		t.Error("Expected error for unsupported strategy")
-	}
-}
-
-func TestDefaultAdvisor(t *testing.T) {
-	advisor := NewDefaultAdvisor()
-
-	tests := []struct {
-		name        string
-		contentType string
-		metadata    map[string]any
-		want        core.ChunkStrategy
-	}{
-		{
-			name:        "markdown",
-			contentType: "text/markdown",
-			metadata:    nil,
-			want:        StrategyRecursive,
-		},
-		{
-			name:        "code",
-			contentType: "text/x-go",
-			metadata:    nil,
-			want:        StrategyCode,
-		},
-		{
-			name:        "html",
-			contentType: "text/html",
-			metadata:    nil,
-			want:        StrategyParagraph,
-		},
-		{
-			name:        "default",
-			contentType: "text/plain",
-			metadata:    nil,
-			want:        StrategyRecursive,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := advisor.RecommendStrategy(tt.contentType, tt.metadata)
-			if got != tt.want {
-				t.Errorf("RecommendStrategy() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 

@@ -28,6 +28,14 @@ type GraphStore interface {
 	// Query semantic graph structure. Implementations (Neo4j, Nebula) usually take Cypher/GQL.
 	Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error)
 
+	// GetNodesByChunkIDs retrieves all nodes associated with the given chunk IDs
+	// This is used in hybrid search to find entities related to semantic search results
+	GetNodesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*Node, error)
+
+	// GetEdgesByChunkIDs retrieves all edges associated with the given chunk IDs
+	// This is used in hybrid search to find relationships related to semantic search results
+	GetEdgesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*Edge, error)
+
 	// GetCommunitySummaries fetches hierarchical community abstracts, which are core to Microsoft's GraphRAG paper.
 	GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error)
 

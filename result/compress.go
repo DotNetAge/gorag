@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	goChatCore "github.com/DotNetAge/gochat/pkg/core"
+	goChatCore "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
 )
 

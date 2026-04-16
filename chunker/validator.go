@@ -195,7 +195,7 @@ func (v *ChunkValidator) checkIntraChunkCohesion(chunks []*core.Chunk) float64 {
 			Title:  "chunk",
 			Root:   nil,
 		}
-		sentences, err := sentenceChunker.Chunk(structured, nil)
+		sentences, err := sentenceChunker.Chunk(structured)
 		if err != nil || len(sentences) < 2 {
 			continue
 		}

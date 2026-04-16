@@ -11,12 +11,6 @@ import (
 )
 
 // propertyValueToAny converts a graph.PropertyValue to an any type.
-//
-// Parameters:
-//   - pv: The property value to convert
-//
-// Returns:
-//   - any: The converted value
 func propertyValueToAny(pv graph.PropertyValue) any {
 	if pv.String != nil {
 		return *pv.String
@@ -36,17 +30,112 @@ func propertyValueToAny(pv graph.PropertyValue) any {
 	return nil
 }
 
+// propsToAny converts graph properties to map[string]any.
+func propsToAny(props map[string]graph.PropertyValue) map[string]any {
+	result := make(map[string]any, len(props))
+	for k, v := range props {
+		result[k] = propertyValueToAny(v)
+	}
+	return result
+}
+
+// getStringProp safely extracts a string property from a map.
+func getStringProp(props map[string]any, key string) string {
+	if v, ok := props[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// getStringSliceProp safely extracts a []string property from a map.
+func getStringSliceProp(props map[string]any, key string) []string {
+	if v, ok := props[key]; ok {
+		if slice, ok := v.([]string); ok {
+			return slice
+		}
+	}
+	return nil
+}
+
+// convertNode converts a graph.Node to a core.Node.
+func convertNode(node *graph.Node) *core.Node {
+	props := propsToAny(node.Properties)
+
+	nodeType := ""
+	if len(node.Labels) > 0 {
+		nodeType = node.Labels[0]
+	}
+
+	// Extract ID from properties if available
+	nodeID := node.ID
+	if id := getStringProp(props, "ID"); id != "" {
+		nodeID = id
+	}
+
+	// Extract new fields
+	name := getStringProp(props, "name")
+	sourceChunkIDs := getStringSliceProp(props, "source_chunk_ids")
+	sourceDocIDs := getStringSliceProp(props, "source_doc_ids")
+
+	// Remove internal fields from properties
+	delete(props, "ID")
+	delete(props, "name")
+	delete(props, "source_chunk_ids")
+	delete(props, "source_doc_ids")
+
+	return &core.Node{
+		ID:             nodeID,
+		Type:           nodeType,
+		Name:           name,
+		Properties:     props,
+		SourceChunkIDs: sourceChunkIDs,
+		SourceDocIDs:   sourceDocIDs,
+	}
+}
+
+// convertEdge converts a graph.Relationship to a core.Edge.
+func convertEdge(rel graph.Relationship) *core.Edge {
+	props := propsToAny(rel.Properties)
+
+	// Extract ID from properties if available
+	edgeID := rel.ID
+	if id := getStringProp(props, "ID"); id != "" {
+		edgeID = id
+	}
+
+	// Extract new fields
+	predicate := getStringProp(props, "predicate")
+	sourceChunkIDs := getStringSliceProp(props, "source_chunk_ids")
+	sourceDocIDs := getStringSliceProp(props, "source_doc_ids")
+
+	// Remove internal fields from properties
+	delete(props, "ID")
+	delete(props, "predicate")
+	delete(props, "source_chunk_ids")
+	delete(props, "source_doc_ids")
+
+	return &core.Edge{
+		ID:             edgeID,
+		Type:           rel.Type,
+		Source:         rel.StartNodeID,
+		Target:         rel.EndNodeID,
+		Predicate:      predicate,
+		Properties:     props,
+		SourceChunkIDs: sourceChunkIDs,
+		SourceDocIDs:   sourceDocIDs,
+	}
+}
+
 // gographStore is an implementation of core.GraphStore using gograph.
 type gographStore struct {
-	// db is the underlying gograph database
 	db *api.DB
-	// gs is the gograph graph store
 	gs *api.GraphStore
 }
 
 // Options contains configuration options for the gograph store.
 type Options struct {
-	// Path is the path to the gograph database file
 	Path string
 }
 
@@ -54,22 +143,12 @@ type Options struct {
 type Option func(*Options)
 
 // WithPath returns an Option that sets the database path.
-//
-// Parameters:
-//   - path: The path to the database file
-//
-// Returns:
-//   - Option: A configuration function
 func WithPath(path string) Option {
 	return func(o *Options) {
 		o.Path = path
 	}
 }
 
-// defaultOptions returns the default options for the gograph store.
-//
-// Returns:
-//   - *Options: The default options
 func defaultOptions() *Options {
 	return &Options{
 		Path: "gograph.db",
@@ -77,13 +156,6 @@ func defaultOptions() *Options {
 }
 
 // DefaultGraphStore creates a new gograph store with default options.
-//
-// Parameters:
-//   - opts: Configuration options
-//
-// Returns:
-//   - core.GraphStore: The graph store
-//   - error: Any error that occurred
 func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
@@ -93,13 +165,6 @@ func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 }
 
 // NewGraphStore creates a new gograph store with the specified path.
-//
-// Parameters:
-//   - path: The path to the database file
-//
-// Returns:
-//   - core.GraphStore: The graph store
-//   - error: Any error that occurred
 func NewGraphStore(path string) (core.GraphStore, error) {
 	db, err := api.Open(path)
 	if err != nil {
@@ -113,13 +178,6 @@ func NewGraphStore(path string) (core.GraphStore, error) {
 }
 
 // UpsertNodes inserts or updates nodes in the graph store.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - nodes: The nodes to upsert
-//
-// Returns:
-//   - error: Any error that occurred
 func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) error {
 	if len(nodes) == 0 {
 		return nil
@@ -129,13 +187,20 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 	for _, node := range nodes {
 		labels := []string{node.Type}
 		if node.Type == "" {
-			labels = []string{"Entity"}
+			labels = []string{"Node"}
 		}
 
-		props := make(map[string]interface{})
+		props := make(map[string]interface{}, len(node.Properties)+4)
 		props["ID"] = node.ID
+		props["name"] = node.Name
 		for k, v := range node.Properties {
 			props[k] = v
+		}
+		if len(node.SourceChunkIDs) > 0 {
+			props["source_chunk_ids"] = node.SourceChunkIDs
+		}
+		if len(node.SourceDocIDs) > 0 {
+			props["source_doc_ids"] = node.SourceDocIDs
 		}
 
 		nodeDataList = append(nodeDataList, &api.NodeData{
@@ -149,13 +214,6 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 }
 
 // UpsertEdges inserts or updates edges in the graph store.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - edges: The edges to upsert
-//
-// Returns:
-//   - error: Any error that occurred
 func (s *gographStore) UpsertEdges(ctx context.Context, edges []*core.Edge) error {
 	if len(edges) == 0 {
 		return nil
@@ -163,10 +221,17 @@ func (s *gographStore) UpsertEdges(ctx context.Context, edges []*core.Edge) erro
 
 	edgeDataList := make([]*api.EdgeData, 0, len(edges))
 	for _, edge := range edges {
-		props := make(map[string]interface{})
+		props := make(map[string]interface{}, len(edge.Properties)+4)
 		props["ID"] = edge.ID
+		props["predicate"] = edge.Predicate
 		for k, v := range edge.Properties {
 			props[k] = v
+		}
+		if len(edge.SourceChunkIDs) > 0 {
+			props["source_chunk_ids"] = edge.SourceChunkIDs
+		}
+		if len(edge.SourceDocIDs) > 0 {
+			props["source_doc_ids"] = edge.SourceDocIDs
 		}
 
 		edgeDataList = append(edgeDataList, &api.EdgeData{
@@ -181,14 +246,6 @@ func (s *gographStore) UpsertEdges(ctx context.Context, edges []*core.Edge) erro
 }
 
 // GetNode retrieves a node by ID.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - id: The node ID
-//
-// Returns:
-//   - *core.Node: The node
-//   - error: Any error that occurred
 func (s *gographStore) GetNode(ctx context.Context, id string) (*core.Node, error) {
 	node, err := s.gs.GetNode(id)
 	if err != nil {
@@ -198,42 +255,10 @@ func (s *gographStore) GetNode(ctx context.Context, id string) (*core.Node, erro
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
-	props := make(map[string]any)
-	for k, v := range node.Properties {
-		props[k] = propertyValueToAny(v)
-	}
-
-	nodeType := ""
-	if len(node.Labels) > 0 {
-		nodeType = node.Labels[0]
-	}
-
-	userID := id
-	if idProp, ok := props["ID"]; ok {
-		if idStr, ok := idProp.(string); ok && idStr != "" {
-			userID = idStr
-		}
-	}
-
-	return &core.Node{
-		ID:         userID,
-		Type:       nodeType,
-		Properties: props,
-	}, nil
+	return convertNode(node), nil
 }
 
 // GetNeighbors retrieves the neighbors of a node.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - nodeID: The node ID
-//   - depth: The depth of the search
-//   - limit: The maximum number of results
-//
-// Returns:
-//   - []*core.Node: The neighbor nodes
-//   - []*core.Edge: The connecting edges
-//   - error: Any error that occurred
 func (s *gographStore) GetNeighbors(ctx context.Context, nodeID string, depth int, limit int) ([]*core.Node, []*core.Edge, error) {
 	results, err := s.gs.GetNeighbors(nodeID, depth, limit)
 	if err != nil {
@@ -245,64 +270,26 @@ func (s *gographStore) GetNeighbors(ctx context.Context, nodeID string, depth in
 
 	for _, result := range results {
 		if result.Node != nil {
-			props := make(map[string]any)
-			for k, v := range result.Node.Properties {
-				props[k] = propertyValueToAny(v)
-			}
-
-			nodeType := ""
-			if len(result.Node.Labels) > 0 {
-				nodeType = result.Node.Labels[0]
-			}
-
-			userID := result.Node.ID
-			if idProp, ok := props["ID"]; ok {
-				if idStr, ok := idProp.(string); ok && idStr != "" {
-					userID = idStr
-				}
-			}
-
-			nodeMap[userID] = &core.Node{
-				ID:         userID,
-				Type:       nodeType,
-				Properties: props,
-			}
+			node := convertNode(result.Node)
+			nodeMap[node.ID] = node
 		}
 
 		if result.Edge != nil {
-			props := make(map[string]any)
-			for k, v := range result.Edge.Properties {
-				props[k] = propertyValueToAny(v)
-			}
-
-			edgeID := result.Edge.ID
-			if idProp, ok := props["ID"]; ok {
-				if idStr, ok := idProp.(string); ok && idStr != "" {
-					edgeID = idStr
-				}
-			}
-
-			sourceUserID := result.Edge.StartNodeID
-			targetUserID := result.Edge.EndNodeID
-
+			edge := convertEdge(*result.Edge)
+			
+			// Resolve source and target user IDs
 			if sourceNode, err := s.gs.GetNode(result.Edge.StartNodeID); err == nil {
 				if idProp, ok := sourceNode.Properties["ID"]; ok && idProp.String != nil {
-					sourceUserID = *idProp.String
+					edge.Source = *idProp.String
 				}
 			}
 			if targetNode, err := s.gs.GetNode(result.Edge.EndNodeID); err == nil {
 				if idProp, ok := targetNode.Properties["ID"]; ok && idProp.String != nil {
-					targetUserID = *idProp.String
+					edge.Target = *idProp.String
 				}
 			}
 
-			edgeMap[edgeID] = &core.Edge{
-				ID:         edgeID,
-				Type:       result.Edge.Type,
-				Source:     sourceUserID,
-				Target:     targetUserID,
-				Properties: props,
-			}
+			edgeMap[edge.ID] = edge
 		}
 	}
 
@@ -320,15 +307,6 @@ func (s *gographStore) GetNeighbors(ctx context.Context, nodeID string, depth in
 }
 
 // Query executes a query on the graph store.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - query: The query string
-//   - params: Query parameters
-//
-// Returns:
-//   - []map[string]any: The query results
-//   - error: Any error that occurred
 func (s *gographStore) Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error) {
 	rows, err := s.db.Query(ctx, query, params)
 	if err != nil {
@@ -360,27 +338,19 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 				switch val := (*vp).(type) {
 				case *graph.Node:
 					if val != nil {
-						nodeProps := make(map[string]any)
-						for k, v := range val.Properties {
-							nodeProps[k] = propertyValueToAny(v)
-						}
 						row[col] = map[string]any{
 							"id":         val.ID,
 							"labels":     val.Labels,
-							"properties": nodeProps,
+							"properties": propsToAny(val.Properties),
 						}
 					}
 				case graph.Relationship:
-					relProps := make(map[string]any)
-					for k, v := range val.Properties {
-						relProps[k] = propertyValueToAny(v)
-					}
 					row[col] = map[string]any{
 						"id":          val.ID,
 						"type":        val.Type,
 						"startNodeID": val.StartNodeID,
 						"endNodeID":   val.EndNodeID,
-						"properties":  relProps,
+						"properties":  propsToAny(val.Properties),
 					}
 				default:
 					row[col] = val
@@ -395,14 +365,6 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 }
 
 // GetCommunitySummaries retrieves community summaries at the specified level.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - level: The community level
-//
-// Returns:
-//   - []map[string]any: The community summaries
-//   - error: Any error that occurred
 func (s *gographStore) GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error) {
 	query := fmt.Sprintf("MATCH (c:Community) WHERE c.level = %d RETURN c.id as id, c.summary as summary, c.nodes as nodes", level)
 	results, err := s.Query(ctx, query, nil)
@@ -413,40 +375,151 @@ func (s *gographStore) GetCommunitySummaries(ctx context.Context, level int) ([]
 }
 
 // DeleteNode deletes a node and its edges.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - id: The node ID
-//
-// Returns:
-//   - error: Any error that occurred
 func (s *gographStore) DeleteNode(ctx context.Context, id string) error {
-	// Use Cypher DETACH DELETE to remove node and its edges
 	_, err := s.db.Exec(ctx, "MATCH (n {ID: $id}) DETACH DELETE n", map[string]any{"id": id})
 	return err
 }
 
 // DeleteEdge deletes an edge by ID.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - id: The edge ID
-//
-// Returns:
-//   - error: Any error that occurred
 func (s *gographStore) DeleteEdge(ctx context.Context, id string) error {
-	// Use Cypher to delete edge by ID
 	_, err := s.db.Exec(ctx, "MATCH ()-[r {ID: $id}]-() DELETE r", map[string]any{"id": id})
 	return err
 }
 
 // Close closes the graph store.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//
-// Returns:
-//   - error: Any error that occurred
 func (s *gographStore) Close(ctx context.Context) error {
 	return s.db.Close()
+}
+
+// GetNodesByChunkIDs retrieves all nodes associated with the given chunk IDs.
+func (s *gographStore) GetNodesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*core.Node, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	query := `
+		MATCH (n)
+		WHERE ANY(chunkID IN $chunkIDs WHERE chunkID IN n.source_chunk_ids)
+		RETURN n
+	`
+
+	results, err := s.Query(ctx, query, map[string]any{"chunkIDs": chunkIDs})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query nodes by chunk IDs: %w", err)
+	}
+
+	nodes := make([]*core.Node, 0, len(results))
+	for _, result := range results {
+		nodeData, ok := result["n"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		props, _ := nodeData["properties"].(map[string]any)
+		if props == nil {
+			props = make(map[string]any)
+		}
+
+		// Extract node ID
+		nodeID := getStringProp(props, "ID")
+		if nodeID == "" {
+			nodeID, _ = nodeData["id"].(string)
+		}
+
+		// Extract node type from labels
+		nodeType := ""
+		if labels, ok := nodeData["labels"].([]string); ok && len(labels) > 0 {
+			nodeType = labels[0]
+		}
+
+		// Extract new fields
+		name := getStringProp(props, "name")
+		sourceChunkIDs := getStringSliceProp(props, "source_chunk_ids")
+		sourceDocIDs := getStringSliceProp(props, "source_doc_ids")
+
+		// Remove internal fields
+		delete(props, "ID")
+		delete(props, "name")
+		delete(props, "source_chunk_ids")
+		delete(props, "source_doc_ids")
+
+		nodes = append(nodes, &core.Node{
+			ID:             nodeID,
+			Type:           nodeType,
+			Name:           name,
+			Properties:     props,
+			SourceChunkIDs: sourceChunkIDs,
+			SourceDocIDs:   sourceDocIDs,
+		})
+	}
+
+	return nodes, nil
+}
+
+// GetEdgesByChunkIDs retrieves all edges associated with the given chunk IDs.
+func (s *gographStore) GetEdgesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*core.Edge, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	query := `
+		MATCH ()-[r]->()
+		WHERE ANY(chunkID IN $chunkIDs WHERE chunkID IN r.source_chunk_ids)
+		RETURN r
+	`
+
+	results, err := s.Query(ctx, query, map[string]any{"chunkIDs": chunkIDs})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query edges by chunk IDs: %w", err)
+	}
+
+	edges := make([]*core.Edge, 0, len(results))
+	for _, result := range results {
+		edgeData, ok := result["r"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		props, _ := edgeData["properties"].(map[string]any)
+		if props == nil {
+			props = make(map[string]any)
+		}
+
+		// Extract edge ID
+		edgeID := getStringProp(props, "ID")
+		if edgeID == "" {
+			edgeID, _ = edgeData["id"].(string)
+		}
+
+		// Extract edge type
+		edgeType, _ := edgeData["type"].(string)
+
+		// Extract new fields
+		predicate := getStringProp(props, "predicate")
+		sourceChunkIDs := getStringSliceProp(props, "source_chunk_ids")
+		sourceDocIDs := getStringSliceProp(props, "source_doc_ids")
+
+		// Extract source and target node IDs safely
+		source, _ := edgeData["startNodeID"].(string)
+		target, _ := edgeData["endNodeID"].(string)
+
+		// Remove internal fields
+		delete(props, "ID")
+		delete(props, "predicate")
+		delete(props, "source_chunk_ids")
+		delete(props, "source_doc_ids")
+
+		edges = append(edges, &core.Edge{
+			ID:             edgeID,
+			Type:           edgeType,
+			Source:         source,
+			Target:         target,
+			Predicate:      predicate,
+			Properties:     props,
+			SourceChunkIDs: sourceChunkIDs,
+			SourceDocIDs:   sourceDocIDs,
+		})
+	}
+
+	return edges, nil
 }
