@@ -4,9 +4,10 @@ go 1.25.1
 
 require (
 	github.com/BurntSushi/toml v1.2.1
-	github.com/DotNetAge/gochat v0.2.0
+	github.com/DotNetAge/gochat v0.2.2
 	github.com/DotNetAge/gograph v0.2.1
 	github.com/DotNetAge/govector v0.1.4
+	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/blevesearch/bleve v1.0.14
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-ego/gse v1.0.2
@@ -14,20 +15,22 @@ require (
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	github.com/unidoc/unioffice v1.39.0
+	github.com/tealeg/xlsx v1.0.5
 	github.com/unidoc/unipdf/v3 v3.55.0
 	github.com/yalue/onnxruntime_go v1.27.0
 	github.com/zoomio/stopwords v0.11.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/image v0.18.0
-	golang.org/x/net v0.33.0
+	golang.org/x/image v0.25.0
+	golang.org/x/net v0.50.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/DataDog/zstd v1.4.5 // indirect
+	github.com/PuerkitoBio/goquery v1.9.2 // indirect
 	github.com/RoaringBitmap/roaring v0.4.23 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blevesearch/go-porterstemmer v1.0.3 // indirect
 	github.com/blevesearch/mmap-go v1.0.2 // indirect
@@ -68,7 +71,6 @@ require (
 	github.com/prometheus/client_model v0.2.1-0.20210607210712-147c58e9608a // indirect
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
-	github.com/richardlehane/msoleps v1.0.3 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
@@ -83,10 +85,10 @@ require (
 	github.com/willf/bitset v1.1.10 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

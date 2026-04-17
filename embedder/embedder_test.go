@@ -145,6 +145,10 @@ func TestONNXEmbedder_Text(t *testing.T) {
 			}
 			norm = sqrtFloat32(norm)
 
+			if norm < 0.001 {
+				t.Errorf("Vector norm is %.4f (near zero), embedding output is likely invalid", norm)
+			}
+
 			t.Logf("Text: %q -> vector norm: %.4f, first 5 dims: %v", text, norm, vector.Values[:5])
 		})
 	}
@@ -192,6 +196,10 @@ func TestONNXEmbedder_Image(t *testing.T) {
 				norm += v * v
 			}
 			norm = sqrtFloat32(norm)
+
+			if norm < 0.001 {
+				t.Errorf("Vector norm is %.4f (near zero), embedding output is likely invalid", norm)
+			}
 
 			t.Logf("Image: %s -> vector norm: %.4f, first 5 dims: %v", imgFile, norm, vector.Values[:5])
 		})
@@ -242,7 +250,19 @@ func TestONNXEmbedder_Bulk(t *testing.T) {
 		if v.ChunkID != chunks[i].ID {
 			t.Errorf("Vector %d ChunkID mismatch: expected %s, got %s", i, chunks[i].ID, v.ChunkID)
 		}
-		t.Logf("Chunk %s -> vector len=%d", chunks[i].Content, len(v.Values))
+		if len(v.Values) == 0 {
+			t.Errorf("Vector %d has empty values", i)
+			continue
+		}
+		var norm float32
+		for _, val := range v.Values {
+			norm += val * val
+		}
+		norm = sqrtFloat32(norm)
+		if norm < 0.001 {
+			t.Errorf("Vector %d norm is %.4f (near zero), embedding output is likely invalid", i, norm)
+		}
+		t.Logf("Chunk %s -> vector len=%d, norm=%.4f", chunks[i].Content, len(v.Values), norm)
 	}
 }
 

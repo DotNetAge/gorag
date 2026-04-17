@@ -19,20 +19,20 @@ import (
 // IndexingService RAG 索引服务
 // 支持批量索引和文件监控两种模式
 type IndexingService struct {
-	dataDir      string         // 索引数据目录
-	watchs       []string       // 监控的文件目录
-	pendingFiles []string       // 待索引文件列表
+	dataDir      string          // 索引数据目录
+	watchs       []string        // 监控的文件目录
+	pendingFiles []string        // 待索引文件列表
 	indexedFiles map[string]bool // 已索引文件路径集合
-	indexer      core.Indexer   // 索引器实例
-	logger       logging.Logger // 日志记录器
-	workerCount  int            // worker pool 大小
+	indexer      core.Indexer    // 索引器实例
+	logger       logging.Logger  // 日志记录器
+	workerCount  int             // worker pool 大小
 
 	// 内部状态
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	indexFile   string // 已索引文件记录文件路径
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	indexFile string // 已索引文件记录文件路径
 }
 
 // ServiceOption 服务配置选项
@@ -127,7 +127,7 @@ func (s *IndexingService) Index() error {
 	defer s.mu.Unlock()
 
 	s.logger.Info("starting batch indexing", map[string]any{
-		"watch_dirs":  s.watchs,
+		"watch_dirs":   s.watchs,
 		"worker_count": s.workerCount,
 	})
 
@@ -187,8 +187,8 @@ func (s *IndexingService) Index() error {
 	}
 
 	s.logger.Info("batch indexing completed", map[string]any{
-		"total":  len(s.pendingFiles),
-		"failed": failedCount,
+		"total":   len(s.pendingFiles),
+		"failed":  failedCount,
 		"success": len(s.pendingFiles) - failedCount,
 	})
 
@@ -356,8 +356,8 @@ func (s *IndexingService) handleWatchEvents(watcher *fsnotify.Watcher) {
 			}
 
 			// 只处理创建和写入事件
-			if event.Op&fsnotify.Create == fsnotify.Create || 
-			   event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Op&fsnotify.Create == fsnotify.Create ||
+				event.Op&fsnotify.Write == fsnotify.Write {
 				// 检查是否为文本文件
 				if s.isTextFile(event.Name) {
 					pendingEvents = append(pendingEvents, event.Name)
@@ -393,6 +393,7 @@ func (s *IndexingService) processFileChanges(files []string) {
 			s.mu.RUnlock()
 			// 文件已存在，需要更新（先删除再添加）
 			// 注意：当前实现暂不支持更新，跳过
+			// TODO: 如果不支持删除很容易产生大量冗余数据，需要考虑如何处理，是将该原文档相关的全部Chunks删除，实体也要删除。
 			s.logger.Warn("file already indexed, skip update", map[string]any{"file": file})
 			continue
 		}

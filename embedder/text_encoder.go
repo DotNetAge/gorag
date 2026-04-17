@@ -20,79 +20,141 @@ type TextEncoderConfig struct {
 
 // TextEncoder 通用文本编码器
 type TextEncoder struct {
-	config    TextEncoderConfig
-	tokenizer *VocabTokenizer
-	session   *ort.AdvancedSession
-	mu        sync.RWMutex
+	config        TextEncoderConfig
+	tokenizer     *VocabTokenizer
+	session       *ort.AdvancedSession
+	inputIDs      *ort.Tensor[int64]   // session 绑定的 input_ids 张量
+	attentionMask *ort.Tensor[int64]   // session 绑定的 attention_mask 张量
+	pixelValues   *ort.Tensor[float32] // session 绑定的 pixel_values 张量 (图像占位，可为 nil)
+	textEmbeds    *ort.Tensor[float32] // session 绑定的 text_embeds 输出张量
+	mu            sync.RWMutex
 }
 
 // NewTextEncoder 创建文本编码器
 func NewTextEncoder(config TextEncoderConfig, tokenizer *VocabTokenizer) (*TextEncoder, error) {
-	session, err := createTextSession(config)
+	session, inputIDs, attentionMask, pixelValues, textEmbeds, err := createTextSession(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create text session: %w", err)
 	}
 	return &TextEncoder{
-		config:    config,
-		tokenizer: tokenizer,
-		session:   session,
+		config:        config,
+		tokenizer:     tokenizer,
+		session:       session,
+		inputIDs:      inputIDs,
+		attentionMask: attentionMask,
+		pixelValues:   pixelValues,
+		textEmbeds:    textEmbeds,
 	}, nil
 }
 
-// createTextSession 创建文本编码 session
-func createTextSession(config TextEncoderConfig) (*ort.AdvancedSession, error) {
-	batchSize := 1
+// createTextSession 创建文本编码 session，返回 session 和绑定的类型化张量
+func createTextSession(config TextEncoderConfig) (
+	session *ort.AdvancedSession,
+	inputIDs *ort.Tensor[int64],
+	attentionMask *ort.Tensor[int64],
+	pixelValues *ort.Tensor[float32],
+	textEmbeds *ort.Tensor[float32],
+	err error,
+) {
+	batchSize := int64(1)
 
-	inputs := make([]ort.Value, len(config.InputNames))
-	for i, name := range config.InputNames {
-		var err error
+	cleanup := func() {
+		if inputIDs != nil {
+			inputIDs.Destroy()
+		}
+		if attentionMask != nil {
+			attentionMask.Destroy()
+		}
+		if pixelValues != nil {
+			pixelValues.Destroy()
+		}
+		if textEmbeds != nil {
+			textEmbeds.Destroy()
+		}
+	}
+
+	// 创建绑定张量并记录对应的 ort.Value
+	type namedInput struct {
+		name  string
+		value ort.Value
+	}
+	namedInputs := make([]namedInput, 0, len(config.InputNames))
+
+	for _, name := range config.InputNames {
 		switch name {
 		case "pixel_values":
-			if config.ImageSize <= 0 {
-				config.ImageSize = 224
+			imageSize := config.ImageSize
+			if imageSize <= 0 {
+				imageSize = 224
 			}
-			inputs[i], err = ort.NewEmptyTensor[float32](
-				ort.NewShape(int64(batchSize), 3, int64(config.ImageSize), int64(config.ImageSize)),
+			pixelValues, err = ort.NewEmptyTensor[float32](
+				ort.NewShape(batchSize, 3, int64(imageSize), int64(imageSize)),
 			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: pixelValues})
+		case "input_ids":
+			inputIDs, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
+			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: inputIDs})
+		case "attention_mask":
+			attentionMask, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
+			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: attentionMask})
 		default:
-			inputs[i], err = ort.NewEmptyTensor[int64](
-				ort.NewShape(int64(batchSize), int64(config.SeqLength)),
+			// 其他文本输入 (如 token_type_ids)，按 int64 处理
+			var t *ort.Tensor[int64]
+			t, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
 			)
-		}
-		if err != nil {
-			for j := 0; j < i; j++ {
-				inputs[j].Destroy()
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
 			}
-			return nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
+			namedInputs = append(namedInputs, namedInput{name: name, value: t})
 		}
 	}
 
-	outputs := make([]ort.Value, len(config.OutputNames))
-	for i := range config.OutputNames {
-		var err error
-		if config.UseCLSPooling {
-			// 输出形状: [batch, seq, hidden]
-			outputs[i], err = ort.NewEmptyTensor[float32](
-				ort.NewShape(int64(batchSize), int64(config.SeqLength), int64(config.Dimension)),
-			)
-		} else {
-			// 输出形状: [batch, dimension]
-			outputs[i], err = ort.NewEmptyTensor[float32](
-				ort.NewShape(int64(batchSize), int64(config.Dimension)),
-			)
-		}
-		if err != nil {
-			for j := 0; j < len(inputs); j++ {
-				inputs[j].Destroy()
-			}
-			for j := 0; j < i; j++ {
-				outputs[j].Destroy()
-			}
-			return nil, fmt.Errorf("failed to create output tensor: %w", err)
-		}
+	// 按原始 InputNames 顺序组装 inputs
+	inputOrder := make(map[string]int)
+	for i, name := range config.InputNames {
+		inputOrder[name] = i
+	}
+	inputs := make([]ort.Value, len(config.InputNames))
+	for _, ni := range namedInputs {
+		inputs[inputOrder[ni.name]] = ni.value
 	}
 
-	session, err := ort.NewAdvancedSession(
+	// 输出张量
+	if config.UseCLSPooling {
+		textEmbeds, err = ort.NewEmptyTensor[float32](
+			ort.NewShape(batchSize, int64(config.SeqLength), int64(config.Dimension)),
+		)
+	} else {
+		textEmbeds, err = ort.NewEmptyTensor[float32](
+			ort.NewShape(batchSize, int64(config.Dimension)),
+		)
+	}
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create output tensor: %w", err)
+	}
+
+	outputs := []ort.Value{textEmbeds}
+
+	session, err = ort.NewAdvancedSession(
 		config.ModelPath,
 		config.InputNames,
 		config.OutputNames,
@@ -101,120 +163,51 @@ func createTextSession(config TextEncoderConfig) (*ort.AdvancedSession, error) {
 		nil,
 	)
 	if err != nil {
-		for j := 0; j < len(inputs); j++ {
-			inputs[j].Destroy()
-		}
-		for j := 0; j < len(outputs); j++ {
-			outputs[j].Destroy()
-		}
-		return nil, fmt.Errorf("failed to create session: %w", err)
+		cleanup()
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	return session, nil
+	return session, inputIDs, attentionMask, pixelValues, textEmbeds, nil
 }
 
 // Embed 文本向量化
+// 逐条处理文本，将 tokenized 数据写入 session 绑定的输入张量，
+// 调用 Run() 推理后从绑定的输出张量读取结果。
 func (e *TextEncoder) Embed(texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
 
 	e.mu.RLock()
-	session := e.session
-	e.mu.RUnlock()
+	defer e.mu.RUnlock()
 
-	if session == nil {
+	if e.session == nil {
 		return nil, fmt.Errorf("text encoder session not initialized")
 	}
 
-	batchSize := len(texts)
-	maxLen := e.config.SeqLength
+	dim := e.config.Dimension
+	result := make([][]float32, len(texts))
 
-	// 1. 分词
-	allInputIDs := make([][]int64, batchSize)
-	allMasks := make([][]int64, batchSize)
 	for i, text := range texts {
+		// 1. 分词
 		inputIDs, mask, err := e.tokenizer.Tokenize(text)
 		if err != nil {
-			return nil, fmt.Errorf("tokenization failed: %w", err)
+			return nil, fmt.Errorf("tokenization failed for text %d: %w", i, err)
 		}
-		allInputIDs[i] = inputIDs
-		allMasks[i] = mask
-	}
 
-	// 2. 构建输入数据
-	inputData := make([]int64, batchSize*maxLen)
-	for i := range allInputIDs {
-		copy(inputData[i*maxLen:], allInputIDs[i])
-	}
+		// 2. 将数据写入 session 绑定的输入张量
+		copy(e.inputIDs.GetData(), inputIDs)
+		copy(e.attentionMask.GetData(), mask)
 
-	maskData := make([]int64, batchSize*maxLen)
-	for i := range allMasks {
-		copy(maskData[i*maxLen:], allMasks[i])
-	}
-
-	// 3. 创建输入张量
-	inputShape := ort.NewShape(int64(batchSize), int64(maxLen))
-	inputTensor, err := ort.NewTensor(inputShape, inputData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
-	}
-	defer inputTensor.Destroy()
-
-	maskTensor, err := ort.NewTensor(inputShape, maskData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
-	}
-	defer maskTensor.Destroy()
-
-	// 4. 如果需要 pixel_values，创建占位符
-	var pixelTensor *ort.Tensor[float32]
-	if e.config.ImageSize > 0 {
-		pixelShape := ort.NewShape(int64(batchSize), 3, int64(e.config.ImageSize), int64(e.config.ImageSize))
-		pixelData := make([]float32, batchSize*3*e.config.ImageSize*e.config.ImageSize)
-		pixelTensor, err = ort.NewTensor(pixelShape, pixelData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
+		// 3. 推理（在绑定的张量上执行）
+		if err := e.session.Run(); err != nil {
+			return nil, fmt.Errorf("inference failed for text %d: %w", i, err)
 		}
-		defer pixelTensor.Destroy()
-	}
 
-	// 5. 创建输出张量
-	var outputTensor *ort.Tensor[float32]
-	if e.config.UseCLSPooling {
-		outputShape := ort.NewShape(int64(batchSize), int64(maxLen), int64(e.config.Dimension))
-		outputTensor, err = ort.NewEmptyTensor[float32](outputShape)
-	} else {
-		outputShape := ort.NewShape(int64(batchSize), int64(e.config.Dimension))
-		outputTensor, err = ort.NewEmptyTensor[float32](outputShape)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create output tensor: %w", err)
-	}
-	defer outputTensor.Destroy()
-
-	// 6. 推理
-	if err := session.Run(); err != nil {
-		return nil, fmt.Errorf("inference failed: %w", err)
-	}
-
-	// 7. 提取结果
-	embeddings := outputTensor.GetData()
-	result := make([][]float32, batchSize)
-	dim := e.config.Dimension
-
-	if e.config.UseCLSPooling {
-		// 从 [batch, seq, hidden] 提取每个样本的第一个 token (CLS) 的向量
-		for i := 0; i < batchSize; i++ {
-			result[i] = make([]float32, dim)
-			copy(result[i], embeddings[i*dim:(i+1)*dim])
-		}
-	} else {
-		// 直接使用 [batch, dimension]
-		for i := 0; i < batchSize; i++ {
-			result[i] = make([]float32, dim)
-			copy(result[i], embeddings[i*dim:(i+1)*dim])
-		}
+		// 4. 从 session 绑定的输出张量读取结果
+		outputData := e.textEmbeds.GetData()
+		result[i] = make([]float32, dim)
+		copy(result[i], outputData[:dim])
 	}
 
 	return result, nil
@@ -227,6 +220,22 @@ func (e *TextEncoder) Close() error {
 	if e.session != nil {
 		e.session.Destroy()
 		e.session = nil
+	}
+	if e.inputIDs != nil {
+		e.inputIDs.Destroy()
+		e.inputIDs = nil
+	}
+	if e.attentionMask != nil {
+		e.attentionMask.Destroy()
+		e.attentionMask = nil
+	}
+	if e.pixelValues != nil {
+		e.pixelValues.Destroy()
+		e.pixelValues = nil
+	}
+	if e.textEmbeds != nil {
+		e.textEmbeds.Destroy()
+		e.textEmbeds = nil
 	}
 	return nil
 }

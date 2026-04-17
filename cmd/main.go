@@ -68,7 +68,7 @@ func main() {
   GORAG_MODEL_PATH - 模型存储目录（默认: ~/.embeddings）
 
 示例:
-  gorag init ./my-rag -t hybrid -i Xenova/chinese-clip-vit-base-patch16
+  gorag init ./my-rag -t hybrid -i Xenova/chinese-clip-vit-base-patch16 -f onnx/model.onnx
   gorag init ./my-rag -t semantic -m /path/to/model.onnx
   gorag init ./my-rag -t fulltext`,
 		Args: cobra.ExactArgs(1),
@@ -78,7 +78,7 @@ func main() {
 	initCmd.Flags().StringVarP(&initName, "name", "n", "", "RAG 库命名")
 	initCmd.Flags().StringVarP(&initModel, "model", "m", "", "本地模型文件路径")
 	initCmd.Flags().StringVarP(&initModelID, "model-id", "i", "", "HuggingFace 模型 ID")
-	initCmd.Flags().StringVar(&initModelFile, "model-file", "onnx/model.onnx", "模型文件名")
+	initCmd.Flags().StringVarP(&initModelFile, "model-file", "f", "", "模型文件名")
 
 	// search 子命令
 	var searchCmd = &cobra.Command{
@@ -129,6 +129,16 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	var modelPath string
 	var err error
+
+	if initType == "hybrid" && ((initModel == "" && initModelID == "") || initModel == "") {
+		initModelID = "Xenova/chinese-clip-vit-base-patch16"
+		initModelFile = "onnx/model.onnx"
+	}
+
+	if initType == "semantic" && ((initModel == "" && initModelID == "") || initModel == "") {
+		initModelID = "Xenova/bge-base-zh-v1.5"
+		initModelFile = "onnx/model.onnx"
+	}
 
 	// 处理模型
 	if initModelID != "" {
@@ -257,7 +267,7 @@ func getModelDir() string {
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "./models"
+		return "/embeddings"
 	}
 	return filepath.Join(homeDir, ".embeddings")
 }

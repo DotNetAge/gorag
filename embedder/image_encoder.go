@@ -19,66 +19,129 @@ type ImageEncoderConfig struct {
 
 // ImageEncoder 通用图像编码器
 type ImageEncoder struct {
-	config  ImageEncoderConfig
-	session *ort.AdvancedSession
-	mu      sync.RWMutex
+	config       ImageEncoderConfig
+	session      *ort.AdvancedSession
+	inputIDs     *ort.Tensor[int64]   // session 绑定的 input_ids 张量 (文本占位)
+	attentionMask *ort.Tensor[int64]  // session 绑定的 attention_mask 张量 (文本占位)
+	pixelValues  *ort.Tensor[float32] // session 绑定的 pixel_values 张量
+	imageEmbeds  *ort.Tensor[float32] // session 绑定的 image_embeds 输出张量
+	mu           sync.RWMutex
 }
 
 // NewImageEncoder 创建图像编码器
 func NewImageEncoder(config ImageEncoderConfig) (*ImageEncoder, error) {
-	session, err := createImageSession(config)
+	session, inputIDs, attentionMask, pixelValues, imageEmbeds, err := createImageSession(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create image session: %w", err)
 	}
 	return &ImageEncoder{
-		config:  config,
-		session: session,
+		config:       config,
+		session:      session,
+		inputIDs:     inputIDs,
+		attentionMask: attentionMask,
+		pixelValues:  pixelValues,
+		imageEmbeds:  imageEmbeds,
 	}, nil
 }
 
-// createImageSession 创建图像编码 session
-func createImageSession(config ImageEncoderConfig) (*ort.AdvancedSession, error) {
-	batchSize := 1
+// createImageSession 创建图像编码 session，返回 session 和绑定的类型化张量
+func createImageSession(config ImageEncoderConfig) (
+	session *ort.AdvancedSession,
+	inputIDs *ort.Tensor[int64],
+	attentionMask *ort.Tensor[int64],
+	pixelValues *ort.Tensor[float32],
+	imageEmbeds *ort.Tensor[float32],
+	err error,
+) {
+	batchSize := int64(1)
 
-	inputs := make([]ort.Value, len(config.InputNames))
-	for i, name := range config.InputNames {
-		var err error
+	cleanup := func() {
+		if inputIDs != nil {
+			inputIDs.Destroy()
+		}
+		if attentionMask != nil {
+			attentionMask.Destroy()
+		}
+		if pixelValues != nil {
+			pixelValues.Destroy()
+		}
+		if imageEmbeds != nil {
+			imageEmbeds.Destroy()
+		}
+	}
+
+	// 创建绑定张量
+	type namedInput struct {
+		name  string
+		value ort.Value
+	}
+	namedInputs := make([]namedInput, 0, len(config.InputNames))
+
+	for _, name := range config.InputNames {
 		switch name {
 		case "pixel_values":
-			inputs[i], err = ort.NewEmptyTensor[float32](
-				ort.NewShape(int64(batchSize), 3, int64(config.ImageSize), int64(config.ImageSize)),
+			pixelValues, err = ort.NewEmptyTensor[float32](
+				ort.NewShape(batchSize, 3, int64(config.ImageSize), int64(config.ImageSize)),
 			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: pixelValues})
+		case "input_ids":
+			inputIDs, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
+			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: inputIDs})
+		case "attention_mask":
+			attentionMask, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
+			)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
+			}
+			namedInputs = append(namedInputs, namedInput{name: name, value: attentionMask})
 		default:
-			inputs[i], err = ort.NewEmptyTensor[int64](
-				ort.NewShape(int64(batchSize), int64(config.SeqLength)),
+			// 其他输入按 int64 处理
+			var t *ort.Tensor[int64]
+			t, err = ort.NewEmptyTensor[int64](
+				ort.NewShape(batchSize, int64(config.SeqLength)),
 			)
-		}
-		if err != nil {
-			for j := 0; j < i; j++ {
-				inputs[j].Destroy()
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
 			}
-			return nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
-		}
-	}
-
-	outputs := make([]ort.Value, len(config.OutputNames))
-	for i := range config.OutputNames {
-		var err error
-		outputs[i], err = ort.NewEmptyTensor[float32](
-			ort.NewShape(int64(batchSize), int64(config.Dimension)),
-		)
-		if err != nil {
-			for j := 0; j < len(inputs); j++ {
-				inputs[j].Destroy()
-			}
-			for j := 0; j < i; j++ {
-				outputs[j].Destroy()
-			}
-			return nil, fmt.Errorf("failed to create output tensor: %w", err)
+			namedInputs = append(namedInputs, namedInput{name: name, value: t})
 		}
 	}
 
-	session, err := ort.NewAdvancedSession(
+	// 按 InputNames 顺序组装 inputs
+	inputOrder := make(map[string]int)
+	for i, name := range config.InputNames {
+		inputOrder[name] = i
+	}
+	inputs := make([]ort.Value, len(config.InputNames))
+	for _, ni := range namedInputs {
+		inputs[inputOrder[ni.name]] = ni.value
+	}
+
+	// 输出张量
+	imageEmbeds, err = ort.NewEmptyTensor[float32](
+		ort.NewShape(batchSize, int64(config.Dimension)),
+	)
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create output tensor: %w", err)
+	}
+
+	outputs := []ort.Value{imageEmbeds}
+
+	session, err = ort.NewAdvancedSession(
 		config.ModelPath,
 		config.InputNames,
 		config.OutputNames,
@@ -87,93 +150,63 @@ func createImageSession(config ImageEncoderConfig) (*ort.AdvancedSession, error)
 		nil,
 	)
 	if err != nil {
-		for j := 0; j < len(inputs); j++ {
-			inputs[j].Destroy()
-		}
-		for j := 0; j < len(outputs); j++ {
-			outputs[j].Destroy()
-		}
-		return nil, fmt.Errorf("failed to create session: %w", err)
+		cleanup()
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	return session, nil
+	return session, inputIDs, attentionMask, pixelValues, imageEmbeds, nil
 }
 
 // Embed 图像向量化
-// 输入: 预处理后的图像数据 [3, H, W] 格式的 float32 数组
+// 逐张处理图像，将预处理后的数据写入 session 绑定的 pixel_values 张量，
+// 调用 Run() 推理后从绑定的输出张量读取结果。
 func (e *ImageEncoder) Embed(images [][]float32) ([][]float32, error) {
 	if len(images) == 0 {
 		return [][]float32{}, nil
 	}
 
 	e.mu.RLock()
-	session := e.session
-	e.mu.RUnlock()
+	defer e.mu.RUnlock()
 
-	if session == nil {
+	if e.session == nil {
 		return nil, fmt.Errorf("image encoder session not initialized")
 	}
 
-	batchSize := len(images)
-	imageSize := e.config.ImageSize
 	maxLen := e.config.SeqLength
-
-	// 1. 构建 pixel_values 张量 [batch, 3, H, W]
-	pixelData := make([]float32, batchSize*3*imageSize*imageSize)
-	for b := 0; b < batchSize; b++ {
-		copy(pixelData[b*3*imageSize*imageSize:], images[b])
-	}
-
-	pixelShape := ort.NewShape(int64(batchSize), 3, int64(imageSize), int64(imageSize))
-	pixelTensor, err := ort.NewTensor(pixelShape, pixelData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
-	}
-	defer pixelTensor.Destroy()
-
-	// 2. 构建占位符文本输入 (全零，带 [CLS]...[SEP] 结构)
-	textData := make([]int64, batchSize*maxLen)
-	maskData := make([]int64, batchSize*maxLen)
-	for b := 0; b < batchSize; b++ {
-		textData[b*maxLen] = 101          // [CLS]
-		textData[b*maxLen+maxLen-1] = 102 // [SEP]
-		maskData[b*maxLen] = 1
-		maskData[b*maxLen+maxLen-1] = 1
-	}
-
-	inputShape := ort.NewShape(int64(batchSize), int64(maxLen))
-	inputTensor, err := ort.NewTensor(inputShape, textData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
-	}
-	defer inputTensor.Destroy()
-
-	maskTensor, err := ort.NewTensor(inputShape, maskData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
-	}
-	defer maskTensor.Destroy()
-
-	// 3. 创建输出张量
-	outputShape := ort.NewShape(int64(batchSize), int64(e.config.Dimension))
-	outputTensor, err := ort.NewEmptyTensor[float32](outputShape)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create output tensor: %w", err)
-	}
-	defer outputTensor.Destroy()
-
-	// 4. 推理
-	if err := session.Run(); err != nil {
-		return nil, fmt.Errorf("image inference failed: %w", err)
-	}
-
-	// 5. 提取结果
-	embeddings := outputTensor.GetData()
-	result := make([][]float32, batchSize)
 	dim := e.config.Dimension
-	for i := 0; i < batchSize; i++ {
+	result := make([][]float32, len(images))
+
+	for i, imageData := range images {
+		// 1. 将图像数据写入绑定的 pixel_values 张量
+		copy(e.pixelValues.GetData(), imageData)
+
+		// 2. 设置文本占位符输入（全零，带 [CLS]...[SEP] 结构）
+		if e.inputIDs != nil {
+			idsData := e.inputIDs.GetData()
+			for j := range idsData {
+				idsData[j] = 0
+			}
+			idsData[0] = 101                   // [CLS]
+			idsData[maxLen-1] = 102             // [SEP]
+		}
+		if e.attentionMask != nil {
+			maskData := e.attentionMask.GetData()
+			for j := range maskData {
+				maskData[j] = 0
+			}
+			maskData[0] = 1
+			maskData[maxLen-1] = 1
+		}
+
+		// 3. 推理
+		if err := e.session.Run(); err != nil {
+			return nil, fmt.Errorf("image inference failed for image %d: %w", i, err)
+		}
+
+		// 4. 从绑定的输出张量读取结果
+		outputData := e.imageEmbeds.GetData()
 		result[i] = make([]float32, dim)
-		copy(result[i], embeddings[i*dim:(i+1)*dim])
+		copy(result[i], outputData[:dim])
 	}
 
 	return result, nil
@@ -186,6 +219,22 @@ func (e *ImageEncoder) Close() error {
 	if e.session != nil {
 		e.session.Destroy()
 		e.session = nil
+	}
+	if e.inputIDs != nil {
+		e.inputIDs.Destroy()
+		e.inputIDs = nil
+	}
+	if e.attentionMask != nil {
+		e.attentionMask.Destroy()
+		e.attentionMask = nil
+	}
+	if e.pixelValues != nil {
+		e.pixelValues.Destroy()
+		e.pixelValues = nil
+	}
+	if e.imageEmbeds != nil {
+		e.imageEmbeds.Destroy()
+		e.imageEmbeds = nil
 	}
 	return nil
 }

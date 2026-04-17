@@ -32,20 +32,22 @@ type PromptConfig struct {
 // DefaultPromptConfig 默认 Prompt 配置
 func DefaultPromptConfig() *PromptConfig {
 	return &PromptConfig{
-		SystemPrompt: `你是一个智能助手，请基于以下提供的参考文档回答用户问题。
-要求：
-1. 回答必须严格基于提供的参考文档内容
-2. 如果参考文档中没有相关信息，请明确告知"根据提供的文档，我无法回答这个问题"
-3. 不要编造或推测文档中不存在的信息
-4. 回答时可以引用文档编号来支持你的答案`,
-		ContextTemplate: `以下是相关的参考文档：
+		SystemPrompt: `You are a knowledgeable assistant. Answer the user's question based strictly on the reference documents provided below.
+
+Requirements:
+1. Your answer must be grounded entirely in the provided reference documents.
+2. If the reference documents do not contain relevant information, state clearly: "Based on the provided documents, I cannot answer this question."
+3. Do not fabricate or infer information not present in the documents.
+4. You may cite document numbers to support your answer.
+5. Respond in the same language as the user's question. If the user asks in Chinese, respond in Chinese; if in English, respond in English, and so on.`,
+		ContextTemplate: `Here are the relevant reference documents:
 
 {{range $i, $doc := .Documents}}
 {{$doc}}
 {{end}}
 
-请基于以上参考文档回答问题：{{.Query}}`,
-		DocumentTemplate: `[文档{{.Index}}]{{if .Score}} (相关度: {{printf "%.2f" .Score}}){{end}}
+Please answer the following question based on the reference documents above: {{.Query}}`,
+		DocumentTemplate: `[Document {{.Index}}]{{if .Score}} (relevance: {{printf "%.2f" .Score}}){{end}}
 {{.Content}}`,
 		IncludeScore:  true,
 		IncludeSource: true,
@@ -139,14 +141,14 @@ func (f *PromptFormatter) formatDocument(index int, hit *core.Hit) string {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "[文档%d]", index)
+	fmt.Fprintf(&sb, "[Document %d]", index)
 
 	if f.config.IncludeScore && hit.Score > 0 {
-		fmt.Fprintf(&sb, " (相关度: %.4f)", hit.Score)
+		fmt.Fprintf(&sb, " (relevance: %.4f)", hit.Score)
 	}
 
 	if f.config.IncludeSource && hit.DocID != "" {
-		fmt.Fprintf(&sb, " [来源: %s]", hit.DocID)
+		fmt.Fprintf(&sb, " [source: %s]", hit.DocID)
 	}
 
 	sb.WriteString("\n")
@@ -164,15 +166,15 @@ func (f *PromptFormatter) FormatAll(hits []core.Hit) string {
 func (f *PromptFormatter) FormatWithContext(hits []core.Hit, query string) string {
 	var sb strings.Builder
 
-	// 系统提示词
+	// System prompt
 	if f.config.SystemPrompt != "" {
-		sb.WriteString("## 系统提示\n\n")
+		sb.WriteString("## System Instructions\n\n")
 		sb.WriteString(f.config.SystemPrompt)
 		sb.WriteString("\n\n")
 	}
 
-	// 文档
-	sb.WriteString("## 参考文档\n\n")
+	// Reference documents
+	sb.WriteString("## Reference Documents\n\n")
 
 	maxDocs := len(hits)
 	if f.config.MaxDocuments > 0 && maxDocs > f.config.MaxDocuments {
@@ -186,9 +188,9 @@ func (f *PromptFormatter) FormatWithContext(hits []core.Hit, query string) strin
 		}
 	}
 
-	// 查询
+	// User query
 	if query != "" {
-		sb.WriteString("\n\n## 用户问题\n\n")
+		sb.WriteString("\n\n## User Question\n\n")
 		sb.WriteString(query)
 	}
 

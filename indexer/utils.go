@@ -216,5 +216,9 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		return nil, err
 	}
 
+	// for i := range chunks {
+	// 	chunks[i].Metadata["file"] = strings.ToLower(file)
+	// }
+
 	return chunks, nil
 }
