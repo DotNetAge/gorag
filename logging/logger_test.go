@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,17 +76,17 @@ func TestDefaultNoopLogger(t *testing.T) {
 
 func TestNoopLogger_AllMethodsNoOp(t *testing.T) {
 	logger := &noopLogger{}
-	logger.Info("info message", map[string]any{"key": "value"})
-	logger.Debug("debug message", map[string]any{"key": "value"})
-	logger.Warn("warn message", map[string]any{"key": "value"})
-	logger.Error("error message", nil, map[string]any{"key": "value"})
+	logger.Info("info message", "key", "value")
+	logger.Debug("debug message", "key", "value")
+	logger.Warn("warn message", "key", "value")
+	logger.Error("error message", nil, "key", "value")
 }
 
 func TestDefaultLogger_Info(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Info("test info", map[string]any{"key": "value"})
+	fileLogger.Info("test info", "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -94,13 +95,14 @@ func TestDefaultLogger_Info(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), "[INFO]")
 	assert.Contains(t, string(content), "test info")
+	assert.Contains(t, string(content), "key=value")
 }
 
 func TestDefaultLogger_Error(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Error("test error", nil, map[string]any{"key": "value"})
+	fileLogger.Error("test error", nil, "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -115,7 +117,7 @@ func TestDefaultLogger_Debug(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Debug("test debug", map[string]any{"key": "value"})
+	fileLogger.Debug("test debug", "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -124,13 +126,14 @@ func TestDefaultLogger_Debug(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), "[DEBUG]")
 	assert.Contains(t, string(content), "test debug")
+	assert.Contains(t, string(content), "key=value")
 }
 
 func TestDefaultLogger_Warn(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Warn("test warn", map[string]any{"key": "value"})
+	fileLogger.Warn("test warn", "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -139,15 +142,17 @@ func TestDefaultLogger_Warn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), "[WARN]")
 	assert.Contains(t, string(content), "test warn")
+	assert.Contains(t, string(content), "key=value")
 }
 
 func TestDefaultLogger_LevelFiltering(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(WARN))
-	fileLogger.Debug("debug should not appear", map[string]any{})
-	fileLogger.Info("info should not appear", map[string]any{})
-	fileLogger.Error("error should appear", nil, map[string]any{})
+	fileLogger.Debug("debug should not appear")
+	fileLogger.Info("info should not appear")
+	fileLogger.Error("error should appear", nil)
+	fileLogger.Warn("warn should appear")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -157,13 +162,14 @@ func TestDefaultLogger_LevelFiltering(t *testing.T) {
 	assert.NotContains(t, string(content), "debug should not appear")
 	assert.NotContains(t, string(content), "info should not appear")
 	assert.Contains(t, string(content), "error should appear")
+	assert.Contains(t, string(content), "warn should appear")
 }
 
 func TestDefaultLogger_ErrorWithNilError(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Error("test error", nil, map[string]any{"key": "value"})
+	fileLogger.Error("test error", nil, "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -179,7 +185,7 @@ func TestDefaultLogger_ErrorWithRealError(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
 	testErr := os.ErrPermission
-	fileLogger.Error("test error", testErr, map[string]any{"key": "value"})
+	fileLogger.Error("test error", testErr, "key", "value")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -191,15 +197,11 @@ func TestDefaultLogger_ErrorWithRealError(t *testing.T) {
 	assert.Contains(t, string(content), testErr.Error())
 }
 
-func TestDefaultLogger_FieldsFormat(t *testing.T) {
+func TestDefaultLogger_KeyvalsFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Info("test message", map[string]any{
-		"string": "value",
-		"int":    42,
-		"bool":   true,
-	})
+	fileLogger.Info("test message", "string", "value", "int", 42, "bool", true)
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -211,11 +213,11 @@ func TestDefaultLogger_FieldsFormat(t *testing.T) {
 	assert.Contains(t, string(content), "bool=true")
 }
 
-func TestDefaultLogger_NilFields(t *testing.T) {
+func TestDefaultLogger_NoKeyvals(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.log")
 	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
-	fileLogger.Info("test message", nil)
+	fileLogger.Info("test message")
 	if dl, ok := fileLogger.(*defaultLogger); ok {
 		dl.Close()
 	}
@@ -223,6 +225,22 @@ func TestDefaultLogger_NilFields(t *testing.T) {
 	content, err := os.ReadFile(filePath)
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), "test message")
+}
+
+func TestDefaultLogger_OddKeyvals(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.log")
+	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
+	fileLogger.Info("test message", "orphan_key")
+	if dl, ok := fileLogger.(*defaultLogger); ok {
+		dl.Close()
+	}
+
+	content, err := os.ReadFile(filePath)
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "test message")
+	// Odd keyval: last key without a value is silently dropped (same as zap)
+	assert.NotContains(t, string(content), "orphan_key=")
 }
 
 func TestDefaultLogger_Close(t *testing.T) {
@@ -235,4 +253,23 @@ func TestDefaultLogger_Close(t *testing.T) {
 		err = dl.Close()
 		assert.NoError(t, err)
 	}
+}
+
+func TestDefaultLogger_ErrorWithErrorAndKeyvals(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.log")
+	fileLogger, _ := DefaultFileLogger(filePath, WithLevel(DEBUG))
+	testErr := errors.New("disk full")
+	fileLogger.Error("write failed", testErr, "file", "data.bin", "size", 1024)
+	if dl, ok := fileLogger.(*defaultLogger); ok {
+		dl.Close()
+	}
+
+	content, err := os.ReadFile(filePath)
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "[ERROR]")
+	assert.Contains(t, string(content), "write failed")
+	assert.Contains(t, string(content), "error=disk full")
+	assert.Contains(t, string(content), "file=data.bin")
+	assert.Contains(t, string(content), "size=1024")
 }

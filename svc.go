@@ -108,7 +108,7 @@ func NewRAGService(dataDir string, opts ...ServiceOption) (*IndexingService, err
 	// 加载已索引文件记录
 	svc.indexFile = filepath.Join(dataDir, "history", "indexed_files.txt")
 	if err := svc.loadIndexedFiles(); err != nil {
-		svc.logger.Warn("failed to load indexed files history", map[string]any{"error": err.Error()})
+		svc.logger.Warn("failed to load indexed files history", "error", err.Error())
 	}
 
 	// 创建 history 目录
@@ -126,25 +126,22 @@ func (s *IndexingService) Index() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.logger.Info("starting batch indexing", map[string]any{
-		"watch_dirs":   s.watchs,
-		"worker_count": s.workerCount,
-	})
+	s.logger.Info("starting batch indexing", "watch_dirs", s.watchs, "worker_count", s.workerCount)
 
 	// 1. 扫描所有待索引文件
 	for _, watchDir := range s.watchs {
 		if err := s.scanDirectory(watchDir); err != nil {
-			s.logger.Error("failed to scan directory", err, map[string]any{"dir": watchDir})
+			s.logger.Error("failed to scan directory", err, "dir", watchDir)
 			continue
 		}
 	}
 
 	if len(s.pendingFiles) == 0 {
-		s.logger.Info("no files to index", nil)
+		s.logger.Info("no files to index")
 		return nil
 	}
 
-	s.logger.Info("files found for indexing", map[string]any{"count": len(s.pendingFiles)})
+	s.logger.Info("files found for indexing", "count", len(s.pendingFiles))
 
 	// 2. 使用 worker pool 并发索引
 	ctx, cancel := context.WithCancel(context.Background())
@@ -177,20 +174,13 @@ func (s *IndexingService) Index() error {
 	for result := range results {
 		if result.err != nil {
 			failedCount++
-			s.logger.Error("failed to index file", result.err, map[string]any{"file": result.file})
+			s.logger.Error("failed to index file", result.err, "file", result.file)
 		} else {
-			s.logger.Info("file indexed successfully", map[string]any{
-				"file":     result.file,
-				"chunk_id": result.chunkID,
-			})
+			s.logger.Info("file indexed successfully", "file", result.file, "chunk_id", result.chunkID)
 		}
 	}
 
-	s.logger.Info("batch indexing completed", map[string]any{
-		"total":   len(s.pendingFiles),
-		"failed":  failedCount,
-		"success": len(s.pendingFiles) - failedCount,
-	})
+	s.logger.Info("batch indexing completed", "total", len(s.pendingFiles), "failed", failedCount, "success", len(s.pendingFiles)-failedCount)
 
 	// 3. 清空待索引列表
 	s.pendingFiles = []string{}
@@ -238,10 +228,7 @@ func (s *IndexingService) indexWorker(ctx context.Context, wg *sync.WaitGroup, j
 
 			// 持久化到文件
 			if err := s.appendIndexedFile(file); err != nil {
-				s.logger.Warn("failed to record indexed file", map[string]any{
-					"file":  file,
-					"error": err.Error(),
-				})
+				s.logger.Warn("failed to record indexed file", "file", file, "error", err.Error())
 			}
 
 			results <- indexResult{
@@ -314,24 +301,24 @@ func (s *IndexingService) Watch() error {
 		if err := watcher.Add(dir); err != nil {
 			return fmt.Errorf("failed to watch directory %s: %w", dir, err)
 		}
-		s.logger.Info("watching directory", map[string]any{"dir": dir})
+		s.logger.Info("watching directory", "dir", dir)
 	}
 
 	// 首次执行全量索引
 	if err := s.Index(); err != nil {
-		s.logger.Error("initial indexing failed", err, nil)
+		s.logger.Error("initial indexing failed", err)
 	}
 
 	// 启动事件处理 goroutine
 	s.wg.Add(1)
 	go s.handleWatchEvents(watcher)
 
-	s.logger.Info("file watch service started", map[string]any{"watch_dirs": s.watchs})
+	s.logger.Info("file watch service started", "watch_dirs", s.watchs)
 
 	// 阻塞等待
 	<-s.ctx.Done()
 
-	s.logger.Info("file watch service stopped", nil)
+	s.logger.Info("file watch service stopped")
 
 	return nil
 }
@@ -377,14 +364,14 @@ func (s *IndexingService) handleWatchEvents(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			s.logger.Error("watcher error", err, nil)
+			s.logger.Error("watcher error", err)
 		}
 	}
 }
 
 // processFileChanges 处理文件变更
 func (s *IndexingService) processFileChanges(files []string) {
-	s.logger.Info("processing file changes", map[string]any{"count": len(files)})
+	s.logger.Info("processing file changes", "count", len(files))
 
 	for _, file := range files {
 		// 检查文件是否已索引
@@ -394,7 +381,7 @@ func (s *IndexingService) processFileChanges(files []string) {
 			// 文件已存在，需要更新（先删除再添加）
 			// 注意：当前实现暂不支持更新，跳过
 			// TODO: 如果不支持删除很容易产生大量冗余数据，需要考虑如何处理，是将该原文档相关的全部Chunks删除，实体也要删除。
-			s.logger.Warn("file already indexed, skip update", map[string]any{"file": file})
+			s.logger.Warn("file already indexed, skip update", "file", file)
 			continue
 		}
 		s.mu.RUnlock()
@@ -402,7 +389,7 @@ func (s *IndexingService) processFileChanges(files []string) {
 		// 索引新文件
 		chunk, err := s.indexer.AddFile(s.ctx, file)
 		if err != nil {
-			s.logger.Error("failed to index file", err, map[string]any{"file": file})
+			s.logger.Error("failed to index file", err, "file", file)
 			continue
 		}
 
@@ -412,16 +399,10 @@ func (s *IndexingService) processFileChanges(files []string) {
 		s.mu.Unlock()
 
 		if err := s.appendIndexedFile(file); err != nil {
-			s.logger.Warn("failed to record indexed file", map[string]any{
-				"file":  file,
-				"error": err.Error(),
-			})
+		s.logger.Warn("failed to record indexed file", "file", file, "error", err.Error())
 		}
 
-		s.logger.Info("file indexed successfully", map[string]any{
-			"file":     file,
-			"chunk_id": chunk.ID,
-		})
+		s.logger.Info("file indexed successfully", "file", file, "chunk_id", chunk.ID)
 	}
 }
 

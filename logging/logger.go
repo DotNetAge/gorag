@@ -2,23 +2,18 @@
 // It offers a simple, flexible logging interface with support for multiple log levels,
 // file and console output, and structured field logging.
 //
-// The package provides two main implementations:
+// The API is designed to mirror uber-go/zap's calling convention:
+//
+//	logger.Info("server started", "port", 8080, "host", "localhost")
+//	logger.Warn("slow request", "duration", 2.5*time.Second)
+//	logger.Error("connection failed", err, "addr", "127.0.0.1:3306")
+//	logger.Debug("cache hit", "key", userID)
+//
+// The package provides three main implementations:
 //   - Console logger: Outputs to stdout with minimal formatting
 //   - File logger: Writes to a file with configurable log level
 //   - No-op logger: Discards all log output (useful for testing)
-//
-// Example usage:
-//
-//	// Create a console logger
-//	logger := logging.DefaultConsoleLogger()
-//	logger.Info("Application started", map[string]any{"version": "1.0"})
-//
-//	// Create a file logger with debug level
-//	logger, err := logging.DefaultFileLogger("app.log", logging.WithLevel(logging.DEBUG))
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer logger.(*logging.defaultLogger).Close()
+//   - Zap logger: High-performance logger with log rotation (requires zap dependency)
 package logging
 
 import (
@@ -35,24 +30,19 @@ type Level int
 // Messages with a level below the configured threshold will not be logged.
 const (
 	// DEBUG level is for detailed debugging information.
-	// Typically enabled during development or troubleshooting.
 	DEBUG Level = iota
 
 	// INFO level is for general operational information.
-	// Suitable for production use to track normal operations.
 	INFO
 
 	// WARN level is for warning messages that indicate potential issues.
-	// Not errors, but situations that might need attention.
 	WARN
 
 	// ERROR level is for error messages indicating failures.
-	// Should be used for errors that affect operation but are recoverable.
 	ERROR
 )
 
 // String returns the string representation of the log level.
-// Returns "DEBUG", "INFO", "WARN", "ERROR", or "UNKNOWN" for invalid levels.
 func (l Level) String() string {
 	switch l {
 	case DEBUG:
@@ -69,48 +59,28 @@ func (l Level) String() string {
 }
 
 // Logger defines the interface for structured logging.
-// Implementations should support multiple log levels and structured field logging.
+// All methods accept optional key-value pairs (alternating string keys and any values),
+// following the same convention as uber-go/zap.
 //
-// All methods accept optional fields as map[string]any for structured logging.
 // Example:
 //
-//	logger.Info("User logged in", map[string]any{
-//	    "user_id": 123,
-//	    "ip": "192.168.1.1",
-//	})
+//	logger.Info("user logged in", "user_id", 123, "ip", "192.168.1.1")
+//	logger.Error("database error", err, "query", sql)
+//	logger.Warn("rate limit approaching", "remaining", 5)
+//	logger.Debug("processing chunk", "chunkID", chunk.ID)
 type Logger interface {
-	// Info logs an informational message.
-	// Use for general operational messages.
-	//
-	// Parameters:
-	//   - msg: The log message
-	//   - fields: Optional structured fields (can be omitted or nil)
-	Info(msg string, fields ...map[string]any)
+	// Info logs an informational message with optional key-value pairs.
+	Info(msg string, keyvals ...any)
 
-	// Error logs an error message with the associated error.
-	// The error is automatically included in the fields.
-	//
-	// Parameters:
-	//   - msg: The log message describing the error context
-	//   - err: The error that occurred (can be nil)
-	//   - fields: Optional additional structured fields
-	Error(msg string, err error, fields ...map[string]any)
+	// Error logs an error message. The error is automatically included in the output.
+	// Additional key-value pairs can be provided after the error.
+	Error(msg string, err error, keyvals ...any)
 
-	// Debug logs a debug message.
-	// Use for detailed information useful during development.
-	//
-	// Parameters:
-	//   - msg: The debug message
-	//   - fields: Optional structured fields
-	Debug(msg string, fields ...map[string]any)
+	// Debug logs a debug message with optional key-value pairs.
+	Debug(msg string, keyvals ...any)
 
-	// Warn logs a warning message.
-	// Use for potentially problematic situations that aren't errors.
-	//
-	// Parameters:
-	//   - msg: The warning message
-	//   - fields: Optional structured fields
-	Warn(msg string, fields ...map[string]any)
+	// Warn logs a warning message with optional key-value pairs.
+	Warn(msg string, keyvals ...any)
 }
 
 // defaultLogger is the standard implementation of Logger.
@@ -126,33 +96,13 @@ type defaultLogger struct {
 type Option func(*defaultLogger)
 
 // WithLevel returns an Option that sets the minimum log level.
-// Messages below this level will not be logged.
-//
-// Parameters:
-//   - level: The minimum log level to enable
-//
-// Returns:
-//   - Option: A configuration function for the logger
-//
-// Example:
-//
-//	logger, _ := logging.DefaultFileLogger("app.log", logging.WithLevel(logging.DEBUG))
 func WithLevel(level Level) Option {
 	return func(l *defaultLogger) {
 		l.level = level
 	}
 }
 
-// DefaultConsoleLogger creates a logger that writes to stdout.
-// It uses INFO level by default and outputs without timestamps or prefixes.
-//
-// Returns:
-//   - Logger: A logger writing to standard output
-//
-// Example:
-//
-//	logger := logging.DefaultConsoleLogger()
-//	logger.Info("Server started on port 8080")
+// DefaultConsoleLogger creates a logger that writes to stdout with INFO level.
 func DefaultConsoleLogger() Logger {
 	return &defaultLogger{
 		file:   os.Stdout,
@@ -163,22 +113,6 @@ func DefaultConsoleLogger() Logger {
 
 // DefaultFileLogger creates a logger that writes to a file.
 // The file is created if it doesn't exist, and appended to if it does.
-//
-// Parameters:
-//   - filePath: Path to the log file
-//   - opts: Optional configuration options (e.g., WithLevel)
-//
-// Returns:
-//   - Logger: A logger writing to the specified file
-//   - error: Any error that occurred while opening the file
-//
-// Example:
-//
-//	logger, err := logging.DefaultFileLogger("app.log", logging.WithLevel(logging.DEBUG))
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer logger.(*logging.defaultLogger).Close()
 func DefaultFileLogger(filePath string, opts ...Option) (Logger, error) {
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
@@ -200,71 +134,42 @@ func DefaultFileLogger(filePath string, opts ...Option) (Logger, error) {
 }
 
 // log writes a formatted log message if the level meets the threshold.
-// It formats fields as key=value pairs appended to the message.
-func (l *defaultLogger) log(level Level, msg string, fields map[string]any) {
+// keyvals are alternating key-value pairs: "key1", val1, "key2", val2, ...
+func (l *defaultLogger) log(level Level, msg string, keyvals []any) {
 	if level < l.level {
 		return
 	}
 
-	if fields == nil {
-		fields = make(map[string]any)
-	}
-
 	var fieldStr string
-	for k, v := range fields {
-		fieldStr += fmt.Sprintf(" %s=%v", k, v)
+	for i := 0; i+1 < len(keyvals); i += 2 {
+		fieldStr += fmt.Sprintf(" %s=%v", keyvals[i], keyvals[i+1])
 	}
 
 	l.logger.Printf("[%s] %s%s", level.String(), msg, fieldStr)
 }
 
-// Info logs an informational message with optional structured fields.
-func (l *defaultLogger) Info(msg string, fields ...map[string]any) {
-	var f map[string]any
-	if len(fields) > 0 {
-		f = fields[0]
-	}
-	l.log(INFO, msg, f)
+func (l *defaultLogger) Info(msg string, keyvals ...any) {
+	l.log(INFO, msg, keyvals)
 }
 
-// Error logs an error message with the error and optional structured fields.
-// The error is automatically added to the fields with key "error".
-func (l *defaultLogger) Error(msg string, err error, fields ...map[string]any) {
-	f := make(map[string]any)
+func (l *defaultLogger) Error(msg string, err error, keyvals ...any) {
+	kvs := make([]any, 0, 2+len(keyvals))
 	if err != nil {
-		f["error"] = err.Error()
+		kvs = append(kvs, "error", err.Error())
 	}
-	if len(fields) > 0 {
-		for k, v := range fields[0] {
-			f[k] = v
-		}
-	}
-	l.log(ERROR, msg, f)
+	kvs = append(kvs, keyvals...)
+	l.log(ERROR, msg, kvs)
 }
 
-// Debug logs a debug message with optional structured fields.
-func (l *defaultLogger) Debug(msg string, fields ...map[string]any) {
-	var f map[string]any
-	if len(fields) > 0 {
-		f = fields[0]
-	}
-	l.log(DEBUG, msg, f)
+func (l *defaultLogger) Debug(msg string, keyvals ...any) {
+	l.log(DEBUG, msg, keyvals)
 }
 
-// Warn logs a warning message with optional structured fields.
-func (l *defaultLogger) Warn(msg string, fields ...map[string]any) {
-	var f map[string]any
-	if len(fields) > 0 {
-		f = fields[0]
-	}
-	l.log(WARN, msg, f)
+func (l *defaultLogger) Warn(msg string, keyvals ...any) {
+	l.log(WARN, msg, keyvals)
 }
 
 // Close closes the underlying file if this is a file logger.
-// Should be called when the logger is no longer needed.
-//
-// Returns:
-//   - error: Any error that occurred while closing the file
 func (l *defaultLogger) Close() error {
 	return l.file.Close()
 }
@@ -273,15 +178,11 @@ func (l *defaultLogger) Close() error {
 type noopLogger struct{}
 
 // DefaultNoopLogger creates a logger that discards all output.
-// Useful for testing or when logging should be disabled.
-//
-// Returns:
-//   - Logger: A logger that does nothing
 func DefaultNoopLogger() Logger {
 	return &noopLogger{}
 }
 
-func (l *noopLogger) Info(string, ...map[string]any)         {}
-func (l *noopLogger) Error(string, error, ...map[string]any) {}
-func (l *noopLogger) Debug(string, ...map[string]any)        {}
-func (l *noopLogger) Warn(string, ...map[string]any)         {}
+func (l *noopLogger) Info(string, ...any)         {}
+func (l *noopLogger) Error(string, error, ...any) {}
+func (l *noopLogger) Debug(string, ...any)        {}
+func (l *noopLogger) Warn(string, ...any)         {}

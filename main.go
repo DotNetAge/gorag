@@ -11,6 +11,7 @@ import (
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedder"
 	"github.com/DotNetAge/gorag/indexer"
+	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/store/doc/bleve"
 	"github.com/DotNetAge/gorag/store/graph/gograph"
 	"github.com/DotNetAge/gorag/store/vector/govector"
@@ -256,7 +257,7 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 
 	llm := createLLM()
 
-	idx, err := NewHybridIndexer(vectorStore, graphStore, fullTextStore, llm, clip)
+	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, llm, clip)
 	if err != nil {
 		slog.Error("Failed to init indexer", "error", err)
 		return nil, err
