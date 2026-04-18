@@ -23,6 +23,17 @@ type HybridIndexer struct {
 	mu       sync.RWMutex
 	logger   logging.Logger
 	client   chat.Client
+	cacheStore core.CacheStore // 图索引器的缓存（依赖注入）
+}
+
+// HybridOption HybridIndexer 的可选配置
+type HybridOption func(*HybridIndexer)
+
+// WithCacheStore 设置图索引器的缓存（依赖注入 core.CacheStore 接口）
+func WithCacheStore(cache core.CacheStore) HybridOption {
+	return func(h *HybridIndexer) {
+		h.cacheStore = cache
+	}
 }
 
 // NewHybridIndexer 创建混合索引器
@@ -32,7 +43,8 @@ func NewHybridIndexer(
 	graphStore core.GraphStore,
 	docStore core.FullTextStore,
 	client chat.Client,
-	embedder core.Embedder) (*HybridIndexer, error) {
+	embedder core.Embedder,
+	opts ...HybridOption) (*HybridIndexer, error) {
 
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -53,6 +65,10 @@ func NewHybridIndexer(
 		client:   client,
 	}
 
+	for _, opt := range opts {
+		opt(h)
+	}
+
 	semanticIndexer := indexer.NewSemanticIndexer(
 		vectorStore,
 		embedder,
@@ -66,7 +82,12 @@ func NewHybridIndexer(
 	}
 
 	if client != nil && graphStore != nil {
-		graphIndexer := indexer.NewGraphIndexer(graphStore, client)
+		var graphOpts []any
+		graphOpts = append(graphOpts, client)
+		if h.cacheStore != nil {
+			graphOpts = append(graphOpts, indexer.WithCache(h.cacheStore))
+		}
+		graphIndexer := indexer.NewGraphIndexer(graphStore, graphOpts...)
 		h.AddIndexer(semanticIndexer, 0.7)
 		h.AddIndexer(fulltextIndexer, 0.2)
 		h.AddIndexer(graphIndexer, 0.1)
@@ -231,9 +252,7 @@ func (h *HybridIndexer) Search(ctx context.Context, query core.Query) ([]core.Hi
 		snaps = append(snaps, indexerSnap{name: name, idx: idx})
 	}
 	weightsSnap := make(map[string]float32, len(h.weights))
-	for k, v := range h.weights {
-		weightsSnap[k] = v
-	}
+	maps.Copy(weightsSnap, h.weights)
 	h.mu.RUnlock()
 
 	if len(snaps) == 0 {
@@ -296,13 +315,52 @@ func (h *HybridIndexer) Search(ctx context.Context, query core.Query) ([]core.Hi
 		return nil, errs[0]
 	}
 
-	if graphIndexer != nil && len(chunkIDs) > 0 {
-		graphHits, err := graphIndexer.SearchByChunkIDs(ctx, chunkIDs, 1, 10)
-		if err == nil && len(graphHits) > 0 {
-			results = append(results,
-				*result.NewSource("graph",
-					weightsSnap["graph"],
-					graphHits))
+	if graphIndexer != nil {
+		// 查询路由：根据查询特征选择图搜索策略
+		router := querypkg.NewQueryRouter()
+		mode := router.Route(query.Raw())
+
+		switch mode {
+		case core.SearchModeGlobal:
+			// Global Search：通过社区摘要检索（不依赖 chunkIDs）
+			globalHits, err := graphIndexer.SearchGlobal(ctx, query.Raw(), 0)
+			if err == nil && len(globalHits) > 0 {
+				results = append(results,
+					*result.NewSource("graph",
+						weightsSnap["graph"],
+						globalHits))
+			}
+		case core.SearchModeHybrid:
+			// Hybrid/DRIFT：社区摘要 + 多跳遍历
+			// Global 部分不依赖 chunkIDs
+			globalHits, err := graphIndexer.SearchGlobal(ctx, query.Raw(), 0)
+			if err == nil && len(globalHits) > 0 {
+				results = append(results,
+					*result.NewSource("graph_global",
+						weightsSnap["graph"]*0.5,
+						globalHits))
+			}
+			// Local 部分依赖 chunkIDs
+			if len(chunkIDs) > 0 {
+				graphHits, err := graphIndexer.SearchByChunkIDs(ctx, chunkIDs, 1, 10)
+				if err == nil && len(graphHits) > 0 {
+					results = append(results,
+						*result.NewSource("graph_local",
+							weightsSnap["graph"]*0.5,
+							graphHits))
+				}
+			}
+		default:
+			// Local Search：多跳遍历（依赖 chunkIDs）
+			if len(chunkIDs) > 0 {
+				graphHits, err := graphIndexer.SearchByChunkIDs(ctx, chunkIDs, 1, 10)
+				if err == nil && len(graphHits) > 0 {
+					results = append(results,
+						*result.NewSource("graph",
+							weightsSnap["graph"],
+							graphHits))
+				}
+			}
 		}
 	}
 

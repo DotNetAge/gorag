@@ -1,5 +1,7 @@
 package core
 
+import "context"
+
 // Node represents a graph node entity in the RAG system.
 // In GraphRAG, nodes are derived from text chunks and serve as an index layer.
 // Unified entity structure combining advantages from Entity design.
@@ -58,53 +60,53 @@ type Edge struct {
 // 	Confidence    float32 `json:"confidence,omitempty"`
 // }
 
-// // Community represents a detected community in the knowledge graph.
-// // Communities are hierarchical groups of related nodes, enabling global search.
-// type Community struct {
-// 	ID       string   `json:"id"`                  // Unique identifier for the community
-// 	Level    int      `json:"level"`               // Hierarchy level (0 = finest granularity)
-// 	NodeIDs  []string `json:"node_ids"`            // Node IDs in this community
-// 	EdgeIDs  []string `json:"edge_ids"`            // Edge IDs in this community
-// 	ParentID string   `json:"parent_id,omitempty"` // Parent community ID (for hierarchy)
+// Community represents a detected community in the knowledge graph.
+// Communities are hierarchical groups of related nodes, enabling global search.
+type Community struct {
+	ID       string   `json:"id"`                  // Unique identifier for the community
+	Level    int      `json:"level"`               // Hierarchy level (0 = finest granularity)
+	NodeIDs  []string `json:"node_ids"`            // Node IDs in this community
+	EdgeIDs  []string `json:"edge_ids"`            // Edge IDs in this community
+	ParentID string   `json:"parent_id,omitempty"` // Parent community ID (for hierarchy)
 
-// 	// LLM-generated summary
-// 	Summary  string   `json:"summary,omitempty"`  // Community summary
-// 	Keywords []string `json:"keywords,omitempty"` // Key topics/concepts
+	// LLM-generated summary
+	Summary  string   `json:"summary,omitempty"`  // Community summary
+	Keywords []string `json:"keywords,omitempty"` // Key topics/concepts
 
-// 	// Source binding
-// 	SourceChunkIDs []string `json:"source_chunk_ids,omitempty"`
-// }
+	// Source binding
+	SourceChunkIDs []string `json:"source_chunk_ids,omitempty"`
+}
 
-// // SearchMode defines the search strategy for GraphRAG retrieval.
-// type SearchMode string
+// SearchMode defines the search strategy for GraphRAG retrieval.
+type SearchMode string
 
-// const (
-// 	// SearchModeLocal uses graph traversal from extracted entities.
-// 	// Best for: specific questions about entities and their relationships.
-// 	SearchModeLocal SearchMode = "local"
+const (
+	// SearchModeLocal uses graph traversal from extracted entities.
+	// Best for: specific questions about entities and their relationships.
+	SearchModeLocal SearchMode = "local"
 
-// 	// SearchModeGlobal uses community summaries for macro-level queries.
-// 	// Best for: "What are the main themes?" type questions.
-// 	SearchModeGlobal SearchMode = "global"
+	// SearchModeGlobal uses community summaries for macro-level queries.
+	// Best for: "What are the main themes?" type questions.
+	SearchModeGlobal SearchMode = "global"
 
-// 	// SearchModeHybrid combines local and global search with vector search.
-// 	// Best for: complex queries needing both specific facts and context.
-// 	SearchModeHybrid SearchMode = "hybrid"
-// )
+	// SearchModeHybrid combines local and global search with vector search.
+	// Best for: complex queries needing both specific facts and context.
+	SearchModeHybrid SearchMode = "hybrid"
+)
 
-// // CommunityMatch represents a matched community during global search.
-// type CommunityMatch struct {
-// 	CommunityID string   `json:"community_id"`
-// 	Score       float32  `json:"score"`
-// 	Summary     string   `json:"summary"`
-// 	Keywords    []string `json:"keywords"`
-// }
+// CommunityMatch represents a matched community during global search.
+type CommunityMatch struct {
+	CommunityID string   `json:"community_id"`
+	Score       float32  `json:"score"`
+	Summary     string   `json:"summary"`
+	Keywords    []string `json:"keywords"`
+}
 
-// // CommunityDetector defines the interface for community detection algorithms.
-// type CommunityDetector interface {
-// 	// Detect identifies communities in the graph and returns them hierarchically.
-// 	Detect(ctx context.Context, graphStore GraphStore) ([]*Community, error)
-// }
+// CommunityDetector defines the interface for community detection algorithms.
+type CommunityDetector interface {
+	// Detect identifies communities in the graph and returns them hierarchically.
+	Detect(ctx context.Context, graphStore GraphStore) ([]*Community, error)
+}
 
 // // TriplesExtractor extracts knowledge triples from text for graph construction.
 // // This is the core interface for GraphRAG indexing pipeline.

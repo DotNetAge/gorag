@@ -39,6 +39,16 @@ type GraphStore interface {
 	// GetCommunitySummaries fetches hierarchical community abstracts, which are core to Microsoft's GraphRAG paper.
 	GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error)
 
+	// GetMultiHopPaths performs multi-hop traversal from starting node IDs,
+	// optionally filtering by edge types. Returns discovered nodes and edges.
+	// depth controls how many hops to traverse (1 = direct neighbors only).
+	// limit caps the total number of results returned.
+	GetMultiHopPaths(ctx context.Context, nodeIDs []string, edgeTypes []string, depth int, limit int) ([]*Node, []*Edge, error)
+
+	// GetAllEdgeTypes returns all distinct edge types present in the graph.
+	// Useful for introspection and building UI filters.
+	GetAllEdgeTypes(ctx context.Context) ([]string, error)
+
 	// Close cleanly tears down Graph Store connections
 	Close(ctx context.Context) error
 }

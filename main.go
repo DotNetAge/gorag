@@ -12,6 +12,7 @@ import (
 	"github.com/DotNetAge/gorag/embedder"
 	"github.com/DotNetAge/gorag/indexer"
 	"github.com/DotNetAge/gorag/logging"
+	"github.com/DotNetAge/gorag/store/cache"
 	"github.com/DotNetAge/gorag/store/doc/bleve"
 	"github.com/DotNetAge/gorag/store/graph/gograph"
 	"github.com/DotNetAge/gorag/store/vector/govector"
@@ -64,7 +65,7 @@ func New(dataDir string, cfg *Config) (core.Indexer, error) {
 	}
 
 	// 4. 创建子目录
-	subDirs := []string{"vectors", "graphs", "fulltexts"}
+	subDirs := []string{"vectors", "graphs", "fulltexts", "caches"}
 	for _, subDir := range subDirs {
 		dirPath := filepath.Join(dataDir, subDir)
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
@@ -216,7 +217,12 @@ func createGraphIndexer(dataDir string) (core.Indexer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create graph store: %w", err)
 	}
-	return indexer.NewGraphIndexer(graphStore), nil
+	cacheStore, err := createCacheDB(dataDir)
+	if err != nil {
+		slog.Warn("Failed to create cache store, caching disabled", "error", err)
+		return indexer.NewGraphIndexer(graphStore), nil
+	}
+	return indexer.NewGraphIndexer(graphStore, indexer.WithCache(cacheStore)), nil
 }
 
 func createFulltextIndexer(dataDir string) (core.Indexer, error) {
@@ -256,7 +262,8 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 
 	llm := createLLM()
 
-	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, llm, clip)
+	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, llm, clip,
+		WithCacheStoreOrNil(dataDir))
 	if err != nil {
 		slog.Error("Failed to init indexer", "error", err)
 		return nil, err
@@ -316,4 +323,23 @@ func createGraphDB(dataDir string) (core.GraphStore, error) {
 	name := getName(dataDir)
 	graphDbFile := filepath.Join(dataDir, "graphs", name+".db")
 	return gograph.NewGraphStore(graphDbFile)
+}
+
+func createCachePath(dataDir string) string {
+	return filepath.Join(dataDir, "caches", getName(dataDir)+".db")
+}
+
+func createCacheDB(dataDir string) (core.CacheStore, error) {
+	return cache.NewBoltCache(createCachePath(dataDir))
+}
+
+// WithCacheStoreOrNil 创建缓存并返回 HybridOption；
+// 缓存创建失败时返回 nil option，不阻断索引器创建
+func WithCacheStoreOrNil(dataDir string) HybridOption {
+	cacheStore, err := createCacheDB(dataDir)
+	if err != nil {
+		slog.Warn("Failed to create cache store, caching disabled", "error", err)
+		return nil
+	}
+	return WithCacheStore(cacheStore)
 }
