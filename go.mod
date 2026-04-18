@@ -92,3 +92,6 @@ require (
 	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+// TODO: 发布前移除此 replace 指令，改用正式发布版本
+replace github.com/DotNetAge/gograph => ../gograph
