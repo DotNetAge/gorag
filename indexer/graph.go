@@ -60,61 +60,33 @@ func (g *GraphIndexer) Type() string {
 // 流程：分块 → LLM实体关系提取 → 图存储
 // 注意：如果没有 client，会跳过实体提取
 func (g *GraphIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
-	if g.client == nil {
-		// 没有 client，无法提取实体，只返回 chunk
-		chunks, err := GetChunks(content)
-		if err != nil {
-			return nil, err
-		}
-		if len(chunks) > 0 {
-			return chunks[0], nil
-		}
-		return nil, nil
-	}
-
 	chunks, err := GetChunks(content)
 	if err != nil {
 		return nil, err
 	}
-	for _, chunk := range chunks {
-		if err := g.buildChunk(ctx, chunk); err != nil {
-			return nil, err
-		}
+	if len(chunks) == 0 {
+		return nil, nil
 	}
-	if len(chunks) > 0 {
-		return chunks[0], nil
+	if err := g.IndexChunks(ctx, chunks); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return chunks[0], nil
 }
 
 // AddFile 从文件构建知识图谱（实现 core.Indexer 接口）
 // 注意：如果没有 client，会跳过实体提取
 func (g *GraphIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
-	if g.client == nil {
-		// 没有 client，无法提取实体，只返回 chunk
-		chunks, err := GetFileChunks(filePath)
-		if err != nil {
-			return nil, err
-		}
-		if len(chunks) > 0 {
-			return chunks[0], nil
-		}
-		return nil, nil
-	}
-
 	chunks, err := GetFileChunks(filePath)
 	if err != nil {
 		return nil, err
 	}
-	for _, chunk := range chunks {
-		if err := g.buildChunk(ctx, chunk); err != nil {
-			return nil, err
-		}
+	if len(chunks) == 0 {
+		return nil, nil
 	}
-	if len(chunks) > 0 {
-		return chunks[0], nil
+	if err := g.IndexChunks(ctx, chunks); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return chunks[0], nil
 }
 
 // NewQuery 创建图查询（实现 core.Indexer 接口）
@@ -495,6 +467,9 @@ func (g *GraphIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) er
 	}
 	return nil
 }
+
+// Ensure implementation of core.ChunkIndexer interface
+var _ core.ChunkIndexer = (*GraphIndexer)(nil)
 
 // Close 关闭图存储
 func (g *GraphIndexer) Close(ctx context.Context) error {

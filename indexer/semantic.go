@@ -42,10 +42,8 @@ func (s *semanticIndexer) Add(ctx context.Context, content string) (*core.Chunk,
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from content")
 	}
-	for _, chunk := range chunks {
-		if err := s.indexAndStore(ctx, chunk); err != nil {
-			return nil, err
-		}
+	if err := s.IndexChunks(ctx, chunks); err != nil {
+		return nil, err
 	}
 	return chunks[0], nil
 }
@@ -61,10 +59,8 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) (*core.C
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from file")
 	}
-	for _, chunk := range chunks {
-		if err := s.indexAndStore(ctx, chunk); err != nil {
-			return nil, err
-		}
+	if err := s.IndexChunks(ctx, chunks); err != nil {
+		return nil, err
 	}
 	return chunks[0], nil
 }
