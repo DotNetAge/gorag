@@ -20,14 +20,14 @@ const (
 	StrategyParentDoc core.ChunkStrategy = "parent_doc"
 )
 
-// Default configuration constants
+// Default configuration constants (based on NVIDIA 2025 RAG research: 512-1024 tokens sweet spot, ~15% overlap optimal)
 const (
-	DefaultChunkSize          = 800   // default chunk size in characters
-	DefaultOverlap            = 100   // default overlap in characters
+	DefaultChunkSize          = 1500  // default chunk size in characters (~500-600 tokens for Chinese text)
+	DefaultOverlap            = 225   // default overlap in characters (~15% of chunk size)
 	MinChunkSize              = 50    // minimum chunk size
 	MaxChunkSize              = 2000  // maximum chunk size
 	DefaultMaxSentences       = 5     // default max sentences per chunk
-	DefaultMaxParagraphs      = 3     // default max paragraphs per chunk
+	DefaultMaxParagraphs      = 15    // default max paragraphs per chunk (hard upper limit)
 	DefaultSimilarityThreshold = 0.7   // default similarity threshold for semantic chunking
 	DefaultParentSize         = 1500  // default parent chunk size
 	DefaultChildSize           = 400   // default child chunk size

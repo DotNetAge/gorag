@@ -50,8 +50,9 @@ func (ms *MarkdownStructurizer) Parse(raw core.Document) (*core.StructuredDocume
 	// 	"nodeCount":  countNodes(root),
 	// }
 	sd := &core.StructuredDocument{
-		Title: title,
-		Root:  root,
+		RawDoc: raw,
+		Title:  title,
+		Root:   root,
 	}
 
 	return sd.SetValue("total_lines", strings.Count(raw.GetContent(), "\n")+1).

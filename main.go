@@ -197,15 +197,15 @@ func createIndexerByName(name, dataDir, modelFile string) (core.Indexer, error) 
 }
 
 func createSemanticIndexer(dataDir, modelFile string) (core.Indexer, error) {
-	vectorStore, err := createVectorDB(dataDir, modelFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create vector store: %w", err)
-	}
-
-	// 创建 embedder
+	// 创建 embedder（全局唯一一次 ONNX 初始化）
 	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedder: %w", err)
+	}
+
+	vectorStore, err := createVectorDB(dataDir, modelFile, clip)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create vector store: %w", err)
 	}
 
 	return indexer.NewSemanticIndexer(vectorStore, clip), nil
@@ -229,8 +229,13 @@ func createFulltextIndexer(dataDir string) (core.Indexer, error) {
 
 func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, error) {
 
-	vectorStore, err := createVectorDB(dataDir, modelFile)
+	// 创建 embedder（全局唯一一次 ONNX 初始化）
+	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedder: %w", err)
+	}
 
+	vectorStore, err := createVectorDB(dataDir, modelFile, clip)
 	if err != nil {
 		slog.Error("Failed to init vector store", "error", err)
 		return nil, fmt.Errorf("failed to init vector store: %w", err)
@@ -247,12 +252,6 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 	if err != nil {
 		slog.Error("Failed to init fulltext store", "error", err)
 		return nil, err
-	}
-
-	// 创建 embedder
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 
 	llm := createLLM()
@@ -293,13 +292,8 @@ func createLLM() chat.Client {
 	return c
 }
 
-func createVectorDB(dataDir, modelFile string) (core.VectorStore, error) {
+func createVectorDB(dataDir string, modelFile string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {
 	name := filepath.Dir(dataDir)
-
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
-	if err != nil {
-		return nil, err
-	}
 
 	vectorDbFile := filepath.Join(dataDir, "vectors", name+".db")
 

@@ -63,9 +63,8 @@ func NewBGEEmbedder(opts ...BGEOption) (*BGEEmbedder, error) {
 		opt(cfg)
 	}
 
-	// 初始化 ONNX Runtime
-	ort.SetSharedLibraryPath(getORTSharedLibraryPath())
-	if err := ort.InitializeEnvironment(); err != nil {
+	// 初始化 ONNX Runtime（幂等，全局只执行一次）
+	if err := initONNX(); err != nil {
 		return nil, fmt.Errorf("failed to initialize ONNX Runtime: %w", err)
 	}
 

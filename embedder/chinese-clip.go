@@ -5,11 +5,25 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/DotNetAge/gorag/core"
 	"github.com/google/uuid"
 	ort "github.com/yalue/onnxruntime_go"
 )
+
+// onnxInitOnce 确保 ONNX Runtime 全局只初始化一次
+var onnxInitOnce sync.Once
+var onnxInitErr error
+
+// initONNX 幂等初始化 ONNX Runtime（全局只执行一次）
+func initONNX() error {
+	onnxInitOnce.Do(func() {
+		ort.SetSharedLibraryPath(getORTSharedLibraryPath())
+		onnxInitErr = ort.InitializeEnvironment()
+	})
+	return onnxInitErr
+}
 
 // ChineseClipOption 是 ChineseClipEmbedder 的配置选项
 type ChineseClipOption func(*chineseClipConfig)
@@ -51,9 +65,8 @@ func NewChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, er
 		opt(cfg)
 	}
 
-	// 初始化 ONNX Runtime
-	ort.SetSharedLibraryPath(getORTSharedLibraryPath())
-	if err := ort.InitializeEnvironment(); err != nil {
+	// 初始化 ONNX Runtime（幂等，全局只执行一次）
+	if err := initONNX(); err != nil {
 		return nil, fmt.Errorf("failed to initialize ONNX Runtime: %w", err)
 	}
 
