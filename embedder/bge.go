@@ -278,6 +278,16 @@ func newVector(chunk *core.Chunk, embedding []float32) *core.Vector {
 	meta["content"] = chunk.Content
 	meta["mime_type"] = chunk.MIMEType
 
+	// 将 ChunkMeta 信息存入 metadata，以便搜索时恢复
+	chunkMetaMap := map[string]any{
+		"index":         chunk.ChunkMeta.Index,
+		"start_pos":     chunk.ChunkMeta.StartPos,
+		"end_pos":       chunk.ChunkMeta.EndPos,
+		"heading_level": chunk.ChunkMeta.HeadingLevel,
+		"heading_path":  chunk.ChunkMeta.HeadingPath,
+	}
+	meta["chunk_meta"] = chunkMetaMap
+
 	return &core.Vector{
 		ID:       uuid.NewString(),
 		Values:   embedding,

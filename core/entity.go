@@ -123,8 +123,10 @@ type Chunk struct {
 
 // Hit 搜索结果结构
 type Hit struct {
-	ID      string  `json:"id"`      // 结果ID
-	Score   float32 `json:"score"`   // 相似度分数
-	Content string  `json:"content"` // 结果内容
-	DocID   string  `json:"doc_id"`  // 文档ID
+	ID        string         `json:"id"`          // 结果ID
+	Score     float32        `json:"score"`       // 相似度分数
+	Content   string         `json:"content"`     // 结果内容
+	DocID     string         `json:"doc_id"`      // 文档ID
+	Metadata  map[string]any `json:"metadata"`    // 扩展元数据（来自原 Chunk.Metadata）
+	ChunkMeta ChunkMeta      `json:"chunk_meta"`  // 分块固定元数据（来自原 Chunk.ChunkMeta）
 }

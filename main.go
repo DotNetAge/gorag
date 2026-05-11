@@ -35,16 +35,36 @@ const (
 	GORAG_MODEL      = "GORAG_MODEL"
 )
 
+type RAGOption func(*Config)
+
+func WithModelFile(modelFile string) RAGOption {
+	return func(cfg *Config) {
+		cfg.ModelFile = modelFile
+	}
+}
+
+func WithIndexType(indexType string) RAGOption {
+	return func(cfg *Config) {
+		cfg.Type = indexType
+	}
+}
+
+func WithName(name string) RAGOption {
+	return func(cfg *Config) {
+		cfg.Name = name
+	}
+}
+
 // New 创建新的 RAG 索引实例
 // 如果数据目录不存在则创建，生成配置文件和子目录结构
-func New(dataDir string, cfg *Config) (core.Indexer, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
+func New(dataDir string, opts ...RAGOption) (core.Indexer, error) {
+	cfg := &Config{
+		Name: "gorag",
+		Type: "hybrid",
 	}
 
-	// 设置默认值
-	if cfg.Type == "" {
-		cfg.Type = "hybrid"
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
 	// 1. 创建数据目录
@@ -57,6 +77,8 @@ func New(dataDir string, cfg *Config) (core.Indexer, error) {
 		if _, err := os.Stat(cfg.ModelFile); os.IsNotExist(err) {
 			return nil, fmt.Errorf("model file not found: %s", cfg.ModelFile)
 		}
+	} else {
+		return nil, fmt.Errorf("model file is empty")
 	}
 
 	// 3. 保存配置文件
@@ -260,7 +282,10 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 		return nil, err
 	}
 
-	llm := createLLM()
+	llm, err := createLLM()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LLM: %w", err)
+	}
 
 	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, llm, clip,
 		WithCacheStoreOrNil(dataDir))
@@ -275,14 +300,14 @@ func getName(dataDir string) string {
 	return filepath.Dir(dataDir)
 }
 
-func createLLM() chat.Client {
+func createLLM() (chat.Client, error) {
 	baseURL := os.Getenv(GORAG_BASE_URL)
 	apiKey := os.Getenv(GORAG_API_KEY)
 	authToken := os.Getenv(GORAG_AUTH_TOKEN)
 	model := os.Getenv(GORAG_MODEL)
 
 	if model == "" || baseURL == "" {
-		return nil
+		return nil, nil
 	}
 
 	c, err := openai.NewOpenAI(chat.Config{
@@ -293,10 +318,10 @@ func createLLM() chat.Client {
 	})
 
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
-	return c
+	return c, nil
 }
 
 func createVectorDB(dataDir string, modelFile string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {

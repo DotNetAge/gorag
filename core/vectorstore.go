@@ -57,6 +57,25 @@ type VectorStore interface {
 	//   - error: Any error that occurred during deletion
 	Delete(ctx context.Context, id string) error
 
+	// GetByDocID retrieves all vectors belonging to the same document by doc_id.
+	// This enables "knowledge traceability" — reconstructing the original document
+	// from individual chunks stored in the vector store.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - docID: The document ID to search for (from Chunk.DocID)
+	//
+	// Returns:
+	//   - []*Vector: All vectors belonging to the document (sorted by chunk index)
+	//   - error: Any error that occurred during retrieval
+	//
+	// Example usage:
+	//
+	//	vectors, err := store.GetByDocID(ctx, docID)
+	//	if err != nil { ... }
+	//	doc := ReconstructDocument(vectors)
+	GetByDocID(ctx context.Context, docID string) ([]*Vector, error)
+
 	// Close gracefully shuts down the vector store connection.
 	// It should release all resources and close any open connections.
 	//

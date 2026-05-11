@@ -3,6 +3,7 @@ package govector
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
@@ -271,4 +272,77 @@ func (s *Store) Close(ctx context.Context) error {
 		return s.storage.Close()
 	}
 	return nil
+}
+
+// GetByDocID retrieves all vectors belonging to the same document by doc_id.
+// Results are sorted by chunk_meta.index to enable document reconstruction.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - docID: The document ID to search for
+//
+// Returns:
+//   - []*core.Vector: All vectors belonging to the document, sorted by chunk index
+//   - error: Any error that occurred
+func (s *Store) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, error) {
+	if docID == "" {
+		return nil, fmt.Errorf("docID cannot be empty")
+	}
+
+	filter := &gvcore.Filter{
+		Must: []gvcore.Condition{{
+			Key:   "doc_id",
+			Match: gvcore.MatchValue{Value: docID},
+		}},
+	}
+
+	points, err := s.collection.GetPointsByFilter(filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get points by doc_id: %w", err)
+	}
+
+	vectors := make([]*core.Vector, 0, len(points))
+	for _, pt := range points {
+		chunkID := ""
+		if c, ok := pt.Payload["chunk_id"].(string); ok {
+			chunkID = c
+		}
+
+		metadata := make(map[string]any)
+		for k, v := range pt.Payload {
+			if k != "chunk_id" {
+				metadata[k] = v
+			}
+		}
+
+		vectors = append(vectors, &core.Vector{
+			ID:       pt.ID,
+			Values:   pt.Vector,
+			ChunkID:  chunkID,
+			Metadata: metadata,
+		})
+	}
+
+	// Sort by chunk_meta.index for document reconstruction
+	sort.Slice(vectors, func(i, j int) bool {
+		return extractChunkIndex(vectors[i]) < extractChunkIndex(vectors[j])
+	})
+
+	return vectors, nil
+}
+
+// extractChunkIndex extracts the chunk index from a Vector's Metadata["chunk_meta"].map["index"].
+func extractChunkIndex(v *core.Vector) int {
+	if v == nil || v.Metadata == nil {
+		return 0
+	}
+	cm, ok := v.Metadata["chunk_meta"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	index, ok := cm["index"].(float64)
+	if !ok {
+		return 0
+	}
+	return int(index)
 }

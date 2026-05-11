@@ -408,8 +408,8 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 
 // GetCommunitySummaries retrieves community summaries at the specified level.
 func (s *gographStore) GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error) {
-	query := fmt.Sprintf("MATCH (c:Community) WHERE c.level = %d RETURN c.id as id, c.summary as summary, c.keywords as keywords, c.nodes as nodes", level)
-	results, err := s.Query(ctx, query, nil)
+	query := `MATCH (c:Community) WHERE c.level = $level RETURN c.id as id, c.summary as summary, c.keywords as keywords, c.nodes as nodes`
+	results, err := s.Query(ctx, query, map[string]any{"level": level})
 	if err != nil {
 		return []map[string]any{}, nil
 	}

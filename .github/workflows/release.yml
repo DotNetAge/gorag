@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ''
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ''
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: '.exe'
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version: '1.25.1'
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          OUTPUT_NAME="gorag_${VERSION}_${GOOS}_${GOARCH}${matrix.ext}"
+          
+          go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd
+          
+          echo "Built: ${OUTPUT_NAME}"
+          ls -la "${OUTPUT_NAME}"
+
+      - name: Create tarball
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -j "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.exe"
+          else
+            tar -czf "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          fi
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: gorag ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            gorag_v*.tar.gz
+            gorag_v*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

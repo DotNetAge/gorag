@@ -2,11 +2,13 @@ module github.com/DotNetAge/gorag
 
 go 1.25.1
 
+// replace github.com/DotNetAge/govector => ../govector
+
 require (
 	github.com/BurntSushi/toml v1.2.1
 	github.com/DotNetAge/gochat v0.2.2
 	github.com/DotNetAge/gograph v0.2.1
-	github.com/DotNetAge/govector v0.1.4
+	github.com/DotNetAge/govector v0.1.5
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/blevesearch/bleve v1.0.14
 	github.com/fsnotify/fsnotify v1.9.0
@@ -19,6 +21,7 @@ require (
 	github.com/unidoc/unipdf/v3 v3.55.0
 	github.com/yalue/onnxruntime_go v1.27.0
 	github.com/zoomio/stopwords v0.11.0
+	go.etcd.io/bbolt v1.4.3
 	go.uber.org/zap v1.27.1
 	golang.org/x/image v0.25.0
 	golang.org/x/net v0.50.0
@@ -64,6 +67,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -82,8 +86,9 @@ require (
 	github.com/vcaesar/cedar v0.30.0 // indirect
 	github.com/viterin/partial v1.1.0 // indirect
 	github.com/viterin/vek v0.4.2 // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/willf/bitset v1.1.10 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
@@ -95,3 +100,5 @@ require (
 
 // TODO: 发布前移除此 replace 指令，改用正式发布版本
 replace github.com/DotNetAge/gograph => ../gograph
+
+replace github.com/DotNetAge/govector => ../govector

@@ -111,17 +111,21 @@ func containsChunkID(hits []core.Hit, chunkID string) bool {
 // =============================================================================
 
 func TestNew_HybridIndexer(t *testing.T) {
-	cfg := &Config{
-		Name:      testName,
-		Type:      testType,
-		ModelFile: testModel,
-	}
+	// cfg := &Config{
+	// 	Name:      testName,
+	// 	Type:      testType,
+	// 	ModelFile: testModel,
+	// }
 
 	// 清理旧数据（确保测试从干净状态开始）
 	_ = os.RemoveAll(testDataPath)
 
 	// 调用 New
-	idx, err := New(testDataPath, cfg)
+	idx, err := New(testDataPath,
+		WithIndexType(testType),
+		WithModelFile(testModel),
+		WithName(testName),
+	)
 	require.NoError(t, err, "New 应成功创建索引器")
 	require.NotNil(t, idx, "返回的 Indexer 不应为 nil")
 	defer safeClose(t, idx)

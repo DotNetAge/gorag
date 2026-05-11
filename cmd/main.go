@@ -113,7 +113,7 @@ func main() {
 	defaultCmd.Flags().BoolVar(&showDocID, "docid", true, "显示文档ID")
 	defaultCmd.Flags().IntVar(&contentMax, "max", 500, "内容最大显示长度")
 
-	rootCmd.AddCommand(initCmd, addCmd, watchCmd, searchCmd, defaultCmd)
+	rootCmd.AddCommand(initCmd, addCmd, infoCmd, watchCmd, searchCmd, defaultCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -171,17 +171,19 @@ func runInit(cmd *cobra.Command, args []string) {
 
 	ui.Section("创建 RAG 库")
 
-	cfg := &gorag.Config{
-		Name:      initName,
-		Type:      initType,
-		ModelFile: modelPath,
-	}
-
 	// 创建 RAG 库
 	spinner := ui.NewSpinner("正在初始化...")
 	spinner.Start()
 
-	idx, err := gorag.New(dataDir, cfg)
+	// 构建 RAGOption 列表
+	var opts []gorag.RAGOption
+	if initName != "" {
+		opts = append(opts, gorag.WithName(initName))
+	}
+	opts = append(opts, gorag.WithIndexType(initType))
+	opts = append(opts, gorag.WithModelFile(modelPath))
+
+	idx, err := gorag.New(dataDir, opts...)
 	if err != nil {
 		spinner.Stop()
 		ui.Error("初始化失败: %v", err)

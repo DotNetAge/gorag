@@ -26,10 +26,17 @@ func ExtractImageChunks(structured *core.StructuredDocument) []*core.Chunk {
 			DocID:     structured.RawDoc.GetID(),
 			MIMEType:  "image/jpeg", // 缩略图统一为 JPEG
 			Content:   base64.StdEncoding.EncodeToString(img.Data()),
-			Metadata:  map[string]any{
-				"image_index": i,
+			Metadata:  structured.RawDoc.GetMeta(),
+			ChunkMeta: core.ChunkMeta{
+				Index:        i,
+				StartPos:     0,
+				EndPos:       0,
+				HeadingLevel: 0,
+				HeadingPath:  []string{},
 			},
 		})
+		// 修复: 在 Metadata 中填入 image_index 的同时保留文档元数据
+		chunks[i].Metadata["image_index"] = i
 	}
 
 	return chunks

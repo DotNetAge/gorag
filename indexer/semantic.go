@@ -113,21 +113,52 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 	// 确保混合搜索 RRF 融合时能正确匹配
 	hits := make([]core.Hit, 0, len(results))
 	for i, vec := range results {
-		docID := ""
+		hit := core.Hit{
+			ID:    vec.ChunkID,
+			Score: scores[i],
+			Content: s.extractChunkContent(vec),
+		}
+
+		// 从 Vector.Metadata 中提取元信息
 		if vec.Metadata != nil {
+			// 提取 doc_id
 			if d, ok := vec.Metadata["doc_id"].(string); ok {
-				docID = d
+				hit.DocID = d
+			}
+
+			// 提取完整 metadata（排除内部使用字段）
+			hit.Metadata = extractMetadata(vec.Metadata)
+
+			// 提取 chunk_meta
+			if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
+				hit.ChunkMeta = mapToChunkMeta(cm)
 			}
 		}
-		hits = append(hits, core.Hit{
-			ID:      vec.ChunkID, // 使用 ChunkID 而不是 UUID
-			Score:   scores[i],
-			Content: s.extractChunkContent(vec),
-			DocID:   docID,
-		})
+
+		hits = append(hits, hit)
 	}
 
 	return hits, nil
+}
+
+// GetByDocID retrieves all vectors belonging to the specified document.
+// This is used for document reconstruction (knowledge traceability).
+func (s *semanticIndexer) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, error) {
+	return s.db.GetByDocID(ctx, docID)
+}
+
+// ReconstructDocument reconstructs the original document from its stored chunks
+// using the knowledge traceability system (doc_id → all chunks → sort by index → concatenate).
+func (s *semanticIndexer) ReconstructDocument(ctx context.Context, docID string) (*core.ReconstructedDocument, error) {
+	vectors, err := s.db.GetByDocID(ctx, docID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vectors by doc_id %s: %w", docID, err)
+	}
+	if len(vectors) == 0 {
+		return nil, fmt.Errorf("no chunks found for doc_id %s", docID)
+	}
+	doc := core.ReconstructDocument(vectors)
+	return doc, nil
 }
 
 // resolveParentChunks 处理 ParentDoc 分块结果
@@ -230,6 +261,59 @@ func (s *semanticIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk)
 
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
 	return query.NewSemanticQuery(terms, s.embedder)
+}
+
+// extractMetadata 从 Vector.Metadata 中提取原始 Chunk.Metadata
+// 排除内部使用字段（doc_id, parent_id, content, mime_type, chunk_meta）
+func extractMetadata(meta map[string]any) map[string]any {
+	if meta == nil {
+		return nil
+	}
+
+	internalFields := map[string]bool{
+		"doc_id":      true,
+		"parent_id":   true,
+		"content":     true,
+		"mime_type":   true,
+		"chunk_meta":  true,
+	}
+
+	result := make(map[string]any)
+	for k, v := range meta {
+		if !internalFields[k] {
+			result[k] = v
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// mapToChunkMeta 将 map[string]any 转换为 core.ChunkMeta
+func mapToChunkMeta(m map[string]any) core.ChunkMeta {
+	cm := core.ChunkMeta{}
+	if index, ok := m["index"].(float64); ok {
+		cm.Index = int(index)
+	}
+	if startPos, ok := m["start_pos"].(float64); ok {
+		cm.StartPos = int(startPos)
+	}
+	if endPos, ok := m["end_pos"].(float64); ok {
+		cm.EndPos = int(endPos)
+	}
+	if headingLevel, ok := m["heading_level"].(float64); ok {
+		cm.HeadingLevel = int(headingLevel)
+	}
+	if headingPath, ok := m["heading_path"].([]any); ok {
+		for _, h := range headingPath {
+			if hs, ok := h.(string); ok {
+				cm.HeadingPath = append(cm.HeadingPath, hs)
+			}
+		}
+	}
+	return cm
 }
 
 // Ensure implementation of core.ChunkIndexer interface

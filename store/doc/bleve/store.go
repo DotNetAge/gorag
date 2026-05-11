@@ -70,7 +70,7 @@ func (s *BleveStore) Search(query string, topK int) ([]core.FullTextSearchResult
 	queryObj := blevedb.NewQueryStringQuery(query)
 	searchRequest := blevedb.NewSearchRequest(queryObj)
 	searchRequest.Size = topK
-	searchRequest.Fields = []string{"doc_id", "content"}
+	searchRequest.Fields = []string{"doc_id", "content", "metadata", "chunk_meta"}
 
 	result, err := s.index.Search(searchRequest)
 	if err != nil {
@@ -89,6 +89,14 @@ func (s *BleveStore) Search(query string, topK int) ([]core.FullTextSearchResult
 		}
 		if content, ok := hit.Fields["content"].(string); ok {
 			sr.Content = content
+		}
+		// 提取 metadata
+		if metadata, ok := hit.Fields["metadata"].(map[string]any); ok {
+			sr.Metadata = metadata
+		}
+		// 提取 chunk_meta
+		if chunkMetaMap, ok := hit.Fields["chunk_meta"].(map[string]any); ok {
+			sr.ChunkMeta = extractChunkMeta(chunkMetaMap)
 		}
 		results = append(results, sr)
 	}
@@ -113,4 +121,29 @@ func (s *BleveStore) Close() error {
 		return s.index.Close()
 	}
 	return nil
+}
+
+// extractChunkMeta 从 map 中提取 ChunkMeta
+func extractChunkMeta(m map[string]any) core.ChunkMeta {
+	cm := core.ChunkMeta{}
+	if index, ok := m["index"].(float64); ok {
+		cm.Index = int(index)
+	}
+	if startPos, ok := m["start_pos"].(float64); ok {
+		cm.StartPos = int(startPos)
+	}
+	if endPos, ok := m["end_pos"].(float64); ok {
+		cm.EndPos = int(endPos)
+	}
+	if headingLevel, ok := m["heading_level"].(float64); ok {
+		cm.HeadingLevel = int(headingLevel)
+	}
+	if headingPath, ok := m["heading_path"].([]any); ok {
+		for _, h := range headingPath {
+			if hs, ok := h.(string); ok {
+				cm.HeadingPath = append(cm.HeadingPath, hs)
+			}
+		}
+	}
+	return cm
 }

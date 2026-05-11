@@ -94,10 +94,12 @@ func (f *fulltextIndexer) Search(ctx context.Context, query core.Query) ([]core.
 	hits := make([]core.Hit, 0, len(results))
 	for _, r := range results {
 		hits = append(hits, core.Hit{
-			ID:      r.ID,
-			Score:   float32(r.Score),
-			DocID:   r.DocID,
-			Content: r.Content,
+			ID:        r.ID,
+			Score:     float32(r.Score),
+			DocID:     r.DocID,
+			Content:   r.Content,
+			Metadata:  r.Metadata,
+			ChunkMeta: r.ChunkMeta,
 		})
 	}
 	return hits, nil

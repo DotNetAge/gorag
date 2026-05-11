@@ -1,3 +1,11 @@
 - [ ] Result 的处理还是不完善，没有完全按照RAG的理论进行对应的处理
 - [ ] Query 的增强部分还有待改善
-- [ ] 还需要引入召回率评估系统
+- [ ] 需要确认HIT的Meta中带有Source字段
+- [ ] 增加XML的解析功能
+- [ ] 增加JSON的解析功能
+- [ ] 问题 : Add() 、 AddFile() 、 Remove() 、 IndexChunk() 、 IndexChunks() 方法中存在 大量重复代码 ——相同的索引器遍历、 ChunkIndexer 接口检查、错误聚合逻辑被复制了 5 次以上
+  - 位置 : hybrid.go:L149-L194 , hybrid.go:L384-L406
+  - 建议 : 抽取通用的 distributeToIndexers() 函数，接受一个操作函数作为参数
+- [ ] 问题 : Search() 方法约 140 行，包含并发搜索调度、图索引器路由、结果融合、重排序等多个阶段
+  - 建议 : 将图索引器搜索部分抽取为 searchGraphWithRouter() 方法
+  - 位置 : hybrid.go:L244-L381

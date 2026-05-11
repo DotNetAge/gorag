@@ -12,10 +12,12 @@ type FullTextStore interface {
 	Delete(chunkID string) error
 }
 
-// SearchResult 全文搜索结果
+// FullTextSearchResult 全文搜索结果
 type FullTextSearchResult struct {
-	ID      string  // chunk ID
-	Score   float64 // 相关性得分（由搜索引擎计算）
-	DocID   string  // 所属文档 ID
-	Content string  // 匹配的文本内容片段
+	ID        string         // chunk ID
+	Score     float64        // 相关性得分（由搜索引擎计算）
+	DocID     string         // 所属文档 ID
+	Content   string         // 匹配的文本内容片段
+	Metadata  map[string]any // 扩展元数据（来自原 Chunk.Metadata）
+	ChunkMeta ChunkMeta      // 分块固定元数据（来自原 Chunk.ChunkMeta）
 }
