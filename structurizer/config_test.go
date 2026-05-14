@@ -253,9 +253,9 @@ func TestConfigStructurizer_Types(t *testing.T) {
 			continue
 		}
 		if child.NodeType == "key_value" {
-			// 检查类型标注
-			if !containsType(child.Title, expectedType) {
-				t.Errorf("Field %s should have type %s, got %s", child.Title, expectedType, child.Title)
+			// 检查类型标注（类型信息存储在 Text 字段中）
+			if !containsType(child.Text, expectedType) {
+				t.Errorf("Field %s should have type %s, got text=%s", child.Title, expectedType, child.Text)
 			}
 		} else if child.NodeType != expectedType && child.NodeType != "array" && child.NodeType != "object" {
 			t.Errorf("Field %s NodeType = %s, want %s", child.Title, child.NodeType, expectedType)
@@ -326,8 +326,8 @@ func TestConfigStructurizer_DefaultTitle(t *testing.T) {
 	}
 
 	// 没有匹配的标题字段，应使用文件名
-	if result.Title != "config.json" {
-		t.Errorf("Title = %s, want config.json", result.Title)
+	if result.Title != "file.json" {
+		t.Errorf("Title = %s, want file.json", result.Title)
 	}
 }
 

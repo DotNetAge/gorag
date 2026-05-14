@@ -12,6 +12,9 @@ import (
 
 // TestChunkingTimingProfile 分块各阶段耗时分解
 func TestChunkingTimingProfile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping chunking timing benchmark in short mode")
+	}
 	contents := map[string]string{
 		"500chars":   generateTestContent(500),
 		"3000chars":  generateTestContent(3000),

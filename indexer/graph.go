@@ -79,7 +79,7 @@ func (g *GraphIndexer) Type() string {
 // Add 从内容构建知识图谱（实现 core.Indexer 接口）
 // 流程：分块 → LLM实体关系提取 → 图存储
 // 注意：如果没有 client，会跳过实体提取
-func (g *GraphIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+func (g *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	chunks, err := GetChunks(content)
 	if err != nil {
 		return nil, err
@@ -90,12 +90,12 @@ func (g *GraphIndexer) Add(ctx context.Context, content string) (*core.Chunk, er
 	if err := g.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
 // AddFile 从文件构建知识图谱（实现 core.Indexer 接口）
 // 注意：如果没有 client，会跳过实体提取
-func (g *GraphIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+func (g *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	chunks, err := GetFileChunks(filePath)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func (g *GraphIndexer) AddFile(ctx context.Context, filePath string) (*core.Chun
 	if err := g.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
 // NewQuery 创建图查询（实现 core.Indexer 接口）

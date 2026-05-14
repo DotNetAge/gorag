@@ -23,7 +23,8 @@ type HybridIndexer struct {
 	mu       sync.RWMutex
 	logger   logging.Logger
 	client   chat.Client
-	cacheStore core.CacheStore // 图索引器的缓存（依赖注入）
+	cacheStore core.CacheStore          // 图索引器的缓存（依赖注入）
+	closers    []func(context.Context) error // stores/indexers needing cleanup
 }
 
 // HybridOption HybridIndexer 的可选配置
@@ -94,6 +95,18 @@ func NewHybridIndexer(
 	} else {
 		h.AddIndexer(semanticIndexer, 0.8)
 		h.AddIndexer(fulltextIndexer, 0.2)
+		// When graph store is not used by any indexer, register it for cleanup
+		if graphStore != nil {
+			h.closers = append(h.closers, func(ctx context.Context) error {
+				return graphStore.Close(ctx)
+			})
+		}
+		// Also close cache store when not used by graph indexer (no LLM client)
+		if h.cacheStore != nil {
+			h.closers = append(h.closers, func(ctx context.Context) error {
+				return h.cacheStore.Close()
+			})
+		}
 	}
 
 	return h, nil
@@ -147,7 +160,7 @@ func (h *HybridIndexer) ListIndexers() []string {
 }
 
 // Add 将内容添加到所有索引器
-func (h *HybridIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
 	for _, idx := range h.indexers {
@@ -186,15 +199,15 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) (*core.Chunk, e
 	}
 
 	if len(partialErrs) > 0 {
-		return chunks[0], fmt.Errorf("index succeeded partially (%d/%d indexers failed): %w",
+		return chunks, fmt.Errorf("index succeeded partially (%d/%d indexers failed): %w",
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
 
-	return chunks[0], nil
+	return chunks, nil
 }
 
 // AddFile 将文件添加到所有索引器
-func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
 	for _, idx := range h.indexers {
@@ -233,11 +246,11 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) (*core.Chu
 	}
 
 	if len(partialErrs) > 0 {
-		return chunks[0], fmt.Errorf("indexfile succeeded partially (%d/%d indexers failed): %w",
+		return chunks, fmt.Errorf("indexfile succeeded partially (%d/%d indexers failed): %w",
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
 
-	return chunks[0], nil
+	return chunks, nil
 }
 
 // Search 从所有索引器搜索并融合结果
@@ -485,6 +498,13 @@ func (h *HybridIndexer) Close(ctx context.Context) error {
 				h.logger.Warn("close indexer failed", "indexer", idx.Name(), "error", err)
 				errs = append(errs, fmt.Errorf("%s: %w", idx.Name(), err))
 			}
+		}
+	}
+	// Close any extra resources not wrapped by indexers (e.g., graph store when no LLM)
+	for _, c := range h.closers {
+		if err := c(ctx); err != nil {
+			h.logger.Warn("close extra resource failed", "error", err)
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {

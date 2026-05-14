@@ -3,8 +3,19 @@ package structurizer
 import (
 	"testing"
 
+	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/document"
 )
+
+// collectAllBlocks 递归收集所有非根节点，用于扁平化的块检查
+func collectAllBlocks(node *core.StructureNode) []*core.StructureNode {
+	var result []*core.StructureNode
+	for _, child := range node.Children {
+		result = append(result, child)
+		result = append(result, collectAllBlocks(child)...)
+	}
+	return result
+}
 
 func TestPlainTextStructurizer_Parse(t *testing.T) {
 	tests := []struct {
@@ -140,19 +151,20 @@ This is the introduction.`,
 				t.Fatal("Parse() returned nil root")
 			}
 
-			// Check block count
-			if len(doc.Root.Children) != tt.wantBlocks {
-				t.Errorf("Parse() got %d blocks, want %d", len(doc.Root.Children), tt.wantBlocks)
+			// Check block count (recursive: content may be nested under headings)
+			allBlocks := collectAllBlocks(doc.Root)
+			if len(allBlocks) != tt.wantBlocks {
+				t.Errorf("Parse() got %d blocks, want %d", len(allBlocks), tt.wantBlocks)
 			}
 
-			// Check block types
+			// Check block types (recursive order)
 			for i, wantType := range tt.wantTypes {
-				if i >= len(doc.Root.Children) {
+				if i >= len(allBlocks) {
 					break
 				}
-				if doc.Root.Children[i].NodeType != wantType {
+				if allBlocks[i].NodeType != wantType {
 					t.Errorf("Parse() block[%d] type = %s, want %s",
-						i, doc.Root.Children[i].NodeType, wantType)
+						i, allBlocks[i].NodeType, wantType)
 				}
 			}
 		})

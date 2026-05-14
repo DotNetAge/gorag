@@ -31,7 +31,7 @@ func (s *semanticIndexer) Type() string {
 	return "semantic"
 }
 
-func (s *semanticIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+func (s *semanticIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	if content == "" {
 		return nil, fmt.Errorf("content cannot be empty")
 	}
@@ -45,10 +45,10 @@ func (s *semanticIndexer) Add(ctx context.Context, content string) (*core.Chunk,
 	if err := s.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
-func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("file path cannot be empty")
 	}
@@ -62,7 +62,7 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) (*core.C
 	if err := s.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
 // indexAndStore 计算 chunk 向量并存储到数据库
@@ -261,6 +261,11 @@ func (s *semanticIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk)
 
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
 	return query.NewSemanticQuery(terms, s.embedder)
+}
+
+// Close closes the underlying vector store to release resources (e.g., bbolt file locks)
+func (s *semanticIndexer) Close(ctx context.Context) error {
+	return s.db.Close(ctx)
 }
 
 // extractMetadata 从 Vector.Metadata 中提取原始 Chunk.Metadata

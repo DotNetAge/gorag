@@ -281,8 +281,8 @@ func helper() int {
 
 	// 验证元数据
 	for _, chunk := range chunks {
-		if chunk.MIMEType != "code" {
-			t.Errorf("Expected ContentType 'code', got '%s'", chunk.MIMEType)
+		if chunk.MIMEType != "text/x-go" && chunk.MIMEType != "code" {
+			t.Errorf("Expected ContentType 'text/x-go' or 'code', got '%s'", chunk.MIMEType)
 		}
 		if _, ok := chunk.Metadata["node_type"]; !ok {
 			t.Error("Missing node_type in metadata")

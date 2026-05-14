@@ -26,9 +26,9 @@ type Indexer interface {
 	// Returns:
 	//   - *Chunk: The chunk created from the content
 	//   - error: An error if the operation fails
-	Add(ctx context.Context, content string) (*Chunk, error)
+	Add(ctx context.Context, content string) ([]*Chunk, error)
 
-	AddFile(ctx context.Context, filePath string) (*Chunk, error)
+	AddFile(ctx context.Context, filePath string) ([]*Chunk, error)
 
 	NewQuery(terms string) Query
 

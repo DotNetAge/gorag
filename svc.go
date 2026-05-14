@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/indexer"
 	"github.com/DotNetAge/gorag/logging"
 	"github.com/fsnotify/fsnotify"
 )
@@ -184,7 +183,7 @@ func (s *IndexingService) Index() error {
 			failedCount++
 			s.logger.Error("failed to index file", result.err, "file", result.file)
 		} else {
-			s.logger.Info("file indexed successfully", "file", result.file, "chunk_id", result.chunkID, "chunk_count", result.count)
+			s.logger.Info("file indexed successfully", "file", result.file, "chunk_count", result.count)
 		}
 	}
 
@@ -204,7 +203,6 @@ func (s *IndexingService) Index() error {
 // indexResult 索引结果
 type indexResult struct {
 	file    string
-	chunkID string
 	count   int
 	err     error
 }
@@ -228,18 +226,15 @@ func (s *IndexingService) indexWorker(ctx context.Context, wg *sync.WaitGroup, j
 			}
 			s.mu.RUnlock()
 
-			// 执行索引
-			chunk, err := s.indexer.AddFile(ctx, file)
+			chunks, err := s.indexer.AddFile(ctx, file)
 			if err != nil {
 				results <- indexResult{file: file, err: err}
 				continue
 			}
 
-			// 获取 chunk ID 列表并记录
-			chunkIDs := s.recordFileChunks(ctx, file)
+			chunkIDs := s.recordFileChunks(file, chunks)
 			results <- indexResult{
 				file:    file,
-				chunkID: chunk.ID,
 				count:   len(chunkIDs),
 			}
 		}
@@ -392,13 +387,13 @@ func (s *IndexingService) processFileChanges(ctx context.Context, files []string
 		if exists {
 			// 已索引 → 更新（先删后加）
 			s.logger.Info("reindexing changed file", "file", file)
-			chunk, err := s.reindexFile(ctx, file)
+			chunks, err := s.reindexFile(ctx, file)
 			if err != nil {
 				s.logger.Error("failed to reindex file", err, "file", file)
 				continue
 			}
 			s.logger.Info("file reindexed", "file", file,
-				"chunk_count", s.getChunkCount(file), "first_chunk_id", chunk.ID)
+				"chunk_count", len(chunks), "first_chunk_id", chunks[0].ID)
 		} else {
 			// 新文件 → 直接索引
 			s.indexNewFile(ctx, file)
@@ -437,80 +432,50 @@ func (s *IndexingService) removeFileIndex(ctx context.Context, file string) erro
 }
 
 // reindexFile 更新文件索引（删除旧数据 → 重新分块索引）
-func (s *IndexingService) reindexFile(ctx context.Context, file string) (*core.Chunk, error) {
+func (s *IndexingService) reindexFile(ctx context.Context, file string) ([]*core.Chunk, error) {
 	// 1. 删除旧索引
 	if err := s.removeFileIndex(ctx, file); err != nil {
 		s.logger.Warn("partial failure removing old index, continuing with reindex",
 			"file", file, "error", err)
 	}
 
-	// 2. 预分块获取所有 chunk ID（记录映射关系）
-	chunks, err := indexer.GetFileChunks(file)
+	// 2. 执行索引（AddFile 内部完成分块，返回所有 chunk）
+	chunks, err := s.indexer.AddFile(ctx, file)
 	if err != nil {
-		return nil, fmt.Errorf("get chunks: %w", err)
+		return nil, err
 	}
 	if len(chunks) == 0 {
 		return nil, nil
 	}
 
-	// 3. 执行索引
-	chunk, err := s.indexer.AddFile(ctx, file)
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. 记录文件 → chunkIDs 映射
-	chunkIDs := make([]string, len(chunks))
-	for i, c := range chunks {
-		chunkIDs[i] = c.ID
-	}
-	s.mu.Lock()
-	s.indexedFiles[file] = &indexedDoc{
-		Chunks:    chunkIDs,
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-	s.mu.Unlock()
+	// 3. 记录文件 → chunkIDs 映射
+	s.recordFileChunks(file, chunks)
 
 	if err := s.saveIndexedFiles(); err != nil {
 		s.logger.Warn("failed to persist reindex record", "file", file, "error", err)
 	}
 
-	return chunk, nil
+	return chunks, nil
 }
 
 // indexNewFile 索引新文件并记录映射
 func (s *IndexingService) indexNewFile(ctx context.Context, file string) {
-	chunks, err := indexer.GetFileChunks(file)
+	chunks, err := s.indexer.AddFile(ctx, file)
 	if err != nil {
-		s.logger.Error("failed to get chunks", err, "file", file)
+		s.logger.Error("failed to index file", err, "file", file)
 		return
 	}
 	if len(chunks) == 0 {
 		return
 	}
 
-	chunk, err := s.indexer.AddFile(ctx, file)
-	if err != nil {
-		s.logger.Error("failed to index file", err, "file", file)
-		return
-	}
-
-	chunkIDs := make([]string, len(chunks))
-	for i, c := range chunks {
-		chunkIDs[i] = c.ID
-	}
-	s.mu.Lock()
-	s.indexedFiles[file] = &indexedDoc{
-		Chunks:    chunkIDs,
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-	s.mu.Unlock()
+	s.recordFileChunks(file, chunks)
 
 	if err := s.saveIndexedFiles(); err != nil {
 		s.logger.Warn("failed to persist indexed file record", "file", file, "error", err)
 	}
 
-	s.logger.Info("file indexed", "file", file, "chunk_count", len(chunkIDs), "first_chunk_id", chunk.ID)
+	s.logger.Info("file indexed", "file", file, "chunk_count", len(chunks), "first_chunk_id", chunks[0].ID)
 }
 
 // Reindex 重新索引指定文件（公开 API）
@@ -521,13 +486,7 @@ func (s *IndexingService) Reindex(ctx context.Context, file string) error {
 }
 
 // recordFileChunks 获取文件的 chunk IDs 并记录到内存（持久化由 Index 批量保存）
-func (s *IndexingService) recordFileChunks(_ context.Context, file string) []string {
-	chunks, err := indexer.GetFileChunks(file)
-	if err != nil {
-		s.logger.Warn("failed to get chunk IDs for recording", "file", file, "error", err)
-		return nil
-	}
-
+func (s *IndexingService) recordFileChunks(file string, chunks []*core.Chunk) []string {
 	chunkIDs := make([]string, len(chunks))
 	for i, c := range chunks {
 		chunkIDs[i] = c.ID
@@ -542,15 +501,6 @@ func (s *IndexingService) recordFileChunks(_ context.Context, file string) []str
 	return chunkIDs
 }
 
-// getChunkCount 获取文件的已索引 chunk 数量
-func (s *IndexingService) getChunkCount(file string) int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if doc, ok := s.indexedFiles[file]; ok {
-		return len(doc.Chunks)
-	}
-	return 0
-}
 
 // loadIndexedFiles 从 JSON 文件加载已索引记录，不存在时尝试从旧格式迁移
 func (s *IndexingService) loadIndexedFiles() error {

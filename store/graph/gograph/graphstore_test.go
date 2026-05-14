@@ -2,6 +2,8 @@ package gograph
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"os"
 	"testing"
 
@@ -9,6 +11,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	// gograph tests create pebble databases per-test, which is slow
+	if testing.Short() {
+		fmt.Println("skipping gograph tests in short mode")
+		return
+	}
+	os.Exit(m.Run())
+}
 
 func setupTestDB(t *testing.T) (*gographStore, func()) {
 	tmpPath := "/tmp/gograph_store_test_" + t.Name()
@@ -72,7 +84,7 @@ func TestUpsertNodes(t *testing.T) {
 	require.NotNil(t, retrievedNode)
 	assert.Equal(t, "node1", retrievedNode.ID)
 	assert.Equal(t, "Person", retrievedNode.Type)
-	assert.Equal(t, "Alice", retrievedNode.Properties["name"])
+	assert.Equal(t, "Alice", retrievedNode.Name)
 }
 
 func TestUpsertNodesEmpty(t *testing.T) {

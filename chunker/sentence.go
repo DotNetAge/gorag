@@ -73,7 +73,7 @@ func (c *SentenceChunker) Chunk(
 				DocID:    structured.RawDoc.GetID(),
 				MIMEType: structured.RawDoc.GetMimeType(),
 				Content:  content,
-				Metadata: structured.RawDoc.GetMeta(),
+				Metadata: copyMetadata(structured.RawDoc.GetMeta()),
 				ChunkMeta: core.ChunkMeta{
 					Index:        index,
 					StartPos:     startPos,
@@ -192,4 +192,17 @@ func (c *SentenceChunker) extractHeadingInfo(
 			break
 		}
 	}
+}
+
+
+// copyMetadata returns a shallow copy of a map[string]any
+func copyMetadata(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cpy := make(map[string]any, len(m))
+	for k, v := range m {
+		cpy[k] = v
+	}
+	return cpy
 }

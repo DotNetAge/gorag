@@ -37,14 +37,19 @@ func TestGoVectorStore(t *testing.T) {
 	err = store.Upsert(ctx, vectors)
 	assert.NoError(t, err)
 
+	// Capture the auto-generated IDs
+	id1 := vectors[0].ID
+	id2 := vectors[1].ID
+	chunkID1 := vectors[0].ChunkID
+
 	// 2. Search
 	query := []float32{0.9, 0.1, 0.0} // Close to Go
 
 	results, scores, err := store.Search(ctx, query, 1, nil)
 	assert.NoError(t, err)
 	assert.Len(t, results, 1)
-	assert.Equal(t, "1", results[0].ID)
-	assert.Equal(t, "chunk1", results[0].ChunkID)
+	assert.Equal(t, id1, results[0].ID)
+	assert.Equal(t, chunkID1, results[0].ChunkID)
 	assert.Equal(t, "doc1", results[0].Metadata["source"])
 	assert.Len(t, scores, 1)
 
@@ -54,15 +59,15 @@ func TestGoVectorStore(t *testing.T) {
 	resultsFilter, _, err := store.Search(ctx, []float32{0, 0, 0}, 1, filter)
 	assert.NoError(t, err)
 	assert.Len(t, resultsFilter, 1)
-	assert.Equal(t, "2", resultsFilter[0].ID)
+	assert.Equal(t, id2, resultsFilter[0].ID)
 
 	// 4. Delete
-	err = store.Delete(ctx, "1")
+	err = store.Delete(ctx, id1)
 	assert.NoError(t, err)
 
-	// Verify deletion
+	// Verify deletion (should only return id2)
 	results, _, err = store.Search(ctx, query, 5, nil)
 	assert.NoError(t, err)
 	assert.Len(t, results, 1)
-	assert.Equal(t, "2", results[0].ID) // Only 2 should remain
+	assert.Equal(t, id2, results[0].ID)
 }

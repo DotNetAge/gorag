@@ -70,6 +70,7 @@ func (c *ParagraphChunker) Chunk(
 		// 收集段落直到达到 chunkSize 或 maxParagraphs
 		var selected []int // 选中的段落索引
 		currentLen := 0
+		chunkSizeHit := false
 
 		for j := i; j < len(paragraphs); j++ {
 			paraLen := len(paragraphs[j])
@@ -80,6 +81,7 @@ func (c *ParagraphChunker) Chunk(
 
 			// 如果加入这段后超过 chunkSize，且已有足够内容，停止
 			if currentLen+addLen > c.chunkSize && len(selected) >= 1 && currentLen >= c.minChunkSize {
+				chunkSizeHit = true
 				break
 			}
 
@@ -105,13 +107,20 @@ func (c *ParagraphChunker) Chunk(
 		startPos := paraPositions[selected[0]]
 		endPos := paraPositions[selected[len(selected)-1]] + len(paragraphs[selected[len(selected)-1]])
 
+		// 复制 metadata 避免与其他 chunker 共享
+		meta := structured.RawDoc.GetMeta()
+		metaCopy := make(map[string]any, len(meta))
+		for k, v := range meta {
+			metaCopy[k] = v
+		}
+
 		chunk := &core.Chunk{
 			ID:       GenerateChunkID(structured.RawDoc.GetID(), index, content),
 			ParentID: "",
 			DocID:    structured.RawDoc.GetID(),
 			MIMEType: structured.RawDoc.GetMimeType(),
 			Content:  content,
-			Metadata: structured.RawDoc.GetMeta(),
+			Metadata: metaCopy,
 			ChunkMeta: core.ChunkMeta{
 				Index:        index,
 				StartPos:     startPos,
@@ -128,9 +137,9 @@ func (c *ParagraphChunker) Chunk(
 		chunks = append(chunks, chunk)
 		index++
 
-		// 应用 overlap：从最后一个选中段落向前回溯 overlap 字符
+		// 应用 overlap：仅当因 chunkSize 限制而停止时（非 maxParagraphs 上限）
 		nextStart := selected[len(selected)-1] + 1
-		if c.overlap > 0 && nextStart <= len(paragraphs) {
+		if c.overlap > 0 && nextStart <= len(paragraphs) && chunkSizeHit {
 			overlapUsed := 0
 			for k := len(selected) - 1; k >= 1; k-- { // k >= 1 确保至少前进一个段落
 				paraLen := len(paragraphs[selected[k]])

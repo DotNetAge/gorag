@@ -297,7 +297,7 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 }
 
 func getName(dataDir string) string {
-	return filepath.Dir(dataDir)
+	return filepath.Base(dataDir)
 }
 
 func createLLM() (chat.Client, error) {
@@ -325,7 +325,7 @@ func createLLM() (chat.Client, error) {
 }
 
 func createVectorDB(dataDir string, modelFile string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {
-	name := filepath.Dir(dataDir)
+	name := getName(dataDir)
 
 	vectorDbFile := filepath.Join(dataDir, "vectors", name+".db")
 

@@ -74,6 +74,15 @@ func (c *ParentDocChunker) Chunk(
 	parents = filterOutImageChunks(parents)
 	children = filterOutImageChunks(children)
 
+	// Copy metadata maps to avoid sharing between parent and child chunks
+	// (both sub-chunkers may reference the same RawDoc.GetMeta() map)
+	for _, p := range parents {
+		p.Metadata = copyMap(p.Metadata)
+	}
+	for _, c := range children {
+		c.Metadata = copyMap(c.Metadata)
+	}
+
 	// 3. Establish parent-child relationships
 	c.establishParentChildRelationships(parents, children)
 
@@ -173,4 +182,17 @@ func filterOutImageChunks(chunks []*core.Chunk) []*core.Chunk {
 		}
 	}
 	return result
+}
+
+
+// copyMap returns a shallow copy of a map[string]any
+func copyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cpy := make(map[string]any, len(m))
+	for k, v := range m {
+		cpy[k] = v
+	}
+	return cpy
 }

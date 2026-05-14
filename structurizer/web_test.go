@@ -8,6 +8,33 @@ import (
 	"github.com/DotNetAge/gorag/document"
 )
 
+// rawContentDoc 创建一个保留原始内容的文档，绕过 document.New 的变换逻辑
+func rawContentDoc(content, ext string) core.Document {
+	return &testRawDoc{
+		content: content,
+		ext:     ext,
+		source:  "file" + ext,
+		mime:    "text/" + ext,
+		meta:    make(map[string]any),
+	}
+}
+
+type testRawDoc struct {
+	content string
+	ext     string
+	source  string
+	mime    string
+	meta    map[string]any
+}
+
+func (d *testRawDoc) GetID() string               { return "" }
+func (d *testRawDoc) GetContent() string            { return d.content }
+func (d *testRawDoc) GetMimeType() string            { return d.mime }
+func (d *testRawDoc) GetMeta() map[string]any        { return d.meta }
+func (d *testRawDoc) GetImages() []core.Image        { return nil }
+func (d *testRawDoc) GetSource() string               { return d.source }
+func (d *testRawDoc) GetExt() string                  { return d.ext }
+
 func TestWebStructurizer_Parse_HTML(t *testing.T) {
 	htmlContent := `<!DOCTYPE html>
 <html>
@@ -31,7 +58,7 @@ func TestWebStructurizer_Parse_HTML(t *testing.T) {
 </html>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -80,7 +107,7 @@ func TestWebStructurizer_Parse_HTML_SkipScript(t *testing.T) {
 </html>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -122,7 +149,7 @@ func TestWebStructurizer_Parse_XML(t *testing.T) {
 </root>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(xmlContent, "text/xml")
+	doc := rawContentDoc(xmlContent, ".xml")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -170,7 +197,7 @@ func TestWebStructurizer_Parse_HTML_Nested(t *testing.T) {
 </html>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -216,7 +243,7 @@ func TestWebStructurizer_Parse_Table(t *testing.T) {
 </html>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -264,7 +291,7 @@ func TestWebStructurizer_Parse_Form(t *testing.T) {
 </html>`
 
 	ws := NewWebStructurizer()
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {
@@ -340,7 +367,7 @@ func TestWebStructurizer_CustomConfig(t *testing.T) {
 </body>
 </html>`
 
-	doc := document.New(htmlContent, "text/html")
+	doc := rawContentDoc(htmlContent, ".html")
 
 	result, err := ws.Parse(doc)
 	if err != nil {

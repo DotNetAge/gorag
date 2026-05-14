@@ -1,3 +1,5 @@
+//go:build integration
+
 package result
 
 import (
@@ -16,7 +18,6 @@ func TestCompressWithLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}
-	// c := NewCompresser(llm).WithLimit(2)
 
 	hits := []goragCore.Hit{
 		{ID: "1", DocID: "doc-a", Score: 0.9, Content: "这是一段非常长的文档内容...包含很多无关信息...用户张三今年25岁...他的银行账户余额是5000元...还有很多其他内容"},
@@ -51,7 +52,6 @@ func TestCompressSortsByScore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}
-	// c := NewCompresser(llm).WithLimit(2)
 
 	hits := []goragCore.Hit{
 		{ID: "low", Score: 0.3, Content: "低分内容"},
@@ -61,11 +61,9 @@ func TestCompressSortsByScore(t *testing.T) {
 
 	result, _ := Compress(2, llm, hits)
 
-	// limit=2，应只返回 top 2
 	if len(result) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(result))
 	}
-	// top 2 应该是 high 和 mid（按分数排序）
 	if result[0].ID != "high" || result[1].ID != "mid" {
 		t.Errorf("expected [high,mid], got [%s,%s]", result[0].ID, result[1].ID)
 	}
@@ -74,7 +72,6 @@ func TestCompressSortsByScore(t *testing.T) {
 // TestCompressDoesNotMutateInput 验证不修改输入切片
 func TestCompressDoesNotMutateInput(t *testing.T) {
 	llm, _ := ollama.NewOllamaClient(chat.Config{})
-	// c := NewCompresser(llm).WithLimit(1)
 	hits := []goragCore.Hit{{ID: "a", Score: 0.9, Content: "原始内容"}}
 	originalContent := hits[0].Content
 
@@ -91,15 +88,12 @@ func TestCompressPreservesKeyInformation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ollama client: %v", err)
 	}
-	// c := NewCompresser(llm).WithLimit(1)
 
-	// content := "According to the 2024 annual financial report, Company A achieved revenue of 50 billion RMB, a year-over-year growth of 25%, with employee count increasing from 8,000 to 10,000."
 	content := "根据2024年年度财务报告显示，公司A的营收达到了500亿元人民币，同比增长了25%，员工总数从去年的8000人增长到10000人。"
 	hits := []goragCore.Hit{{ID: "1", Content: content}}
 
 	result, _ := Compress(1, llm, hits)
 
-	// Key data should be preserved: 2024, 50 billion, 25%, 10,000
 	hasData := strings.Contains(result[0].Content, "50") ||
 		strings.Contains(result[0].Content, "25") ||
 		strings.Contains(result[0].Content, "10,000") || strings.Contains(result[0].Content, "10000")

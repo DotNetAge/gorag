@@ -30,6 +30,8 @@ func NewWebStructurizer() *WebStructurizer {
 			"svg": true, "math": true, "template": true,
 		},
 		InlineTags: map[string]bool{
+			// 结构标签，不作为独立节点，子节点上提
+			"html": true, "head": true, "body": true,
 			"span": true, "a": true, "strong": true, "em": true,
 			"b": true, "i": true, "u": true, "s": true,
 			"code": true, "kbd": true, "samp": true, "var": true,
@@ -44,7 +46,10 @@ func NewWebStructurizer() *WebStructurizer {
 // Parse 实现 Structurizer 接口
 func (w *WebStructurizer) Parse(doc core.Document) (*core.StructuredDocument, error) {
 	content := doc.GetContent()
-	ext := strings.ToLower(doc.GetExt())
+	if strings.TrimSpace(content) == "" {
+		return nil, fmt.Errorf("empty content")
+	}
+	ext := strings.TrimPrefix(strings.ToLower(doc.GetExt()), ".")
 
 	var root *core.StructureNode
 	var err error
@@ -83,7 +88,7 @@ func (w *WebStructurizer) Parse(doc core.Document) (*core.StructuredDocument, er
 		Root:   root,
 	}
 	sd.SetValue("file", doc.GetSource())
-	sd.SetValue("format", ext)
+	sd.SetValue("format", strings.TrimPrefix(ext, "."))
 	sd.SetValue("node_count", nodeCount)
 	return sd, nil
 }
@@ -192,8 +197,8 @@ func (w *WebStructurizer) createHTMLStructureNode(node *html.Node, depth int) *c
 		structNode.Title = w.extractTextContent(node)
 		structNode.Level = 6
 	case "title":
-		structNode.Title = w.extractTextContent(node)
-		structNode.Text = structNode.Title
+		structNode.Title = "title"
+		// Text is populated by TextNode processing below
 	case "img":
 		structNode.Title = attrs["alt"]
 		if structNode.Title == "" {

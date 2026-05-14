@@ -16,6 +16,9 @@ var funcDict = map[string]ParseFunc{
 	".jpg":  ParseImage,
 	".jpeg": ParseImage,
 	".png":  ParseImage,
+	".epub": ParseEPUB,
+	".eml":  ParseEML,
+	".msg":  ParseMSG,
 }
 
 var mimeDict = map[string]ParseFunc{
@@ -26,11 +29,14 @@ var mimeDict = map[string]ParseFunc{
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   ParseDocx,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": ParsePPTX,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         ParseXlsx,
-	"text/csv":   ParseCSV,
-	"text/html":  ParseHTML,
-	"image/jpeg": ParseImage,
-	"image/png":  ParseImage,
-	"text/plain": ParseText,
+	"text/csv":                      ParseCSV,
+	"text/html":                     ParseHTML,
+	"image/jpeg":                    ParseImage,
+	"image/png":                     ParseImage,
+	"text/plain":                    ParseText,
+	"application/epub+zip":          ParseEPUB,
+	"message/rfc822":                ParseEML,
+	"application/vnd.ms-outlook":    ParseMSG,
 }
 
 func getParserByMIME(mime string) ParseFunc {

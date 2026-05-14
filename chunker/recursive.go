@@ -55,7 +55,7 @@ func (c *RecursiveChunker) Chunk(
 		chunk.ID = GenerateChunkID(structured.RawDoc.GetID(), i, chunk.Content)
 		chunk.DocID = structured.RawDoc.GetID()
 		chunk.MIMEType = structured.RawDoc.GetMimeType()
-		chunk.Metadata = structured.RawDoc.GetMeta()
+		chunk.Metadata = copyMetadata(structured.RawDoc.GetMeta())
 		chunk.ChunkMeta.Index = i
 
 		// Extract heading info from structured document

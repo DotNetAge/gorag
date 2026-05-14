@@ -151,12 +151,30 @@ func (c *ConfigStructurizer) build(parent *core.StructureNode, key string, val a
 		return
 	}
 
+	// 顶层调用（key为空且parent为document）时直接将map的子项添加为parent的子节点
+	if key == "" && parent.NodeType == "document" {
+		if m, ok := val.(map[string]any); ok {
+			for _, k := range sortedKeys(m) {
+				c.build(parent, k, m[k], depth)
+			}
+			return
+		}
+	}
+
 	switch v := val.(type) {
 	case map[string]any:
 		c.buildObject(parent, key, v, depth)
 
 	case []any:
 		c.buildArray(parent, key, v, depth)
+
+	case []map[string]any:
+		// TOML array-of-tables 解码为 []map[string]any，转成 []any 统一处理
+		arr := make([]any, len(v))
+		for i, item := range v {
+			arr[i] = item
+		}
+		c.buildArray(parent, key, arr, depth)
 
 	case string:
 		c.buildValue(parent, key, v, "string")
@@ -218,18 +236,17 @@ func (c *ConfigStructurizer) buildArray(parent *core.StructureNode, key string, 
 func (c *ConfigStructurizer) buildValue(parent *core.StructureNode, key, val, valType string) {
 	text := val
 	if key != "" {
-		text = fmt.Sprintf("%s: %s", key, val)
+		if valType != "" {
+			text = fmt.Sprintf("%s: %s (%s)", key, val, valType)
+		} else {
+			text = fmt.Sprintf("%s: %s", key, val)
+		}
 	}
 
 	node := &core.StructureNode{
 		NodeType: "key_value",
 		Title:    key,
 		Text:     text,
-	}
-
-	// 在 Title 中嵌入类型信息（通过后缀）
-	if valType != "" && key != "" {
-		node.Title = fmt.Sprintf("%s (%s)", key, valType)
 	}
 
 	parent.Children = append(parent.Children, node)
@@ -242,12 +259,9 @@ func (c *ConfigStructurizer) extractConfigTitle(root *core.StructureNode, source
 		for _, child := range root.Children {
 			if child.Title == field && child.NodeType == "key_value" {
 				// 提取值部分
-				parts := strings.SplitN(child.Text, ":", 2)
-				if len(parts) == 2 {
-					title := strings.TrimSpace(parts[1])
-					if title != "" && title != "null" {
-						return title
-					}
+				title := extractValueFromText(child.Text, field)
+				if title != "" && title != "null" {
+					return title
 				}
 			}
 		}
@@ -258,12 +272,9 @@ func (c *ConfigStructurizer) extractConfigTitle(root *core.StructureNode, source
 		for _, child := range root.Children[0].Children {
 			for _, field := range c.ExtractTitleFields {
 				if child.Title == field || strings.HasPrefix(child.Title, field+" ") {
-					parts := strings.SplitN(child.Text, ":", 2)
-					if len(parts) == 2 {
-						title := strings.TrimSpace(parts[1])
-						if title != "" && title != "null" {
-							return title
-						}
+					title := extractValueFromText(child.Text, child.Title)
+					if title != "" && title != "null" {
+						return title
 					}
 				}
 			}
@@ -272,6 +283,20 @@ func (c *ConfigStructurizer) extractConfigTitle(root *core.StructureNode, source
 
 	// 3. 默认使用文件名
 	return source
+}
+
+// extractValueFromText 从 "key: value (type)" 格式中提取 value，去掉 type 后缀
+func extractValueFromText(text, key string) string {
+	parts := strings.SplitN(text, ":", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	title := strings.TrimSpace(parts[1])
+	// Strip type suffix like " (string)"
+	if idx := strings.LastIndex(title, " ("); idx > 0 && strings.HasSuffix(title, ")") {
+		title = title[:idx]
+	}
+	return title
 }
 
 // countStructureNodes 统计节点数量

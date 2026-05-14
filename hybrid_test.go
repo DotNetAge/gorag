@@ -1,3 +1,5 @@
+//go:build integration
+
 package gorag
 
 import (
@@ -13,16 +15,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// =============================================================================
-// 测试配置 —— 所有测试的重配置集中在此
-// =============================================================================
+// TestMain clears LLM-related environment variables to prevent real API calls during tests
+func TestMain(m *testing.M) {
+	// Save and clear env vars that would trigger LLM client creation
+	savedVars := map[string]string{}
+	for _, key := range []string{"GORAG_MODEL", "GORAG_BASE_URL", "GORAG_API_KEY", "GORAG_AUTH_TOKEN"} {
+		savedVars[key] = os.Getenv(key)
+		os.Unsetenv(key)
+	}
+
+	code := m.Run()
+
+	// Restore env vars
+	for key, val := range savedVars {
+		if val != "" {
+			os.Setenv(key, val)
+		}
+	}
+	os.Exit(code)
+}
 
 const (
-	testDataPath = ".test/memory"
-	testName     = "memory"
-	testType     = "hybrid"
-	testModel    = "./models/chinese-clip-vit-base-patch16/onnx/model_q4.onnx"
-	testDataDir  = ".test/data"
+	testModel   = "./models/chinese-clip-vit-base-patch16/onnx/model_q4.onnx"
+	testDataDir = ".test/data"
 )
 
 // safeClose 安全关闭 Indexer
@@ -105,26 +120,16 @@ func containsChunkID(hits []core.Hit, chunkID string) bool {
 
 // =============================================================================
 // 测试1: New 方法 —— 检查是否正确初始化
-// 数据目录: .test/memory, name: memory, type: hybrid
-// modelFile: ./models/chinese-clip-vit-base-patch16/onnx/model_q4.onnx
-// 期待: 目录结构创建完成，Indexer 为 HybridIndexer 实例
 // =============================================================================
 
 func TestNew_HybridIndexer(t *testing.T) {
-	// cfg := &Config{
-	// 	Name:      testName,
-	// 	Type:      testType,
-	// 	ModelFile: testModel,
-	// }
-
-	// 清理旧数据（确保测试从干净状态开始）
-	_ = os.RemoveAll(testDataPath)
+	dataPath := t.TempDir()
 
 	// 调用 New
-	idx, err := New(testDataPath,
-		WithIndexType(testType),
+	idx, err := New(dataPath,
+		WithIndexType("hybrid"),
 		WithModelFile(testModel),
-		WithName(testName),
+		WithName("memory"),
 	)
 	require.NoError(t, err, "New 应成功创建索引器")
 	require.NotNil(t, idx, "返回的 Indexer 不应为 nil")
@@ -141,18 +146,18 @@ func TestNew_HybridIndexer(t *testing.T) {
 
 	// 验证数据目录结构已创建
 	for _, sub := range []string{"vectors", "graphs", "fulltexts"} {
-		dirPath := filepath.Join(testDataPath, sub)
+		dirPath := filepath.Join(dataPath, sub)
 		info, err := os.Stat(dirPath)
 		require.NoError(t, err, "子目录 %s 应存在", sub)
 		assert.True(t, info.IsDir(), "%s 应为目录", sub)
 	}
 
 	// 验证配置文件已生成
-	configPath := filepath.Join(testDataPath, "config.yml")
+	configPath := filepath.Join(dataPath, "config.yml")
 	configData, err := os.ReadFile(configPath)
 	require.NoError(t, err, "config.yml 应存在")
-	assert.Contains(t, string(configData), testName, "配置文件应包含 name")
-	assert.Contains(t, string(configData), testType, "配置文件应包含 type")
+	assert.Contains(t, string(configData), "memory", "配置文件应包含 name")
+	assert.Contains(t, string(configData), "hybrid", "配置文件应包含 type")
 
 	// 验证内部索引器列表
 	names := hybrid.ListIndexers()
@@ -168,30 +173,36 @@ func TestNew_HybridIndexer(t *testing.T) {
 }
 
 // =============================================================================
-// 测试2: Open 方法 —— 在测试1之后运行，检查是否正确恢复索引器
-// 条件: 使用测试1创建的 .test/memory 数据目录
-// 期待: Open 成功恢复，Indexer 属性与 New 创建的一致
+// 测试2: Open 方法 —— 自包含测试：先创建再打开
 // =============================================================================
 
 func TestOpen_HybridIndexer(t *testing.T) {
-	// 确保测试1已运行（目录应存在）
-	configPath := filepath.Join(testDataPath, "config.yml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Skip("跳过: 请先运行 TestNew_HybridIndexer 以创建测试数据目录")
-	}
+	dataPath := t.TempDir()
 
-	// 调用 Open
-	idx, err := Open(testDataPath)
+	// 先创建
+	idx, err := New(dataPath,
+		WithIndexType("hybrid"),
+		WithModelFile(testModel),
+		WithName("memory"),
+	)
+	require.NoError(t, err)
+	safeClose(t, idx)
+
+	// 延迟确保锁释放
+	time.Sleep(200 * time.Millisecond)
+
+	// 再打开
+	idx2, err := Open(dataPath)
 	require.NoError(t, err, "Open 应成功恢复索引器")
-	require.NotNil(t, idx, "返回的 Indexer 不应为 nil")
-	defer safeClose(t, idx)
+	require.NotNil(t, idx2, "返回的 Indexer 不应为 nil")
+	defer safeClose(t, idx2)
 
-	// 验证恢复后的属性与 New 一致
-	assert.Equal(t, "hybrid", idx.Name(), "Name 应与 New 创建的一致")
-	assert.Equal(t, "hybrid", idx.Type(), "Type 应与 New 创建的一致")
+	// 验证恢复后的属性
+	assert.Equal(t, "hybrid", idx2.Name(), "Name 应与 New 创建的一致")
+	assert.Equal(t, "hybrid", idx2.Type(), "Type 应与 New 创建的一致")
 
 	// 验证恢复后仍为 HybridIndexer 实例
-	hybrid, ok := idx.(*HybridIndexer)
+	hybrid, ok := idx2.(*HybridIndexer)
 	require.True(t, ok, "恢复的 Indexer 应为 *HybridIndexer 类型")
 
 	// 验证内部索引器列表一致
@@ -202,23 +213,21 @@ func TestOpen_HybridIndexer(t *testing.T) {
 }
 
 // =============================================================================
-// 测试3: AddFile + Search —— 将 .test/data 目录内所有文件添加到索引器
-// 条件: Open 打开 .test/memory
-// 测试数据: .test/data 目录内所有文件
-// 期待: 添加后搜索能召回内容
+// 测试3: AddFile + Search —— 将 .test/data 目录内文件添加到索引器
 // =============================================================================
 
 func TestAddFile_And_Search_AllFiles(t *testing.T) {
-	// 检查数据目录是否存在
-	if _, err := os.Stat(filepath.Join(testDataPath, "config.yml")); os.IsNotExist(err) {
-		t.Skip("跳过: 请先运行 TestNew_HybridIndexer")
-	}
 	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
 		t.Skipf("跳过: 测试数据目录 %s 不存在，请准备测试数据文件", testDataDir)
 	}
 
-	// Open 打开索引器
-	idx, err := Open(testDataPath)
+	dataPath := t.TempDir()
+
+	idx, err := New(dataPath,
+		WithIndexType("hybrid"),
+		WithModelFile(testModel),
+		WithName("memory"),
+	)
 	require.NoError(t, err)
 	defer safeClose(t, idx)
 
@@ -235,11 +244,11 @@ func TestAddFile_And_Search_AllFiles(t *testing.T) {
 	// 添加所有文件到索引器
 	addedChunks := make(map[string]string) // filePath -> chunkID
 	for _, f := range files {
-		chunk, err := idx.AddFile(ctx, f)
+		chunks, err := idx.AddFile(ctx, f)
 		require.NoError(t, err, "AddFile(%s) 不应报错", f)
-		require.NotNil(t, chunk, "AddFile(%s) 应返回非 nil chunk", f)
-		addedChunks[f] = chunk.ID
-		t.Logf("已索引: %s -> chunkID=%s", filepath.Base(f), chunk.ID)
+		require.NotEmpty(t, chunks, "AddFile(%s) 应返回非空 chunks", f)
+		addedChunks[f] = chunks[0].ID
+		t.Logf("已索引: %s -> chunkCount=%d firstChunkID=%s", filepath.Base(f), len(chunks), chunks[0].ID)
 	}
 
 	// 对第一个已索引文件进行搜索验证
@@ -271,22 +280,20 @@ func TestAddFile_And_Search_AllFiles(t *testing.T) {
 
 // =============================================================================
 // 测试4: Add + Search —— 添加单个文件内容，验证索引和召回
-// 条件: Open 打开 .test/memory
-// 测试数据: .test/data 目录内其中一个 markdown 文件
-// 期待: 文档正确索引，搜索能召回相关结果
 // =============================================================================
 
 func TestAdd_And_Search_SingleFile(t *testing.T) {
-	// 检查前置条件
-	if _, err := os.Stat(filepath.Join(testDataPath, "config.yml")); os.IsNotExist(err) {
-		t.Skip("跳过: 请先运行 TestNew_HybridIndexer")
-	}
 	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
 		t.Skipf("跳过: 测试数据目录 %s 不存在", testDataDir)
 	}
 
-	// Open 打开索引器
-	idx, err := Open(testDataPath)
+	dataPath := t.TempDir()
+
+	idx, err := New(dataPath,
+		WithIndexType("hybrid"),
+		WithModelFile(testModel),
+		WithName("memory"),
+	)
 	require.NoError(t, err)
 	defer safeClose(t, idx)
 
@@ -317,11 +324,11 @@ func TestAdd_And_Search_SingleFile(t *testing.T) {
 	fileContent := string(content)
 
 	// 使用 Add 方法添加内容
-	chunk, err := idx.Add(ctx, fileContent)
+	chunks, err := idx.Add(ctx, fileContent)
 	require.NoError(t, err, "Add 不应报错")
-	require.NotNil(t, chunk, "Add 应返回非 nil chunk")
-	chunkID := chunk.ID
-	t.Logf("Add 成功: chunkID=%s, content长度=%d", chunkID, len(chunk.Content))
+	require.NotEmpty(t, chunks, "Add 应返回非空 chunks")
+	chunkID := chunks[0].ID
+	t.Logf("Add 成功: chunkID=%s, content长度=%d", chunkID, len(chunks[0].Content))
 
 	// 提取搜索关键词
 	terms := extractSearchTerms(t, mdFile)

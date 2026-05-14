@@ -96,7 +96,7 @@ func addFromText(ctx context.Context, idx core.Indexer, text string) {
 	spinner := ui.NewSpinner("正在索引...")
 	spinner.Start()
 
-	chunk, err := idx.Add(ctx, text)
+	chunks, err := idx.Add(ctx, text)
 	if err != nil {
 		spinner.Stop()
 		ui.Error("索引失败: %v", err)
@@ -107,9 +107,12 @@ func addFromText(ctx context.Context, idx core.Indexer, text string) {
 	ui.Success("索引成功")
 
 	ui.Section("索引信息")
-	ui.KeyValue("Chunk ID", chunk.ID)
-	ui.KeyValue("文档 ID", chunk.DocID)
-	ui.KeyValue("内容长度", fmt.Sprintf("%d 字符", len(chunk.Content)))
+	ui.KeyValue("Chunk 数量", fmt.Sprintf("%d", len(chunks)))
+	if len(chunks) > 0 {
+		ui.KeyValue("Chunk ID", chunks[0].ID)
+		ui.KeyValue("文档 ID", chunks[0].DocID)
+		ui.KeyValue("内容长度", fmt.Sprintf("%d 字符", len(chunks[0].Content)))
+	}
 }
 
 // addFromFile 从文件添加
@@ -138,7 +141,7 @@ func addFromFile(ctx context.Context, idx core.Indexer, filePath string) {
 	spinner := ui.NewSpinner("正在索引...")
 	spinner.Start()
 
-	chunk, err := idx.AddFile(ctx, filePath)
+	chunks, err := idx.AddFile(ctx, filePath)
 	if err != nil {
 		spinner.Stop()
 		ui.Error("索引失败: %v", err)
@@ -149,8 +152,11 @@ func addFromFile(ctx context.Context, idx core.Indexer, filePath string) {
 	ui.Success("索引成功")
 
 	ui.Section("索引信息")
-	ui.KeyValue("Chunk ID", chunk.ID)
-	ui.KeyValue("文档 ID", chunk.DocID)
-	ui.KeyValue("文件路径", filePath)
-	ui.KeyValue("内容长度", fmt.Sprintf("%d 字符", len(chunk.Content)))
+	ui.KeyValue("Chunk 数量", fmt.Sprintf("%d", len(chunks)))
+	if len(chunks) > 0 {
+		ui.KeyValue("Chunk ID", chunks[0].ID)
+		ui.KeyValue("文档 ID", chunks[0].DocID)
+		ui.KeyValue("文件路径", filePath)
+		ui.KeyValue("内容长度", fmt.Sprintf("%d 字符", len(chunks[0].Content)))
+	}
 }

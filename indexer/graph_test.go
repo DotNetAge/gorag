@@ -1,3 +1,5 @@
+//go:build integration
+
 package indexer
 
 import (
@@ -103,10 +105,10 @@ func TestGraphIndexer_AddFile(t *testing.T) {
 	// 取两个文件并索引
 	files := pickTwoFiles(t)
 	for _, f := range files {
-		chunk, err := gi.AddFile(ctx, f)
+		chunks, err := gi.AddFile(ctx, f)
 		require.NoError(t, err, "AddFile(%s) 不应报错", f)
-		require.NotNil(t, chunk, "AddFile(%s) 应返回非 nil chunk", f)
-		t.Logf("已索引: %s -> chunkID=%s", filepath.Base(f), chunk.ID)
+		require.NotEmpty(t, chunks, "AddFile(%s) 应返回非空 chunks", f)
+		t.Logf("已索引: %s -> chunkCount=%d firstChunkID=%s", filepath.Base(f), len(chunks), chunks[0].ID)
 	}
 
 	// 验证: 通过 Cypher 查询图中是否有节点

@@ -139,8 +139,10 @@ func TestBoltCache_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 最终应存在（因为有写入操作）
-	assert.Equal(t, 1, c.Len())
+	// 最终结果可能是 0（最后一个操作是 Delete）或 1（最后一个操作是 Set）
+	finalLen := c.Len()
+	assert.True(t, finalLen == 0 || finalLen == 1,
+		"final length should be 0 or 1 after concurrent delete/write, got %d", finalLen)
 }
 
 func TestBoltCache_Flush(t *testing.T) {

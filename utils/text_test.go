@@ -571,6 +571,9 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestExtractKeywords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping keyword extraction test in short mode (GSE dict loading is slow)")
+	}
 	tests := []struct {
 		name     string
 		input    string
@@ -631,6 +634,9 @@ func TestExtractKeywords(t *testing.T) {
 }
 
 func TestRemoveStopWords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stop words test in short mode")
+	}
 	tests := []struct {
 		name     string
 		input    string
@@ -670,6 +676,9 @@ func TestRemoveStopWords(t *testing.T) {
 
 // TestCrossLanguageMix tests the functions with mixed Chinese and English content
 func TestCrossLanguageMix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cross-language mix test in short mode (GSE dictionary loading is slow)")
+	}
 	t.Run("CleanNoise mixed", func(t *testing.T) {
 		input := "<div>中文内容</div> English <p>content</p> Mixed 混合"
 		expected := "中文内容 English content Mixed 混合"
@@ -719,6 +728,9 @@ func TestCrossLanguageMix(t *testing.T) {
 
 // TestPerformance checks that functions don't have obvious performance issues
 func TestPerformance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping performance test in short mode")
+	}
 	t.Run("CleanNoise large text", func(t *testing.T) {
 		// Create a larger text to ensure no obvious performance issues
 		input := strings.Repeat("Hello World 你好世界\n", 1000)

@@ -38,7 +38,7 @@ func (f *fulltextIndexer) Type() string {
 	return "fulltext"
 }
 
-func (f *fulltextIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+func (f *fulltextIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	if content == "" {
 		return nil, fmt.Errorf("content cannot be empty")
 	}
@@ -52,10 +52,10 @@ func (f *fulltextIndexer) Add(ctx context.Context, content string) (*core.Chunk,
 	if err := f.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
-func (f *fulltextIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+func (f *fulltextIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	// 安全检查：防止路径遍历攻击
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
@@ -75,7 +75,7 @@ func (f *fulltextIndexer) AddFile(ctx context.Context, filePath string) (*core.C
 	if err := f.IndexChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
-	return chunks[0], nil
+	return chunks, nil
 }
 
 func (f *fulltextIndexer) Search(ctx context.Context, query core.Query) ([]core.Hit, error) {
@@ -154,13 +154,13 @@ func (f *safeFulltextIndexer) Type() string {
 	return f.inner.Type()
 }
 
-func (f *safeFulltextIndexer) Add(ctx context.Context, content string) (*core.Chunk, error) {
+func (f *safeFulltextIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inner.Add(ctx, content)
 }
 
-func (f *safeFulltextIndexer) AddFile(ctx context.Context, filePath string) (*core.Chunk, error) {
+func (f *safeFulltextIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inner.AddFile(ctx, filePath)
@@ -197,6 +197,20 @@ func NewSafeFulltextIndexer(dbPath string) (core.Indexer, error) {
 		return nil, err
 	}
 	return &safeFulltextIndexer{inner: inner.(*fulltextIndexer)}, nil
+}
+
+// Close closes the underlying fulltext store to release resources (e.g., bleve file handles)
+func (f *fulltextIndexer) Close(ctx context.Context) error {
+	if closer, ok := f.store.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+func (s *safeFulltextIndexer) Close(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner.Close(ctx)
 }
 
 func (s *safeFulltextIndexer) NewQuery(terms string) core.Query {

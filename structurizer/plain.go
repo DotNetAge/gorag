@@ -157,7 +157,7 @@ type TaskItem struct {
 var (
 	// 标题匹配
 	headingUnderlineRegex = regexp.MustCompile(`^[=]+$|^[-]+$`)
-	sectionNumberRegex    = regexp.MustCompile(`^第[一二三四五六七八九十百千万零]+[章节条款]|^[0-9]+(\.[0-9]+)*\s+|^[一二三四五六七八九十]+[、.]\s+`)
+	sectionNumberRegex    = regexp.MustCompile(`^第[一二三四五六七八九十百千万零]+[章节条款]|^[0-9]+(\.[0-9]+)*\s+|^[一二三四五六七八九十]+[、.]\s*`)
 	chapterNumberRegex    = regexp.MustCompile(`^[一二三四五六七八九十]+`)
 
 	// 列表匹配
@@ -335,8 +335,8 @@ func (p *PlainTextStructurizer) detectHeading(blockIndex int, allBlocks []string
 		}
 	}
 
-	// 单行 + 较短 + 不以标点结尾
-	if lineCount == 1 && len(firstLine) < 50 && !endsWithPunctuation(firstLine) && hasLetters(firstLine) {
+	// 单行 + 较短 + 不以标点结尾（需要满足最小长度）
+	if lineCount == 1 && len(firstLine) >= p.config.HeadingMinLength && len(firstLine) < 50 && !endsWithPunctuation(firstLine) && hasLetters(firstLine) {
 		return "heading", 4, 0.6
 	}
 
@@ -677,7 +677,8 @@ func endsWithPunctuation(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
-	last := rune(s[len(s)-1])
+	runes := []rune(s)
+	last := runes[len(runes)-1]
 	return last == '.' || last == '。' || last == '!' || last == '！' ||
 		last == '?' || last == '？' || last == ',' || last == '，' ||
 		last == ';' || last == '；' || last == ':'
