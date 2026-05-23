@@ -2,18 +2,14 @@ module github.com/DotNetAge/gorag
 
 go 1.25.1
 
-// replace github.com/DotNetAge/govector => ../govector
-
-// replace github.com/google/renameio => ./renameio
-
 require (
-	github.com/BurntSushi/toml v1.2.1
+	github.com/BurntSushi/toml v1.6.0
 	github.com/DotNetAge/gochat v0.2.5
-	github.com/DotNetAge/gograph v0.2.1
+	github.com/DotNetAge/gograph v0.2.3
 	github.com/DotNetAge/govector v0.1.5
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/blevesearch/bleve v1.0.14
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ego/gse v1.0.2
 	github.com/google/uuid v1.6.0
 	github.com/richardlehane/mscfb v1.0.6
@@ -21,13 +17,13 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tealeg/xlsx v1.0.5
-	github.com/unidoc/unipdf/v3 v3.55.0
-	github.com/yalue/onnxruntime_go v1.27.0
+	github.com/unidoc/unipdf/v3 v3.69.0
+	github.com/yalue/onnxruntime_go v1.30.1
 	github.com/zoomio/stopwords v0.11.0
 	go.etcd.io/bbolt v1.4.3
-	go.uber.org/zap v1.27.1
-	golang.org/x/image v0.14.0
-	golang.org/x/net v0.50.0
+	go.uber.org/zap v1.28.0
+	golang.org/x/image v0.24.0
+	golang.org/x/net v0.35.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -58,6 +54,7 @@ require (
 	github.com/coder/hnsw v0.6.1 // indirect
 	github.com/couchbase/vellum v1.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/glycerine/go-unsnap-stream v0.0.0-20181221182339-f9677308dec2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -84,9 +81,10 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/steveyen/gtreap v0.1.0 // indirect
 	github.com/tinylib/msgp v1.1.0 // indirect
+	github.com/unidoc/freetype v0.2.3 // indirect
 	github.com/unidoc/pkcs7 v0.2.0 // indirect
 	github.com/unidoc/timestamp v0.0.0-20200412005513-91597fd3793a // indirect
-	github.com/unidoc/unitype v0.4.0 // indirect
+	github.com/unidoc/unitype v0.5.1 // indirect
 	github.com/vcaesar/cedar v0.30.0 // indirect
 	github.com/viterin/partial v1.1.0 // indirect
 	github.com/viterin/vek v0.4.2 // indirect
@@ -94,15 +92,13 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/willf/bitset v1.1.10 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 )
 
-// TODO: 发布前移除此 replace 指令，改用正式发布版本
-replace github.com/DotNetAge/gograph => ../gograph
-
-replace github.com/DotNetAge/govector => ../govector
+// 强制统一所有 go-tree-sitter 子模块版本，解决 ambiguous import 问题
+replace github.com/smacker/go-tree-sitter/javascript => github.com/smacker/go-tree-sitter/javascript v0.0.0-20240827094217-dd81d9e9be82
