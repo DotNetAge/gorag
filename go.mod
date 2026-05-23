@@ -4,11 +4,11 @@ go 1.25.1
 
 // replace github.com/DotNetAge/govector => ../govector
 
-replace github.com/google/renameio => ./renameio
+// replace github.com/google/renameio => ./renameio
 
 require (
 	github.com/BurntSushi/toml v1.2.1
-	github.com/DotNetAge/gochat v0.2.2
+	github.com/DotNetAge/gochat v0.2.5
 	github.com/DotNetAge/gograph v0.2.1
 	github.com/DotNetAge/govector v0.1.5
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -26,7 +26,7 @@ require (
 	github.com/zoomio/stopwords v0.11.0
 	go.etcd.io/bbolt v1.4.3
 	go.uber.org/zap v1.27.1
-	golang.org/x/image v0.25.0
+	golang.org/x/image v0.14.0
 	golang.org/x/net v0.50.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
