@@ -101,4 +101,4 @@ require (
 )
 
 // 强制统一所有 go-tree-sitter 子模块版本，解决 ambiguous import 问题
-replace github.com/smacker/go-tree-sitter/javascript => github.com/smacker/go-tree-sitter/javascript v0.0.0-20240827094217-dd81d9e9be82
+// replace github.com/smacker/go-tree-sitter/javascript => github.com/smacker/go-tree-sitter/javascript v0.0.0-20240827094217-dd81d9e9be82
