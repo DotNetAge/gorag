@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/DotNetAge/gochat v0.2.5
+	github.com/DotNetAge/gochat v0.2.6
 	github.com/DotNetAge/gograph v0.2.3
 	github.com/DotNetAge/govector v0.1.5
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0

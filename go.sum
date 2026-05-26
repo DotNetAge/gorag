@@ -37,8 +37,8 @@ github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/DataDog/zstd v1.4.5 h1:EndNeuB0l9syBZhut0wns3gV1hL8zX8LIu6ZiVHWLIQ=
 github.com/DataDog/zstd v1.4.5/go.mod h1:1jcaCB/ufaK+sKp1NBhlGmpz41jOoPQ35bpF36t7BBo=
-github.com/DotNetAge/gochat v0.2.5 h1:GwnZ6ns2ETV5DgEIAUct0Hd27lN2U8292ugWcMk8iCk=
-github.com/DotNetAge/gochat v0.2.5/go.mod h1:w7m36rMZoDwmReJNTLUGHhok6DSqnIidg9wFKwYM1dM=
+github.com/DotNetAge/gochat v0.2.6 h1:RXfWLtaEupkyohjrPwCquLiZJX3R6CG+156CAM2h6ZQ=
+github.com/DotNetAge/gochat v0.2.6/go.mod h1:w7m36rMZoDwmReJNTLUGHhok6DSqnIidg9wFKwYM1dM=
 github.com/DotNetAge/gograph v0.2.3 h1:MF3oJW2IOILFnGyLrEJQ7cYSFkvm+QxIWJGNxVBy6UY=
 github.com/DotNetAge/gograph v0.2.3/go.mod h1:Ia2wvbkpdJvFJEZ1vw+IklbhNbWjPli2dnU21jbmy7I=
 github.com/DotNetAge/govector v0.1.5 h1:w67UBeyOQX0KZsxRSXjxeLW2kB9MKJYV45JtjfOpo2g=
