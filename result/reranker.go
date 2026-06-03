@@ -9,16 +9,14 @@ import (
 	"github.com/DotNetAge/gorag/query"
 )
 
-// Reranker 实现基于向量相似度的结果重排（Re-Ranking）。
+// Rerank re-ranks search results using cosine similarity between query vector and content vectors.
 //
-// RAG 中的 Re-Ranking 指的是对初步检索结果用更精确的方式重新打分排序，
-// 而不是简单地按初始检索分数排列。
+// In RAG systems, Re-Ranking refers to re-scoring initial retrieval results using
+// a more precise method rather than simply ordering by initial retrieval scores.
 //
-// 本实现使用 SemanticQuery 中已预计算的查询向量与每条检索结果的
-// 内容向量进行余弦相似度比较，以此作为重排依据。
-// 查询向量由 SemanticQuery.Vector() 直接获取，不重复编码。
-//
-// Rerank 用查询向量与每条 Hit 的内容向量计算余弦相似度作为新分数，按此分数降序排列。
+// This implementation uses the pre-computed query vector from SemanticQuery.Vector()
+// and computes cosine similarity with each hit's content vector (encoded on-the-fly).
+// Results are returned in descending order of cosine similarity score.
 func Rerank(query *query.SemanticQuery, hits []core.Hit) ([]core.Hit, error) {
 	if len(hits) == 0 {
 		return hits, nil
@@ -63,7 +61,8 @@ func Rerank(query *query.SemanticQuery, hits []core.Hit) ([]core.Hit, error) {
 	return result, nil
 }
 
-// cosineSimilarity 计算两个向量的余弦相似度。
+// cosineSimilarity computes the cosine similarity between two vectors.
+// Returns 0 if vectors have different lengths or are empty.
 func cosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0

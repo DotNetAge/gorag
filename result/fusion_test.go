@@ -95,3 +95,103 @@ func absDiff(a, b float32) float32 {
 	}
 	return b - a
 }
+
+func TestFusionSingleSource(t *testing.T) {
+	sources := []FusionSource{
+		{
+			Name: "single",
+			Hits: []core.Hit{
+				{ID: "a", Score: 0.9},
+				{ID: "b", Score: 0.7},
+				{ID: "c", Score: 0.5},
+			},
+			Weight: 1.0,
+		},
+	}
+
+	fused, err := RRF(sources...)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fused) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(fused))
+	}
+}
+
+func TestFusionDuplicateIDsAcrossSources(t *testing.T) {
+	sources := []FusionSource{
+		{
+			Name: "src1",
+			Hits: []core.Hit{{ID: "a", Score: 0.9}, {ID: "b", Score: 0.5}},
+			Weight: 1.0,
+		},
+		{
+			Name: "src2",
+			Hits: []core.Hit{{ID: "a", Score: 0.8}, {ID: "b", Score: 0.6}},
+			Weight: 1.0,
+		},
+	}
+
+	fused, err := RRF(sources...)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fused) != 2 {
+		t.Fatalf("expected 2 unique results, got %d", len(fused))
+	}
+}
+
+func TestFusionResultsSortedByScore(t *testing.T) {
+	sources := []FusionSource{
+		{
+			Name: "src1",
+			Hits: []core.Hit{{ID: "z", Score: 0.1}, {ID: "y", Score: 0.2}, {ID: "x", Score: 0.3}},
+			Weight: 1.0,
+		},
+	}
+
+	fused, _ := RRF(sources...)
+	for i := 1; i < len(fused); i++ {
+		if fused[i].Score > fused[i-1].Score {
+			t.Errorf("results not sorted by score: [%d].Score=%.4f > [%d-1].Score=%.4f",
+				i, fused[i].Score, i-1, fused[i-1].Score)
+		}
+	}
+}
+
+func TestRRFWithK_CustomK(t *testing.T) {
+	sources := []FusionSource{
+		{
+			Name: "src",
+			Hits: []core.Hit{{ID: "a", Score: 0.9}},
+			Weight: 2.0,
+		},
+	}
+
+	fused, err := RRFWithK(10, sources...)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fused) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(fused))
+	}
+	expectedScore := float32(2.0) / float32(11)
+	if absDiff(fused[0].Score, expectedScore) > 0.001 {
+		t.Errorf("expected score ~%.4f with k=10, got %.4f", expectedScore, fused[0].Score)
+	}
+}
+
+func TestNewSource(t *testing.T) {
+	hits := []core.Hit{{ID: "a", Score: 0.9}}
+	src := NewSource("test", 1.5, hits)
+
+	if src.Name != "test" {
+		t.Errorf("expected name 'test', got '%s'", src.Name)
+	}
+	if src.Weight != 1.5 {
+		t.Errorf("expected weight 1.5, got %.2f", src.Weight)
+	}
+	if len(src.Hits) != 1 {
+		t.Errorf("expected 1 hit, got %d", len(src.Hits))
+	}
+}

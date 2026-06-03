@@ -12,18 +12,13 @@ import (
 
 // Store is an implementation of core.VectorStore using govector.
 type Store struct {
-	// storage is the underlying govector storage
-	storage *gvcore.Storage
-	// collection is the govector collection
+	storage  *gvcore.Storage
 	collection *gvcore.Collection
-	// colName is the collection name
-	colName string
-	// dimension is the vector dimension
+	colName   string
 	dimension int
-	// dbPath is the path to the database file
-	dbPath string
-	// useHNSW indicates whether to use HNSW indexing
-	useHNSW bool
+	dbPath    string
+	useHNSW   bool
+	readOnly  bool
 }
 
 // Option is a function that configures a Store.
@@ -69,15 +64,18 @@ func WithDBPath(path string) Option {
 }
 
 // WithHNSW enables or disables HNSW indexing.
-//
-// Parameters:
-//   - use: Whether to use HNSW indexing
-//
-// Returns:
-//   - Option: A configuration function
 func WithHNSW(use bool) Option {
 	return func(s *Store) {
 		s.useHNSW = use
+	}
+}
+
+// WithReadOnly opens the underlying BoltDB in read-only mode (shared lock).
+// This allows coexistence with another process (e.g. Daemon) that holds
+// the write lock on the same .db file.
+func WithReadOnly(readOnly bool) Option {
+	return func(s *Store) {
+		s.readOnly = readOnly
 	}
 }
 
@@ -116,7 +114,7 @@ func NewStore(opts ...Option) (core.VectorStore, error) {
 		opt(store)
 	}
 
-	storage, err := gvcore.NewStorage(store.dbPath)
+	storage, err := gvcore.NewStorageWithQuantization(store.dbPath, false, gvcore.Quantizer(nil), store.readOnly)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open govector storage: %w", err)
 	}

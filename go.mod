@@ -22,8 +22,8 @@ require (
 	github.com/zoomio/stopwords v0.11.0
 	go.etcd.io/bbolt v1.4.3
 	go.uber.org/zap v1.28.0
-	golang.org/x/image v0.24.0
-	golang.org/x/net v0.35.0
+	golang.org/x/image v0.40.0
+	golang.org/x/net v0.54.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -92,13 +92,21 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/willf/bitset v1.1.10 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/mobile v0.0.0-20260602190626-68735029466e // indirect
+	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
 
 // 强制统一所有 go-tree-sitter 子模块版本，解决 ambiguous import 问题
 // replace github.com/smacker/go-tree-sitter/javascript => github.com/smacker/go-tree-sitter/javascript v0.0.0-20240827094217-dd81d9e9be82
+
+replace github.com/DotNetAge/govector => ../govector
+
+tool golang.org/x/mobile/cmd/gobind

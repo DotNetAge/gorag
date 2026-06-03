@@ -52,3 +52,6 @@ models/
 inputs/
 bin/
 .test
+*.xcframework/
+*.jar
+*.aar

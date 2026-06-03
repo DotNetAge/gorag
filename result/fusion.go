@@ -1,3 +1,6 @@
+// Package result provides result fusion and re-ranking capabilities for multi-source search results.
+// It implements Reciprocal Rank Fusion (RRF) for combining results from different indexers
+// and cosine similarity-based re-ranking for improving result quality.
 package result
 
 import (
@@ -6,23 +9,15 @@ import (
 	"github.com/DotNetAge/gorag/core"
 )
 
-// Fusion 使用 Reciprocal Rank Fusion (RRF) 算法将多个搜索源的
-// 结果融合为统一排序。
-//
-// RRF 公式：
-//
-//	score(doc) = Σ weight_s / (k + rank_s)
-//
-// rank 从 1 开始，k 为平滑参数（默认 60）。
-
-// FusionSource 代表单个搜索源返回的原始结果。
-// 字段 Hits 的顺序即该源内部的排名顺序。
+// FusionSource represents search results from a single source (e.g., vector, keyword, graph indexer).
+// The Hits field maintains the internal ranking order from that source.
 type FusionSource struct {
 	Name   string     // 源标识（如 "vector"、"keyword"、"graph"）
 	Hits   []core.Hit // 该源的搜索结果，顺序 = 排名
 	Weight float32    // 源权重，0 表示 1.0
 }
 
+// NewSource creates a new FusionSource with the given name, weight, and hits.
 func NewSource(name string, weight float32, hits []core.Hit) *FusionSource {
 	return &FusionSource{
 		Name:   name,
@@ -31,13 +26,22 @@ func NewSource(name string, weight float32, hits []core.Hit) *FusionSource {
 	}
 }
 
-// Merge 对多个源执行 RRF 融合，返回按融合分数降序排列的结果。
-// k 为 RRF 平滑参数，默认值 60（推荐范围 5~100，越大对低排名结果越宽容）。
+// RRF performs Reciprocal Rank Fusion on multiple sources using default k=60.
+//
+// The RRF formula: score(doc) = Σ weight_s / (k + rank_s)
+//
+// Parameters:
+//   - sources: variable number of FusionSource inputs
+//
+// Returns:
+//   - []core.Hit: fused results sorted by score in descending order
+//   - error: non-nil only if sources is empty (returns nil, nil)
 func RRF(sources ...FusionSource) ([]core.Hit, error) {
 	return RRFWithK(60, sources...)
 }
 
-// RRFWithK 使用自定义 k 参数的 RRF 融合。
+// RRFWithK performs RRF fusion with a custom smoothing parameter k.
+// Recommended k range: 5-100. Larger values are more tolerant of lower-ranked results.
 func RRFWithK(k int, sources ...FusionSource) ([]core.Hit, error) {
 	if len(sources) == 0 {
 		return nil, nil

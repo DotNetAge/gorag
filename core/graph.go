@@ -1,10 +1,11 @@
+// Package core provides fundamental types and interfaces for the goRAG framework.
 package core
 
 import "context"
 
-// Node represents a graph node entity in the RAG system.
-// In GraphRAG, nodes are derived from text chunks and serve as an index layer.
-// Unified entity structure combining advantages from Entity design.
+// Node represents a graph node entity in the RAG knowledge graph.
+// In GraphRAG, nodes are derived from text chunks and serve as an index layer
+// for enhanced retrieval capabilities. Nodes represent entities extracted from documents.
 type Node struct {
 	ID   string `json:"id"`   // Unique identifier for the node
 	Type string `json:"type"` // Type of the node (e.g., PERSON, ORGANIZATION, LOCATION, TECHNOLOGY)
@@ -23,9 +24,9 @@ type Node struct {
 	SourceDocIDs   []string `json:"source_doc_ids,omitempty"`   // IDs of source documents
 }
 
-// Edge represents a graph edge entity in the RAG system.
-// Edges represent relationships between entities and are also bound to source text.
-// Unified relationship structure combining advantages from Relation design.
+// Edge represents a graph edge (relationship) between two nodes in the knowledge graph.
+// Edges capture relationships between entities and are bound to source text chunks
+// for traceability and evidence retrieval.
 type Edge struct {
 	ID        string `json:"id"`                  // Unique identifier for the edge
 	Type      string `json:"type"`                // Type of the edge (e.g., WORKS_FOR, LOCATED_IN, BELONGS_TO)
@@ -60,8 +61,9 @@ type Edge struct {
 // 	Confidence    float32 `json:"confidence,omitempty"`
 // }
 
-// Community represents a detected community in the knowledge graph.
-// Communities are hierarchical groups of related nodes, enabling global search.
+// Community represents a detected community (cluster) in the knowledge graph.
+// Communities are hierarchical groups of related nodes that enable global search
+// by providing summarized views of related information.
 type Community struct {
 	ID       string   `json:"id"`                  // Unique identifier for the community
 	Level    int      `json:"level"`               // Hierarchy level (0 = finest granularity)
@@ -77,7 +79,11 @@ type Community struct {
 	SourceChunkIDs []string `json:"source_chunk_ids,omitempty"`
 }
 
-// SearchMode defines the search strategy for GraphRAG retrieval.
+// SearchMode defines the search strategy used in GraphRAG retrieval.
+// Different modes are optimized for different types of queries:
+//   - Local: specific entity/relationship queries
+//   - Global: high-level summary/theme queries
+//   - Hybrid: complex queries needing both specifics and context
 type SearchMode string
 
 const (
@@ -94,7 +100,7 @@ const (
 	SearchModeHybrid SearchMode = "hybrid"
 )
 
-// CommunityMatch represents a matched community during global search.
+// CommunityMatch represents a matched community during global search with relevance scoring.
 type CommunityMatch struct {
 	CommunityID string   `json:"community_id"`
 	Score       float32  `json:"score"`
@@ -103,6 +109,8 @@ type CommunityMatch struct {
 }
 
 // CommunityDetector defines the interface for community detection algorithms.
+// Implementations can use various algorithms (Louvain, Leiden, etc.) to identify
+// communities of related nodes in the knowledge graph.
 type CommunityDetector interface {
 	// Detect identifies communities in the graph and returns them hierarchically.
 	Detect(ctx context.Context, graphStore GraphStore) ([]*Community, error)

@@ -120,3 +120,26 @@ dev: build
 	@echo "Running quick test..."
 	./bin/gorag --help
 	@echo "✓ Development build ready"
+
+# =============================================================================
+#  MiniRAG — Mobile RAG Framework
+# =============================================================================
+
+## minirag-ios: Build MiniRAG.xcframework for iOS
+minirag-ios:
+	@echo "Building MiniRAG.xcframework for iOS..."
+	gomobile bind -target=ios -o MiniRAG.xcframework ./minirag
+	@echo "\033[32m✓\033[0m MiniRAG.xcframework built"
+
+## minirag-android: Build MiniRAG.aar for Android (requires NDK)
+minirag-android:
+	@echo "Building MiniRAG.aar for Android..."
+	gomobile bind -target=android -androidapi 21 -o MiniRAG.aar ./minirag
+	@echo "\033[32m✓\033[0m MiniRAG.aar built"
+
+## minirag-all: Build MiniRAG for iOS + Android
+minirag-all: minirag-ios minirag-android
+
+## minirag-clean: Clean MiniRAG build artifacts
+minirag-clean:
+	rm -rf MiniRAG.xcframework MiniRAG.aar
