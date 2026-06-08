@@ -344,3 +344,62 @@ func extractChunkIndex(v *core.Vector) int {
 	}
 	return int(index)
 }
+
+// List returns paginated vectors from the store.
+// Uses an empty filter to retrieve all points, then applies offset/limit.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - offset: Number of vectors to skip (0-based)
+//   - limit: Maximum number of vectors to return
+//
+// Returns:
+//   - []*core.Vector: The paginated vectors
+//   - error: Any error that occurred during retrieval
+func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Retrieve all points with no filter
+	points, err := s.collection.GetPointsByFilter(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list vectors: %w", err)
+	}
+
+	// Apply pagination
+	end := offset + limit
+	if end > len(points) {
+		end = len(points)
+	}
+	if offset >= len(points) {
+		return []*core.Vector{}, nil
+	}
+
+	vectors := make([]*core.Vector, 0, end-offset)
+	for _, pt := range points[offset:end] {
+		chunkID := ""
+		if c, ok := pt.Payload["chunk_id"].(string); ok {
+			chunkID = c
+		}
+
+		metadata := make(map[string]any)
+		for k, v := range pt.Payload {
+			if k != "chunk_id" {
+				metadata[k] = v
+			}
+		}
+
+		vectors = append(vectors, &core.Vector{
+			ID:       pt.ID,
+			Values:   pt.Vector,
+			ChunkID:  chunkID,
+			Metadata: metadata,
+		})
+	}
+
+	return vectors, nil
+}

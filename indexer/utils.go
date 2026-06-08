@@ -2,9 +2,11 @@ package indexer
 
 import (
 	"strings"
+	"time"
 
 	"github.com/DotNetAge/gorag/chunker"
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/structurizer"
 )
 
@@ -16,12 +18,24 @@ type ChunkOption func(*chunkOption)
 
 type chunkOption struct {
 	strategy core.ChunkStrategy
+	logger   logging.Logger
 }
 
 // WithChunkStrategy 设置分块策略
 func WithChunkStrategy(strategy core.ChunkStrategy) ChunkOption {
 	return func(o *chunkOption) {
 		o.strategy = strategy
+	}
+}
+
+// WithChunkLogger attaches a logger to the chunking operation. The chunker
+// emits a "chunker.parse" log when the source has been loaded and a
+// "chunker.chunked" log when the chunk array is produced.
+func WithChunkLogger(logger logging.Logger) ChunkOption {
+	return func(o *chunkOption) {
+		if logger != nil {
+			o.logger = logger
+		}
 	}
 }
 
@@ -147,13 +161,20 @@ func isTableContent(content string) bool {
 // 返回完整的分块数组
 func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	// 应用选项
-	cfg := &chunkOption{strategy: defaultChunkStrategy}
+	cfg := &chunkOption{strategy: defaultChunkStrategy, logger: logging.DefaultNoopLogger()}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
+	parseStart := time.Now()
 	// 1. 从文本内容推断 MIME 类型
 	mime := core.ParseMimeTypeFromText(content)
+	cfg.logger.Debug("chunker.parse",
+		"source", "text",
+		"mime", mime,
+		"bytes", len(content),
+		"duration_ms", time.Since(parseStart).Milliseconds(),
+	)
 
 	// 2. 如果未指定策略，自动选择
 	if cfg.strategy == "" || cfg.strategy == defaultChunkStrategy {
@@ -166,6 +187,7 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		return nil, err
 	}
 
+	chunkStart := time.Now()
 	// 4. Chunking 分块索引内容，获取 Chunk
 	chunkerInstance, err := chunker.CreateChunker(cfg.strategy)
 	if err != nil {
@@ -176,6 +198,14 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg.logger.Debug("chunker.chunked",
+		"source", "text",
+		"mime", mime,
+		"strategy", string(cfg.strategy),
+		"chunks", len(chunks),
+		"duration_ms", time.Since(chunkStart).Milliseconds(),
+	)
 
 	return chunks, nil
 }
@@ -185,11 +215,12 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 // 返回完整的分块数组
 func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	// 应用选项
-	cfg := &chunkOption{strategy: defaultChunkStrategy}
+	cfg := &chunkOption{strategy: defaultChunkStrategy, logger: logging.DefaultNoopLogger()}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
+	parseStart := time.Now()
 	// 1. Structurizing 打开并结构化文件，获取 StructuredDocument
 	doc, err := structurizer.Open(file)
 	if err != nil {
@@ -199,12 +230,20 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	// 2. 获取 MIME 类型和内容（通过 RawDoc）
 	mime := doc.RawDoc.GetMimeType()
 	content := doc.RawDoc.GetContent()
+	cfg.logger.Debug("chunker.parse",
+		"source", "file",
+		"file", file,
+		"mime", mime,
+		"bytes", len(content),
+		"duration_ms", time.Since(parseStart).Milliseconds(),
+	)
 
 	// 3. 如果未指定策略，自动选择
 	if cfg.strategy == "" || cfg.strategy == defaultChunkStrategy {
 		cfg.strategy = autoSelectStrategy(content, mime)
 	}
 
+	chunkStart := time.Now()
 	// 4. Chunking 分块索引内容，获取 Chunk
 	chunkerInstance, err := chunker.CreateChunker(cfg.strategy)
 	if err != nil {
@@ -215,6 +254,15 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg.logger.Debug("chunker.chunked",
+		"source", "file",
+		"file", file,
+		"mime", mime,
+		"strategy", string(cfg.strategy),
+		"chunks", len(chunks),
+		"duration_ms", time.Since(chunkStart).Milliseconds(),
+	)
 
 	// for i := range chunks {
 	// 	chunks[i].Metadata["file"] = strings.ToLower(file)

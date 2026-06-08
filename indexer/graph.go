@@ -826,6 +826,11 @@ func (g *GraphIndexer) DB() core.GraphStore {
 	return g.store
 }
 
+// List returns empty result — Graph indexer does not support chunk browsing.
+func (g *GraphIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
+	return []core.Hit{}, nil
+}
+
 // buildChunk 内部方法：从 chunk 提取实体关系并存储
 func (g *GraphIndexer) buildChunk(ctx context.Context, chunk *core.Chunk) error {
 	if g.client == nil {

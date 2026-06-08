@@ -217,6 +217,17 @@ func (s *safeFulltextIndexer) NewQuery(terms string) core.Query {
 	return query.NewFulltextQuery(terms)
 }
 
+func (s *safeFulltextIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.inner.List(ctx, offset, limit)
+}
+
 func (s *fulltextIndexer) NewQuery(terms string) core.Query {
 	return query.NewFulltextQuery(terms)
+}
+
+// List returns empty result — BM25 indexer does not support chunk browsing.
+func (f *fulltextIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
+	return []core.Hit{}, nil
 }

@@ -63,6 +63,20 @@ type Indexer interface {
 	// Returns:
 	//   - error: An error if the operation fails
 	IndexChunk(ctx context.Context, chunk *Chunk) error
+
+	// List returns paginated hits from the store.
+	// Only semantic (vector) indexers return actual data;
+	// BM25 and Graph indexers return empty slices.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation
+	//   - offset: Number of results to skip (0-based)
+	//   - limit: Maximum number of results to return
+	//
+	// Returns:
+	//   - []Hit: The paginated search hits
+	//   - error: An error if the operation fails
+	List(ctx context.Context, offset, limit int) ([]Hit, error)
 }
 
 // ChunkIndexer is an optional interface for indexers that support batch chunk indexing.

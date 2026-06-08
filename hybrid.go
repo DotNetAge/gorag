@@ -6,6 +6,7 @@ import (
 	"maps"
 	"sort"
 	"sync"
+	"time"
 
 	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
@@ -18,12 +19,12 @@ import (
 // HybridIndexer 混合索引器
 // 将多个索引器（语义、BM25等）组合，实现查询结果融合与重排
 type HybridIndexer struct {
-	indexers map[string]core.Indexer
-	weights  map[string]float32
-	mu       sync.RWMutex
-	logger   logging.Logger
-	client   chat.Client
-	cacheStore core.CacheStore          // 图索引器的缓存（依赖注入）
+	indexers   map[string]core.Indexer
+	weights    map[string]float32
+	mu         sync.RWMutex
+	logger     logging.Logger
+	client     chat.Client
+	cacheStore core.CacheStore               // 图索引器的缓存（依赖注入）
 	closers    []func(context.Context) error // stores/indexers needing cleanup
 }
 
@@ -73,6 +74,7 @@ func NewHybridIndexer(
 	semanticIndexer := indexer.NewSemanticIndexer(
 		vectorStore,
 		embedder,
+		indexer.WithLogger(logger),
 	)
 
 	fulltextIndexer, err := indexer.NewFulltextIndexer(docStore)
@@ -172,13 +174,31 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 		return nil, nil
 	}
 
-	chunks, err := indexer.GetChunks(content)
+	h.logger.Info("indexer.add.start",
+		"source", "text",
+		"indexers", len(indexers),
+		"bytes", len(content),
+	)
+
+	chunkStart := time.Now()
+	chunks, err := indexer.GetChunks(content, indexer.WithChunkLogger(h.logger))
 	if err != nil {
+		h.logger.Error("indexer.add failed at chunker", err,
+			"source", "text",
+			"stage", "chunked",
+		)
 		return nil, fmt.Errorf("failed to generate chunks: %w", err)
 	}
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from content")
 	}
+	h.logger.Info("indexer.chunked",
+		"source", "text",
+		"chunks", len(chunks),
+		"chunk_id_first", chunks[0].ID,
+		"chunk_id_last", chunks[len(chunks)-1].ID,
+		"duration_ms", time.Since(chunkStart).Milliseconds(),
+	)
 
 	var partialErrs []error
 	for _, idx := range indexers {
@@ -203,6 +223,11 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
 
+	h.logger.Info("indexer.add.done",
+		"source", "text",
+		"chunks", len(chunks),
+	)
+
 	return chunks, nil
 }
 
@@ -219,13 +244,34 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 		return nil, nil
 	}
 
-	chunks, err := indexer.GetFileChunks(filePath)
+	h.logger.Info("indexer.add.start",
+		"source", "file",
+		"file", filePath,
+		"indexers", len(indexers),
+	)
+
+	totalStart := time.Now()
+	chunkStart := time.Now()
+	chunks, err := indexer.GetFileChunks(filePath, indexer.WithChunkLogger(h.logger))
 	if err != nil {
+		h.logger.Error("indexer.add failed at chunker", err,
+			"source", "file",
+			"file", filePath,
+			"stage", "chunked",
+		)
 		return nil, fmt.Errorf("failed to generate chunks from file: %w", err)
 	}
 	if len(chunks) == 0 {
 		return nil, nil
 	}
+	h.logger.Info("indexer.chunked",
+		"source", "file",
+		"file", filePath,
+		"chunks", len(chunks),
+		"chunk_id_first", chunks[0].ID,
+		"chunk_id_last", chunks[len(chunks)-1].ID,
+		"duration_ms", time.Since(chunkStart).Milliseconds(),
+	)
 
 	var partialErrs []error
 	for _, idx := range indexers {
@@ -239,7 +285,6 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 				if err := idx.IndexChunk(ctx, chunk); err != nil {
 					h.logger.Warn("partial index failure", "indexer", idx.Name(), "chunkID", chunk.ID, "error", err)
 					partialErrs = append(partialErrs, err)
-					break
 				}
 			}
 		}
@@ -249,6 +294,13 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 		return chunks, fmt.Errorf("indexfile succeeded partially (%d/%d indexers failed): %w",
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
+
+	h.logger.Info("indexer.add.done",
+		"source", "file",
+		"file", filePath,
+		"chunks", len(chunks),
+		"duration_ms", time.Since(totalStart).Milliseconds(),
+	)
 
 	return chunks, nil
 }
@@ -546,4 +598,17 @@ func (h *HybridIndexer) NewQuery(terms string) core.Query {
 		return primaryIndexer.NewQuery(terms)
 	}
 	return nil
+}
+
+// List returns paginated hits from the semantic (vector) indexer only.
+// BM25 and Graph indexers return empty results by design.
+func (h *HybridIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
+	h.mu.RLock()
+	semanticIdx, ok := h.indexers["semantic"]
+	h.mu.RUnlock()
+
+	if !ok {
+		return []core.Hit{}, nil
+	}
+	return semanticIdx.List(ctx, offset, limit)
 }

@@ -3,8 +3,10 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/query"
 )
 
@@ -13,14 +15,32 @@ type semanticIndexer struct {
 	name     string
 	db       core.VectorStore
 	embedder core.Embedder
+	logger   logging.Logger
 }
 
-func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder) core.Indexer {
-	return &semanticIndexer{
+// SemanticOption configures a semantic indexer.
+type SemanticOption func(*semanticIndexer)
+
+// WithLogger attaches a logger to the semantic indexer for observation logs.
+func WithLogger(logger logging.Logger) SemanticOption {
+	return func(s *semanticIndexer) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
+func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder, opts ...SemanticOption) core.Indexer {
+	s := &semanticIndexer{
 		name:     "semantic",
 		db:       db,
 		embedder: embedder,
+		logger:   logging.DefaultNoopLogger(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *semanticIndexer) Name() string {
@@ -114,8 +134,8 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 	hits := make([]core.Hit, 0, len(results))
 	for i, vec := range results {
 		hit := core.Hit{
-			ID:    vec.ChunkID,
-			Score: scores[i],
+			ID:      vec.ChunkID,
+			Score:   scores[i],
 			Content: s.extractChunkContent(vec),
 		}
 
@@ -246,21 +266,57 @@ func (s *semanticIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) err
 	return s.indexAndStore(ctx, chunk)
 }
 
-// IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface)
+// IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
+// Emits a single batch-level INFO log "indexer.embedded" summarizing the embedding
+// and upsert timings so the caller can see one line per batch instead of one per chunk.
 func (s *semanticIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
+
+	embedStart := time.Now()
+	embedErrCount := 0
 	for _, chunk := range chunks {
 		if err := s.indexAndStore(ctx, chunk); err != nil {
-			return err
+			embedErrCount++
+			s.logger.Error("indexer.embed failed", err, "chunk_id", chunk.ID)
 		}
+	}
+	embedDur := time.Since(embedStart)
+
+	s.logger.Info("indexer.embedded",
+		"chunks", len(chunks),
+		"failed", embedErrCount,
+		"duration_ms", embedDur.Milliseconds(),
+	)
+
+	if embedErrCount > 0 {
+		return fmt.Errorf("embedding failed for %d/%d chunks", embedErrCount, len(chunks))
 	}
 	return nil
 }
 
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
 	return query.NewSemanticQuery(terms, s.embedder)
+}
+
+// List returns paginated hits from the vector store.
+// Converts Vector results to Hit format for browsing.
+func (s *semanticIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
+	vectors, err := s.db.List(ctx, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) == 0 {
+		return []core.Hit{}, nil
+	}
+
+	hits := make([]core.Hit, 0, len(vectors))
+	for _, vec := range vectors {
+		hit := vectorToHit(vec)
+		hits = append(hits, hit)
+	}
+	return hits, nil
 }
 
 // Close closes the underlying vector store to release resources (e.g., bbolt file locks)
@@ -276,11 +332,11 @@ func extractMetadata(meta map[string]any) map[string]any {
 	}
 
 	internalFields := map[string]bool{
-		"doc_id":      true,
-		"parent_id":   true,
-		"content":     true,
-		"mime_type":   true,
-		"chunk_meta":  true,
+		"doc_id":     true,
+		"parent_id":  true,
+		"content":    true,
+		"mime_type":  true,
+		"chunk_meta": true,
 	}
 
 	result := make(map[string]any)
@@ -319,6 +375,44 @@ func mapToChunkMeta(m map[string]any) core.ChunkMeta {
 		}
 	}
 	return cm
+}
+
+// vectorToHit converts a Vector to a Hit for browsing purposes.
+func vectorToHit(vec *core.Vector) core.Hit {
+	hit := core.Hit{
+		ID:      vec.ChunkID,
+		Content: "",
+	}
+
+	if vec == nil || vec.Metadata == nil {
+		return hit
+	}
+
+	if content, ok := vec.Metadata["content"].(string); ok {
+		hit.Content = content
+	}
+	if docID, ok := vec.Metadata["doc_id"].(string); ok {
+		hit.DocID = docID
+	}
+	if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
+		hit.ChunkMeta = mapToChunkMeta(cm)
+	}
+
+	// Copy non-internal metadata
+	metadata := make(map[string]any)
+	for k, v := range vec.Metadata {
+		switch k {
+		case "content", "doc_id", "parent_id", "mime_type", "chunk_meta":
+			// skip internal fields
+		default:
+			metadata[k] = v
+		}
+	}
+	if len(metadata) > 0 {
+		hit.Metadata = metadata
+	}
+
+	return hit
 }
 
 // Ensure implementation of core.ChunkIndexer interface

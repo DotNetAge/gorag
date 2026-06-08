@@ -85,4 +85,17 @@ type VectorStore interface {
 	// Returns:
 	//   - error: Any error that occurred during shutdown
 	Close(ctx context.Context) error
+
+	// List returns paginated vectors from the store.
+	// This enables browsing stored chunk content without a search query.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - offset: Number of vectors to skip (0-based)
+	//   - limit: Maximum number of vectors to return
+	//
+	// Returns:
+	//   - []*Vector: The paginated vectors (sorted by insertion order)
+	//   - error: Any error that occurred during retrieval
+	List(ctx context.Context, offset, limit int) ([]*Vector, error)
 }

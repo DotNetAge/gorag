@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/DotNetAge/gorag/core"
@@ -54,9 +56,9 @@ func New(dataDir string, dimension int, emb Embedder) (*NewRAG, error) {
 	return &NewRAG{store: store, emb: emb}, nil
 }
 
-// AddIndex 索引文本：分块 → 嵌入 → 存储。
+// AddText 索引文本：分块 → 嵌入 → 存储。
 // 返回 JSON: [{"id":"..","content":".."},...]
-func (r *NewRAG) AddIndex(content string) ([]byte, error) {
+func (r *NewRAG) AddText(content string) ([]byte, error) {
 	parts := splitText(content)
 	if len(parts) == 0 {
 		return []byte("[]"), nil
@@ -86,6 +88,98 @@ func (r *NewRAG) AddIndex(content string) ([]byte, error) {
 			return nil, fmt.Errorf("store: %w", err)
 		}
 		items = append(items, chunkItem{ID: id, Content: text})
+	}
+
+	return json.Marshal(items)
+}
+
+// AddFile 索引文件：读取文件内容 → 分块 → 嵌入 → 存储。
+// 支持 .txt 文件及可读文本文件，自动检测编码。
+// 返回 JSON: [{"id":"..","content":"..","filename":"..","filepath":".."},...]
+func (r *NewRAG) AddFile(filePath string) ([]byte, error) {
+	// 验证文件路径非空
+	if filePath == "" {
+		return nil, fmt.Errorf("file path is empty")
+	}
+
+	// 规范化路径并验证文件存在
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("file not found: %s", absPath)
+		}
+		return nil, fmt.Errorf("stat file: %w", err)
+	}
+
+	// 验证是文件（非目录）
+	if info.IsDir() {
+		return nil, fmt.Errorf("path is a directory, not a file: %s", absPath)
+	}
+
+	// 检查文件大小限制 (最大 10MB)
+	const maxFileSize = 10 << 20 // 10MB
+	if info.Size() > maxFileSize {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d): %s", info.Size(), maxFileSize, absPath)
+	}
+
+	// 读取文件内容
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	text := string(content)
+	if strings.TrimSpace(text) == "" {
+		return []byte("[]"), nil
+	}
+
+	// 获取文件名用于元数据
+	filename := filepath.Base(absPath)
+
+	// 复用分块逻辑
+	parts := splitText(text)
+	if len(parts) == 0 {
+		return []byte("[]"), nil
+	}
+
+	ctx := context.Background()
+	type fileChunkItem struct {
+		ID       string `json:"id"`
+		Content  string `json:"content"`
+		Filename string `json:"filename"`
+		Filepath string `json:"filepath"`
+	}
+	items := make([]fileChunkItem, 0, len(parts))
+
+	for _, part := range parts {
+		vecBytes, err := r.emb.EmbedText(part)
+		if err != nil {
+			return nil, fmt.Errorf("embed '%s': %w", truncate(part, 16), err)
+		}
+		id := contentID(part)
+		if err := r.store.Upsert(ctx, []*core.Vector{{
+			ID:      id,
+			Values:  bytesToF32s(vecBytes),
+			ChunkID: id,
+			Metadata: map[string]any{
+				"content":  part,
+				"filename": filename,
+				"filepath": absPath,
+			},
+		}}); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		items = append(items, fileChunkItem{
+			ID:       id,
+			Content:  part,
+			Filename: filename,
+			Filepath: absPath,
+		})
 	}
 
 	return json.Marshal(items)
