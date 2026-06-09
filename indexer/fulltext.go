@@ -223,6 +223,12 @@ func (s *safeFulltextIndexer) List(ctx context.Context, offset, limit int) ([]co
 	return s.inner.List(ctx, offset, limit)
 }
 
+func (s *safeFulltextIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.inner.GetChunks(ctx, docId)
+}
+
 func (s *fulltextIndexer) NewQuery(terms string) core.Query {
 	return query.NewFulltextQuery(terms)
 }
