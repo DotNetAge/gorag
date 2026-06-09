@@ -77,6 +77,21 @@ type Indexer interface {
 	//   - []Hit: The paginated search hits
 	//   - error: An error if the operation fails
 	List(ctx context.Context, offset, limit int) ([]Hit, error)
+
+	// GetChunks returns all chunks belonging to a specific document.
+	// This enables fetching an entire document's worth of chunks in one call,
+	// which is useful for knowledge graph construction and batch processing.
+	// Only semantic (vector) indexers return actual data;
+	// BM25 and Graph indexers return empty slices.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation
+	//   - docId: The document ID to retrieve chunks for
+	//
+	// Returns:
+	//   - []*Chunk: All chunks belonging to the document (sorted by chunk index)
+	//   - error: An error if the operation fails
+	GetChunks(ctx context.Context, docId string) ([]*Chunk, error)
 }
 
 // ChunkIndexer is an optional interface for indexers that support batch chunk indexing.

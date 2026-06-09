@@ -831,6 +831,11 @@ func (g *GraphIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit,
 	return []core.Hit{}, nil
 }
 
+// GetChunks returns empty — Graph indexer stores entities/relations, not raw chunks.
+func (g *GraphIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
+	return []*core.Chunk{}, nil
+}
+
 // buildChunk 内部方法：从 chunk 提取实体关系并存储
 func (g *GraphIndexer) buildChunk(ctx context.Context, chunk *core.Chunk) error {
 	if g.client == nil {

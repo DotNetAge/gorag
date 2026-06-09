@@ -231,3 +231,8 @@ func (s *fulltextIndexer) NewQuery(terms string) core.Query {
 func (f *fulltextIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
 	return []core.Hit{}, nil
 }
+
+// GetChunks returns empty — BM25 indexer does not store raw chunks.
+func (f *fulltextIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
+	return []*core.Chunk{}, nil
+}

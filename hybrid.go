@@ -612,3 +612,16 @@ func (h *HybridIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit
 	}
 	return semanticIdx.List(ctx, offset, limit)
 }
+
+// GetChunks returns all chunks belonging to the specified document.
+// Delegates to the semantic (vector) indexer which stores chunk metadata.
+func (h *HybridIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
+	h.mu.RLock()
+	semanticIdx, ok := h.indexers["semantic"]
+	h.mu.RUnlock()
+
+	if !ok {
+		return []*core.Chunk{}, nil
+	}
+	return semanticIdx.GetChunks(ctx, docId)
+}

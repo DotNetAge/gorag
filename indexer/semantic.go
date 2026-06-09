@@ -319,6 +319,56 @@ func (s *semanticIndexer) List(ctx context.Context, offset, limit int) ([]core.H
 	return hits, nil
 }
 
+// GetChunks returns all chunks belonging to the specified document.
+// Converts vectors (with chunk metadata) back to Chunk objects.
+func (s *semanticIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
+	vectors, err := s.db.GetByDocID(ctx, docId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vectors by doc_id %s: %w", docId, err)
+	}
+	if len(vectors) == 0 {
+		return []*core.Chunk{}, nil
+	}
+
+	chunks := make([]*core.Chunk, 0, len(vectors))
+	for _, vec := range vectors {
+		if vec == nil || vec.Metadata == nil {
+			continue
+		}
+		chunk := &core.Chunk{
+			ID:       vec.ChunkID,
+			Content:  "",
+			Metadata: map[string]any{},
+		}
+		if content, ok := vec.Metadata["content"].(string); ok {
+			chunk.Content = content
+		}
+		if did, ok := vec.Metadata["doc_id"].(string); ok {
+			chunk.DocID = did
+		}
+		if pid, ok := vec.Metadata["parent_id"].(string); ok {
+			chunk.ParentID = pid
+		}
+		if mt, ok := vec.Metadata["mime_type"].(string); ok {
+			chunk.MIMEType = mt
+		}
+		if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
+			chunk.ChunkMeta = mapToChunkMeta(cm)
+		}
+		// Copy non-internal metadata
+		for k, v := range vec.Metadata {
+			switch k {
+			case "content", "doc_id", "parent_id", "mime_type", "chunk_meta":
+				// skip internal fields already mapped above
+			default:
+				chunk.Metadata[k] = v
+			}
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, nil
+}
+
 // Close closes the underlying vector store to release resources (e.g., bbolt file locks)
 func (s *semanticIndexer) Close(ctx context.Context) error {
 	return s.db.Close(ctx)
