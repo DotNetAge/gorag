@@ -235,6 +235,16 @@ func NewGraphStore(path string) (core.GraphStore, error) {
 	}, nil
 }
 
+// WrapGraphStore 将已存在的 gograph 数据库包装为 core.GraphStore 接口。
+// 适用于外部已有 graphDB 实例的场景（如 daemon 共享同一个图数据库给 LLMIndexer）。
+// 调用方负责 db 和 gs 的生命周期管理（Close）。
+func WrapGraphStore(db *api.DB, gs *api.GraphStore) core.GraphStore {
+	return &gographStore{
+		db: db,
+		gs: gs,
+	}
+}
+
 // UpsertNodes inserts or updates nodes in the graph store.
 func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) error {
 	if len(nodes) == 0 {
