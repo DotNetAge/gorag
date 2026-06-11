@@ -22,12 +22,13 @@ const segmentRoleDefinition = `You are a knowledge base administrator. Your job 
   Use these line numbers in start_line/end_line fields. Never invent line numbers.`
 
 // segmentChunkingRules 片段 2：分块与摘要规则
-const segmentChunkingRules = `## Chunking & Summarization Rules
+const segmentChunkingRules = `## Chunking & Title Rules
 1. Group content by semantic boundaries (functions, classes, sections, paragraphs, topics).
 2. For each chunk, generate a concise summary (<200 chars) capturing its semantic essence.
-3. The chunk "content" field must contain the EXACT original text lines for the chunk range. Do not paraphrase, do not summarize the content field itself — only the "summary" field is for condensation.
-4. Filter out meaningless content: license headers, template comments, empty boilerplate, navigation links. Do not chunk these.
-5. Merge adjacent lines that belong to the same logical topic. Avoid tiny fragments.`
+3. Generate a short, descriptive title (<60 chars) for each chunk, based on its main topic.
+4. The chunk "content" field must contain the EXACT original text lines for the chunk range. Do not paraphrase, do not summarize the content field itself — only the "title" and "summary" fields are for condensation.
+5. Filter out meaningless content: license headers, template comments, empty boilerplate, navigation links. Do not chunk these.
+6. Merge adjacent lines that belong to the same logical topic. Avoid tiny fragments.`
 
 // segmentOutputFormat 片段 4：输出格式
 const segmentOutputFormat = `## Output Format — JSON only, no markdown, no additional text
@@ -38,6 +39,7 @@ IDs use integers (1, 2, 3...) — see Constraints for the exact rule.
     {
       "content": "exact original text lines for this chunk",
       "metadata": {
+        "title": "short descriptive title (<60 chars)",
         "summary": "concise summary of semantic meaning (<200 chars)",
         "tags": ["topic_tag1", "topic_tag2", "topic_tag3"],
         "entity_ids": [1, 2, 3]

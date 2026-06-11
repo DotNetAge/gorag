@@ -141,6 +141,11 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 
 		// 从 Vector.Metadata 中提取元信息
 		if vec.Metadata != nil {
+			// 提取 title
+			if t, ok := vec.Metadata["title"].(string); ok {
+				hit.Title = t
+			}
+
 			// 提取 doc_id
 			if d, ok := vec.Metadata["doc_id"].(string); ok {
 				hit.DocID = d
@@ -441,6 +446,9 @@ func vectorToHit(vec *core.Vector) core.Hit {
 	if content, ok := vec.Metadata["content"].(string); ok {
 		hit.Content = content
 	}
+	if title, ok := vec.Metadata["title"].(string); ok {
+		hit.Title = title
+	}
 	if docID, ok := vec.Metadata["doc_id"].(string); ok {
 		hit.DocID = docID
 	}
@@ -452,7 +460,7 @@ func vectorToHit(vec *core.Vector) core.Hit {
 	metadata := make(map[string]any)
 	for k, v := range vec.Metadata {
 		switch k {
-		case "content", "doc_id", "parent_id", "mime_type", "chunk_meta":
+		case "content", "title", "doc_id", "parent_id", "mime_type", "chunk_meta":
 			// skip internal fields
 		default:
 			metadata[k] = v

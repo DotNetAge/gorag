@@ -138,6 +138,7 @@ type Chunk struct {
 	ID        string         `json:"id"`         // Chunk 唯一ID
 	ParentID  string         `json:"parent_id"`  // 父Chunk/父文档ID（来自 RawDocument.Source）
 	DocID     string         `json:"doc_id"`     // 原始文档ID（来自 RawDocument.ID）
+	Title     string         `json:"title"`      // Chunk 标题（LLM 生成或从 heading 提取）
 	MIMEType  string         `json:"mime_type"`  // 内容类型
 	Content   string         `json:"content"`    // 分块内容（清洗后纯文本）
 	Metadata  map[string]any `json:"metadata"`   // 扩展元数据（来自 RawDocument.Metadata）
@@ -147,6 +148,7 @@ type Chunk struct {
 // Hit represents a search result with relevance scoring and content.
 type Hit struct {
 	ID        string         `json:"id"`          // 结果ID
+	Title     string         `json:"title"`       // 结果标题（来自原 Chunk.Title）
 	Score     float32        `json:"score"`       // 相似度分数
 	Content   string         `json:"content"`     // 结果内容
 	DocID     string         `json:"doc_id"`      // 文档ID

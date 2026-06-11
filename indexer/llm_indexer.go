@@ -245,6 +245,9 @@ func (idx *LLMIndexer) Search(ctx context.Context, qry core.Query) ([]core.Hit, 
 			if c, ok := vec.Metadata["content"].(string); ok {
 				hit.Content = c
 			}
+			if t, ok := vec.Metadata["title"].(string); ok {
+				hit.Title = t
+			}
 			if d, ok := vec.Metadata["doc_id"].(string); ok {
 				hit.DocID = d
 			}
@@ -560,6 +563,9 @@ func (idx *LLMIndexer) writeToStores(
 		// 从 metadata 中提取 summary
 		summary, _ := c.Metadata["summary"].(string)
 
+		// 从 metadata 中提取 title
+		title, _ := c.Metadata["title"].(string)
+
 		// 从 metadata 中提取 tags
 		tags, _ := c.Metadata["tags"].([]any)
 		tagStrs := make([]string, 0, len(tags))
@@ -583,6 +589,7 @@ func (idx *LLMIndexer) writeToStores(
 		chunk := &core.Chunk{
 			ID:      chunkID,
 			DocID:   docID,
+			Title:   title,
 			Content: c.Content,
 			ChunkMeta: core.ChunkMeta{
 				Index:        i,
@@ -592,6 +599,7 @@ func (idx *LLMIndexer) writeToStores(
 				HeadingPath:  []string{},
 			},
 			Metadata: map[string]any{
+				"title":      title,
 				"summary":    summary,
 				"tags":       tagStrs,
 				"entity_ids": resolvedIDs,
@@ -609,6 +617,7 @@ func (idx *LLMIndexer) writeToStores(
 		vec.ID = utils.GenerateID([]byte("vec_" + chunkID))
 		vec.Metadata = map[string]any{
 			"doc_id":     docID,
+			"title":      title,
 			"content":    c.Content,
 			"summary":    summary,
 			"tags":       tagStrs,
