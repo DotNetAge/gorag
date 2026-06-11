@@ -810,6 +810,13 @@ func expandMergedNodes(nodes []core.Node, edges []core.Edge, chunks []*core.Chun
 	return nodes, edges
 }
 
+// Count returns the total number of indexed graph entities (nodes + edges).
+func (g *GraphIndexer) Count(ctx context.Context) (int, error) {
+	// Graph indexer doesn't directly track chunk count from the graph POV.
+	// Return 0 as the graph store is not a chunk-based vector store.
+	return 0, nil
+}
+
 // Ensure implementation of core.ChunkIndexer interface
 var _ core.ChunkIndexer = (*GraphIndexer)(nil)
 

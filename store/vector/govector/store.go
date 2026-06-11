@@ -258,6 +258,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// Count returns the total number of vectors in the store.
+func (s *Store) Count(ctx context.Context) (int, error) {
+	return s.collection.Count(), nil
+}
+
 // Close closes the vector store.
 //
 // Parameters:

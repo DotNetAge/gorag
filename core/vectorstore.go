@@ -76,6 +76,16 @@ type VectorStore interface {
 	//	doc := ReconstructDocument(vectors)
 	GetByDocID(ctx context.Context, docID string) ([]*Vector, error)
 
+	// Count returns the total number of vectors in the store.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - int: The total count of vectors
+	//   - error: Any error that occurred
+	Count(ctx context.Context) (int, error)
+
 	// Close gracefully shuts down the vector store connection.
 	// It should release all resources and close any open connections.
 	//

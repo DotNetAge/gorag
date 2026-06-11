@@ -10,6 +10,9 @@ type FullTextStore interface {
 
 	// Delete 从索引中移除指定 chunk
 	Delete(chunkID string) error
+
+	// Count 返回全文索引中的文档总数
+	Count() (int, error)
 }
 
 // FullTextSearchResult 全文搜索结果

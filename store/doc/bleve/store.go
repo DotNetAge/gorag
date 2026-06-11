@@ -113,6 +113,17 @@ func (s *BleveStore) Delete(chunkID string) error {
 	return s.index.Delete(chunkID)
 }
 
+// Count 返回全文索引中的文档总数
+func (s *BleveStore) Count() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count, err := s.index.DocCount()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 // Close 关闭索引
 func (s *BleveStore) Close() error {
 	s.mu.Lock()

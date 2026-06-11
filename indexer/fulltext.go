@@ -130,6 +130,11 @@ func (f *fulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk)
 	return nil
 }
 
+// Count returns the total number of indexed fulltext documents.
+func (f *fulltextIndexer) Count(ctx context.Context) (int, error) {
+	return f.store.Count()
+}
+
 // 私有：确保实现 core.Indexer 接口
 var _ core.Indexer = (*fulltextIndexer)(nil)
 
@@ -188,6 +193,12 @@ func (f *safeFulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Ch
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inner.IndexChunks(ctx, chunks)
+}
+
+func (f *safeFulltextIndexer) Count(ctx context.Context) (int, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.inner.Count(ctx)
 }
 
 // NewSafeFulltextIndexer 创建线程安全的全文索引器

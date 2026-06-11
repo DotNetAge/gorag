@@ -92,6 +92,16 @@ type Indexer interface {
 	//   - []*Chunk: All chunks belonging to the document (sorted by chunk index)
 	//   - error: An error if the operation fails
 	GetChunks(ctx context.Context, docId string) ([]*Chunk, error)
+
+	// Count returns the total number of indexed chunks/entries.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation
+	//
+	// Returns:
+	//   - int: The total count of indexed items
+	//   - error: An error if the operation fails
+	Count(ctx context.Context) (int, error)
 }
 
 // ChunkIndexer is an optional interface for indexers that support batch chunk indexing.

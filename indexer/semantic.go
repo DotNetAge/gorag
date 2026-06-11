@@ -465,5 +465,10 @@ func vectorToHit(vec *core.Vector) core.Hit {
 	return hit
 }
 
+// Count returns the total number of indexed chunks.
+func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
+	return s.db.Count(ctx)
+}
+
 // Ensure implementation of core.ChunkIndexer interface
 var _ core.ChunkIndexer = (*semanticIndexer)(nil)

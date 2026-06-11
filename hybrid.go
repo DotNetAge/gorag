@@ -577,6 +577,25 @@ func (h *HybridIndexer) Type() string {
 
 var _ core.Indexer = (*HybridIndexer)(nil)
 
+// Count returns the total number of indexed chunks across all sub-indexers.
+// Delegates to the semantic indexer which is the primary chunk store.
+func (h *HybridIndexer) Count(ctx context.Context) (int, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// Try semantic indexer first (primary chunk store)
+	for name := range h.indexers {
+		if name == "semantic" {
+			return h.indexers[name].Count(ctx)
+		}
+	}
+	// Fallback: return count from first available indexer
+	for _, idx := range h.indexers {
+		return idx.Count(ctx)
+	}
+	return 0, nil
+}
+
 func (h *HybridIndexer) NewQuery(terms string) core.Query {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
