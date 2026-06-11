@@ -556,13 +556,19 @@ func (p *PlainTextStructurizer) isCodeBlock(lines []string, lineCount int) bool 
 func (p *PlainTextStructurizer) buildTree(blocks []*Block) *core.StructureNode {
 	root := emptyRoot()
 	var stack []*core.StructureNode
+	offset := 0 // byte offset in the original content
 
 	for _, block := range blocks {
+		blockLen := len(block.Text)
 		node := &core.StructureNode{
 			NodeType: block.Type,
 			Text:     block.Text,
 			Level:    block.Level,
+			StartPos: offset,
+			EndPos:   offset + blockLen,
 		}
+		// advance past this block plus the "\n\n" separator that was between blocks
+		offset += blockLen + 2
 
 		if block.Type == "heading" {
 			// 弹出所有大于等于当前标题层级的节点

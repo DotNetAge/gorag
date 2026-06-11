@@ -194,27 +194,55 @@ func (c *ParagraphChunker) splitParagraphs(text string) []string {
 	return paragraphs
 }
 
-// extractHeadingInfo extracts heading information from the structure tree
+// extractHeadingInfo extracts heading information from the structure tree.
+// It determines which heading section a chunk belongs to by traversing the
+// tree and matching chunkStart against each child's effective span (from
+// the child's StartPos up to the next sibling's StartPos).
+//
+// The tree structure from the structurizer may be:
+//   - Flat (MarkdownStructurizer / tree-sitter): headings and paragraphs are
+//     siblings under a "document" root.
+//   - Nested (PlainTextStructurizer / buildTree): paragraphs are children of
+//     the nearest preceding heading.
+//
+// This algorithm handles both: it tracks the *most recent heading* as it
+// walks siblings, and when it finds the child whose span contains chunkStart,
+// it assigns the tracked heading info to the chunk. "lastHeading" (not
+// position containment) is used because a heading node's own text range
+// (StartPos..EndPos) only covers the title line, not the following content.
 func (c *ParagraphChunker) extractHeadingInfo(
 	chunk *core.Chunk,
 	node *core.StructureNode,
 	chunkStart, chunkEnd int,
 ) {
-	if node == nil {
+	if node == nil || len(node.Children) == 0 {
 		return
 	}
 
-	if node.StartPos <= chunkStart && node.EndPos >= chunkEnd {
-		if node.NodeType == "heading" {
-			chunk.ChunkMeta.HeadingLevel = node.Level
-			if len(chunk.ChunkMeta.HeadingPath) == 0 {
-				chunk.ChunkMeta.HeadingPath = []string{node.Title}
-			}
-		}
-	}
+	children := node.Children
+	var lastHeading *core.StructureNode
 
-	for _, child := range node.Children {
-		if child.StartPos <= chunkStart && child.EndPos >= chunkEnd {
+	for i, child := range children {
+		// Track the most recent heading that starts before the chunk
+		if child.NodeType == "heading" && child.StartPos <= chunkStart {
+			lastHeading = child
+		}
+
+		// Determine the effective end of this child's span
+		var spanEnd int
+		if i+1 < len(children) {
+			spanEnd = children[i+1].StartPos
+		} else {
+			spanEnd = chunkEnd
+		}
+
+		if child.StartPos <= chunkStart && chunkStart < spanEnd {
+			// Assign heading info from the nearest preceding heading
+			if lastHeading != nil {
+				chunk.ChunkMeta.HeadingLevel = lastHeading.Level
+				chunk.ChunkMeta.HeadingPath = []string{lastHeading.Title}
+			}
+			// Recurse into this child's subtree
 			c.extractHeadingInfo(chunk, child, chunkStart, chunkEnd)
 			break
 		}
