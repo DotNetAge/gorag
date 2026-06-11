@@ -24,7 +24,7 @@ const segmentRoleDefinition = `You are a knowledge base administrator. Your job 
 // segmentChunkingRules 片段 2：分块与摘要规则
 const segmentChunkingRules = `## Chunking & Title Rules
 1. Group content by semantic boundaries (functions, classes, sections, paragraphs, topics).
-2. For each chunk, generate a concise summary (<200 chars) capturing its semantic essence.
+2. For each chunk, generate a concise summary (<300 chars) capturing its semantic essence.
 3. Generate a short, descriptive title (<60 chars) for each chunk, based on its main topic.
 4. The chunk "content" field must contain the EXACT original text lines for the chunk range. Do not paraphrase, do not summarize the content field itself — only the "title" and "summary" fields are for condensation.
 5. Filter out meaningless content: license headers, template comments, empty boilerplate, navigation links. Do not chunk these.
@@ -40,7 +40,7 @@ IDs use integers (1, 2, 3...) — see Constraints for the exact rule.
       "content": "exact original text lines for this chunk",
       "metadata": {
         "title": "short descriptive title (<60 chars)",
-        "summary": "concise summary of semantic meaning (<200 chars)",
+        "summary": "concise summary of semantic meaning (<300 chars)",
         "tags": ["topic_tag1", "topic_tag2", "topic_tag3"],
         "entity_ids": [1, 2, 3]
       },
