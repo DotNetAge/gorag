@@ -369,8 +369,8 @@ func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, er
 		offset = 0
 	}
 
-	// Retrieve all points with no filter
-	points, err := s.collection.GetPointsByFilter(nil)
+	// Retrieve all points with an empty filter (matches everything)
+	points, err := s.collection.GetPointsByFilter(&gvcore.Filter{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list vectors: %w", err)
 	}
