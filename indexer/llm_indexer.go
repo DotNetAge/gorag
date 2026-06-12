@@ -31,12 +31,13 @@ const minContentLength = 20
 //	  → 未超限 → LLM (分块+实体提取) → 写入 vectorDB + graphDB
 //	  → 超限 → 切片 → N 次 LLM 调用 → 合并结果 → 写入
 type LLMIndexer struct {
-	model     ModelConfig
-	embedder  core.Embedder
-	vectorDB  core.VectorStore
-	graphDB   core.GraphStore
-	lastUsage *TokenUsage
-	logger    logging.Logger
+	model           ModelConfig
+	embedder        core.Embedder
+	vectorDB        core.VectorStore
+	graphDB         core.GraphStore
+	lastUsage       *TokenUsage
+	logger          logging.Logger
+	ontologyPrompts []string // 来自 WithOntologyTech 的自定义 ontology 提示
 }
 
 // LLMOption configures an LLMIndexer.
@@ -48,6 +49,15 @@ func WithLLMLogger(logger logging.Logger) LLMOption {
 		if logger != nil {
 			idx.logger = logger
 		}
+	}
+}
+
+// WithOntologyTech 为 LLMIndexer 附加自定义 ontology 提示文本。
+// 这些提示会追加在 ModelConfig.Ontology 预设内容之后，可用于补充特定领域的
+// 实体/关系定义。多次调用会累积所有提示。
+func WithOntologyTech(prompts ...string) LLMOption {
+	return func(idx *LLMIndexer) {
+		idx.ontologyPrompts = append(idx.ontologyPrompts, prompts...)
 	}
 }
 
@@ -481,7 +491,7 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 		lang = "English"
 	}
 
-	messages := buildSystemMessages(docID, lang, idx.model.Ontology)
+	messages := buildSystemMessages(docID, lang, idx.model.Ontology, idx.ontologyPrompts...)
 	messages = append(messages, chat.NewUserMessage(content))
 
 	resp, err := client.Chat(ctx, messages, chat.WithThinking(idx.model.ThinkingBudget))

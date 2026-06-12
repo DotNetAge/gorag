@@ -10,7 +10,7 @@
 - **位于 GoRAG**：实现 `core.Indexer` 接口，与 `semantic_indexer`、`graph_indexer` 平级
 - **一次调用**：单次 LLM 调用，不流式，不循环，不调工具
 - **双写入**：LLM 解析完 JSON 后直接写入 VectorStore + GraphStore
-- **不依赖 MindX**：不依赖 GoReact Runtime、Skill 加载、Daemon RPC
+- **不依赖 MindX**：不依赖 goharness Runtime、Skill 加载、Daemon RPC
 - **LLM 网关**：所有 LLM 调用通过 [GoChat](https://github.com/mindx/chat) 完成
 
 ---
