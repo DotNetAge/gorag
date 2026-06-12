@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/query"
 	"github.com/DotNetAge/gorag/utils"
+	"gopkg.in/yaml.v3"
 )
 
 // minContentLength 是 LLM 索引的最小内容长度（按字符数，非 token）。
@@ -31,13 +33,13 @@ const minContentLength = 20
 //	  → 未超限 → LLM (分块+实体提取) → 写入 vectorDB + graphDB
 //	  → 超限 → 切片 → N 次 LLM 调用 → 合并结果 → 写入
 type LLMIndexer struct {
-	model           ModelConfig
-	embedder        core.Embedder
-	vectorDB        core.VectorStore
-	graphDB         core.GraphStore
-	lastUsage       *TokenUsage
-	logger          logging.Logger
-	ontologyPrompts []string // 来自 WithOntologyTech 的自定义 ontology 提示
+	model      ModelConfig
+	embedder   core.Embedder
+	vectorDB   core.VectorStore
+	graphDB    core.GraphStore
+	lastUsage  *TokenUsage
+	logger     logging.Logger
+	entityDefs []string // 来自 WithEntities 的自定义实体类型定义行
 }
 
 // LLMOption configures an LLMIndexer.
@@ -52,12 +54,78 @@ func WithLLMLogger(logger logging.Logger) LLMOption {
 	}
 }
 
-// WithOntologyTech 为 LLMIndexer 附加自定义 ontology 提示文本。
-// 这些提示会追加在 ModelConfig.Ontology 预设内容之后，可用于补充特定领域的
-// 实体/关系定义。多次调用会累积所有提示。
-func WithOntologyTech(prompts ...string) LLMOption {
+// WithEntities 为 LLMIndexer 指定实体类型定义行。
+// 每行是一个实体类型的定义（如 "**Concept** — core idea, theory, principle, paradigm"），
+// 会统一放置在 ### Entity Types 标题下。多次调用会累积所有定义。
+// 不调用该方法时，使用一组通用的默认实体类型。
+func WithEntities(entityDef ...string) LLMOption {
 	return func(idx *LLMIndexer) {
-		idx.ontologyPrompts = append(idx.ontologyPrompts, prompts...)
+		idx.entityDefs = append(idx.entityDefs, entityDef...)
+	}
+}
+
+// entityTypeFile 定义 entities-*.yml 配置文件的结构。
+type entityTypeFile struct {
+	Domain string       `yaml:"domain"`
+	Title  string       `yaml:"title"`
+	Types  []entityType `yaml:"types"`
+}
+
+type entityType struct {
+	Name  string `yaml:"name"`
+	Title string `yaml:"title"`
+	Desc  string `yaml:"desc"`
+}
+
+// ParseEntityDefsYAML 解析实体类型定义的 YAML 数据，返回格式化后的实体类型定义行。
+// 每行格式为 "**{Name}** — {Desc}"，适用于 WithEntities。
+func ParseEntityDefsYAML(data []byte) ([]string, error) {
+	var f entityTypeFile
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse entity defs yaml: %w", err)
+	}
+	if len(f.Types) == 0 {
+		return nil, nil
+	}
+	defs := make([]string, 0, len(f.Types))
+	for _, t := range f.Types {
+		if t.Name == "" {
+			continue
+		}
+		line := "**" + t.Name + "** — " + t.Desc
+		defs = append(defs, line)
+	}
+	return defs, nil
+}
+
+// WithEntitiesFromFS 从文件系统（如 embed.FS）中读取匹配 glob 模式的实体类型配置文件，
+// 解析后注入到 LLMIndexer。匹配多个文件时会合并所有实体类型定义。
+//
+// 用法：
+//
+//	//go:embed settings/entities-*.yml
+//	var runtimeFS embed.FS
+//
+//	idx := New(cfg, embedder, vdb, gdb,
+//	    WithEntitiesFromFS(runtimeFS, "settings/entities-*.yml"),
+//	)
+func WithEntitiesFromFS(fsys fs.FS, glob string) LLMOption {
+	return func(idx *LLMIndexer) {
+		matches, err := fs.Glob(fsys, glob)
+		if err != nil {
+			return
+		}
+		for _, match := range matches {
+			data, err := fs.ReadFile(fsys, match)
+			if err != nil {
+				continue
+			}
+			defs, err := ParseEntityDefsYAML(data)
+			if err != nil {
+				continue
+			}
+			idx.entityDefs = append(idx.entityDefs, defs...)
+		}
 	}
 }
 
@@ -98,6 +166,13 @@ func New(
 func (idx *LLMIndexer) Name() string { return "llm" }
 
 func (idx *LLMIndexer) Type() string { return "llm" }
+
+// SetEntityDefs 运行时更新实体类型定义行列表。
+// 用于用户在界面上保存知识标签选择后，同步到正在运行的 LLMIndexer。
+// 下次索引调用会使用新的实体定义。
+func (idx *LLMIndexer) SetEntityDefs(defs []string) {
+	idx.entityDefs = defs
+}
 
 // Add 对一段文本执行 LLM 索引。
 //
@@ -491,7 +566,7 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 		lang = "English"
 	}
 
-	messages := buildSystemMessages(docID, lang, idx.model.Ontology, idx.ontologyPrompts...)
+	messages := buildSystemMessages(docID, lang, idx.entityDefs)
 	messages = append(messages, chat.NewUserMessage(content))
 
 	resp, err := client.Chat(ctx, messages, chat.WithThinking(idx.model.ThinkingBudget))

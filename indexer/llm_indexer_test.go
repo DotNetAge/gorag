@@ -135,7 +135,6 @@ func TestLLMIndexer_AddContent(t *testing.T) {
 		Model:          envOrDefault("GORAG_MODEL", "qwen3.5-flash"),
 		Language:       "Chinese",
 		MaxTokens:      128000,
-		Ontology:       "general",
 		ThinkingBudget: 1024,
 	}, embedder, vectorDB, graphDB)
 	defer idx.Close(ctx)
@@ -232,7 +231,6 @@ func TestLLMIndexer_AddFile(t *testing.T) {
 		Model:          envOrDefault("GORAG_MODEL", "qwen3.5-flash"),
 		Language:       "Chinese",
 		MaxTokens:      128000,
-		Ontology:       "general",
 		ThinkingBudget: 1024,
 	}, embedder, vectorDB, graphDB)
 	defer idx.Close(ctx)
@@ -312,7 +310,6 @@ func TestLLMIndexer_Search(t *testing.T) {
 		Model:          envOrDefault("GORAG_MODEL", "qwen3.5-flash"),
 		Language:       "Chinese",
 		MaxTokens:      128000,
-		Ontology:       "general",
 		ThinkingBudget: 1024,
 	}, embedder, vectorDB, graphDB)
 	defer idx.Close(ctx)
@@ -367,7 +364,6 @@ func TestLLMIndexer_SliceAndMerge(t *testing.T) {
 		Model:          envOrDefault("GORAG_MODEL", "qwen3.5-flash"),
 		Language:       "Chinese",
 		MaxTokens:      32000,
-		Ontology:       "general",
 		ThinkingBudget: 1024,
 	}, embedder, vectorDB, graphDB)
 	defer idx.Close(ctx)

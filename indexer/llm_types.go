@@ -9,7 +9,6 @@ type ModelConfig struct {
 	Model          string
 	Language       string // 内容语言英文名（如 "Chinese", "English", "Japanese"），直接注入提示词
 	MaxTokens      int    // 模型的最大上下文窗口（token 数），0 表示使用默认值 128000
-	Ontology       string // 实体提取规则预设名: "general", "tech", "media", "writing", "research", "finance", "medical", "journalism"；空值=general
 	ThinkingBudget int    // 思考模式的 token 预算（0 = 模型默认值），LLMIndexer 始终启用思考模式
 }
 

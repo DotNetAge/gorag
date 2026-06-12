@@ -94,14 +94,13 @@ ALL output text MUST be in "%s": summaries, entity names, descriptions, metadata
 - Do NOT use generic tags like "introduction", "overview", "conclusion". Be specific.`
 
 // buildSystemMessages 构建多条 SystemMessage 分片，以利于 KV Cache 复用。
-// ontology 参数传入预设名（如 "general", "tech"），支持逗号分隔的多个名称（如 "tech,finance"）。
-// customPrompts 为自定义提示文本，会追加在预设 ontology 之后。
+// entityDefs 为实体类型定义行列表，由 WithEntities 提供，会合并在 ### Entity Types 标题下。
 // 调用方只需 append UserMessage 即可完成 Messages 组装。
-func buildSystemMessages(docID, lang, ontology string, customPrompts ...string) []chat.Message {
+func buildSystemMessages(docID, lang string, entityDefs []string) []chat.Message {
 	return []chat.Message{
 		chat.NewSystemMessage(fmt.Sprintf(segmentRoleDefinition, docID, lang)),
 		chat.NewSystemMessage(segmentChunkingRules),
-		chat.NewSystemMessage(selectOntology(ontology, customPrompts...)),
+		chat.NewSystemMessage(buildOntology(entityDefs)),
 		chat.NewSystemMessage(segmentOutputFormat),
 		chat.NewSystemMessage(fmt.Sprintf(segmentConstraints, lang)),
 	}
