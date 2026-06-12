@@ -12,9 +12,9 @@ import (
 	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/chunker"
 	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/document"
 	"github.com/DotNetAge/gorag/logging"
 	"github.com/DotNetAge/gorag/query"
-	"github.com/DotNetAge/gorag/structurizer"
 	"github.com/DotNetAge/gorag/utils"
 )
 
@@ -27,7 +27,7 @@ const minContentLength = 20
 //
 // 数据流：
 //
-//	Add / AddFile → structurizer (获取 docID) → Token 估算
+//	Add / AddFile → document (获取 docID) → Token 估算
 //	  → 未超限 → LLM (分块+实体提取) → 写入 vectorDB + graphDB
 //	  → 超限 → 切片 → N 次 LLM 调用 → 合并结果 → 写入
 type LLMIndexer struct {
@@ -91,7 +91,7 @@ func (idx *LLMIndexer) Type() string { return "llm" }
 
 // Add 对一段文本执行 LLM 索引。
 //
-// 流程：structurizer → Token 估算
+// 流程：document → Token 估算
 //   - 未超限：单次 LLM 分块+实体提取 → 写入 vectorDB + graphDB
 //   - 超限：按 80% maxTokens 切片 → 多次 LLM → 合并结果 → 写入
 //
@@ -113,13 +113,10 @@ func (idx *LLMIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 		"length", utf8.RuneCountInString(content),
 		"estimated_tokens", tokenEstimate(content))
 
-	// 1. 通过 structurizer 获取 docID（与 GetChunks 逻辑一致）
+	// 1. 通过 document.New 获取 docID
 	mime := core.ParseMimeTypeFromText(content)
-	sd, err := structurizer.New(content, mime)
-	if err != nil {
-		return nil, fmt.Errorf("structurizer failed: %w", err)
-	}
-	docID := sd.ID()
+	doc := document.New(content, mime)
+	docID := doc.GetID()
 
 	// 2. Token 估算 → 切片或直接处理
 	slices := idx.sliceContent(content)
@@ -158,7 +155,7 @@ func (idx *LLMIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 
 // AddFile 从文件读取内容后执行 LLM 索引。
 //
-// 流程：structurizer.Open（文档读取 + 清洗）→ Token 估算
+// 流程：document.Open（文档读取 + 清洗）→ Token 估算
 //   - 未超限：单次 LLM → 写入
 //   - 超限：返回错误，要求用户手动拆分文件
 //
@@ -168,7 +165,7 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		return nil, fmt.Errorf("file path cannot be empty")
 	}
 
-	// 文件大小预检 — 避免 structurizer 无效 I/O
+	// 文件大小预检 — 避免 document.Open 无效 I/O
 	if fi, err := os.Stat(filePath); err != nil {
 		return nil, fmt.Errorf("failed to stat file %s: %w", filePath, err)
 	} else if fi.Size() < int64(minContentLength) {
@@ -179,13 +176,13 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		return []*core.Chunk{}, nil
 	}
 
-	// 1. 通过 structurizer.Open 打开文件（与 GetFileChunks 逻辑一致）
-	sd, err := structurizer.Open(filePath)
+	// 1. 通过 document.Open 打开并归一化文档内容
+	doc, err := document.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
-	docID := sd.ID()
-	content := sd.RawDoc.GetContent()
+	docID := doc.GetID()
+	content := doc.GetContent()
 
 	idx.logger.Info("indexing file",
 		"file", filePath,
