@@ -2,6 +2,14 @@ package indexer
 
 import "fmt"
 
+// EntityDef 定义一个实体类型的 Prompt 与 Schema，供 WithEntities 注入 LLM Prompt。
+// Schema 是可选字段；为空时不生成对应的 ### Entity Schema 段。
+// Prompt 写入 ### Entity Types 段，Schema 写入 ### Entity Schema 段。
+type EntityDef struct {
+	Prompt string // 实体类型描述文本（如 "**Person** — author, expert, contributor"）
+	Schema string // JSON Schema 文本（如 `{"type":"object","properties":{...}}`），可选
+}
+
 // ModelConfig LLM 模型连接配置
 type ModelConfig struct {
 	APIKey         string
@@ -55,6 +63,7 @@ type IndexData struct {
 func mergeIndexData(datas ...*IndexData) *IndexData {
 	merged := &IndexData{}
 	nextID := 1 // 全局序数 ID 起点
+	seenChunkContent := make(map[string]struct{}) // Chunk 内容去重
 
 	for _, d := range datas {
 		if d == nil {
@@ -99,7 +108,14 @@ func mergeIndexData(datas ...*IndexData) *IndexData {
 			}
 		}
 
-		merged.Chunks = append(merged.Chunks, d.Chunks...)
+		// 4. 追加 Chunk（按内容去重：相邻切片可能在切点处产生相似 chunk）
+		for _, chunk := range d.Chunks {
+			if _, ok := seenChunkContent[chunk.Content]; ok {
+				continue
+			}
+			seenChunkContent[chunk.Content] = struct{}{}
+			merged.Chunks = append(merged.Chunks, chunk)
+		}
 		merged.Entities = append(merged.Entities, d.Entities...)
 		merged.Relations = append(merged.Relations, d.Relations...)
 	}

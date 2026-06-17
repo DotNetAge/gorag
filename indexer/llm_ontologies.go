@@ -6,7 +6,7 @@ import "strings"
 // 全局统一的关系类型 — 所有领域共享，保证图数据库关系语义一致。
 // =============================================================================
 
-const globalRelationTypes = `### Relation Types (9 Types)
+const globalRelationTypes = `### Relation Types
 **Structural**: IS_A, PART_OF, CONTAINS
 **Semantic**: DESCRIBES, CITES, RELATED_TO
 **Logical**: IMPLIES, PRECEDES, DEPENDS_ON`
@@ -22,52 +22,69 @@ const globalExtractionConstraints = `### Extraction Constraints
 - Short content (<=3 lines) → extract only Topic, Term, and Concept (if applicable).
 - Always create a "Chunk DESCRIBES Entity" edge for each extracted entity.`
 
+// defaultEntityDefs 无自定义实体定义时的通用兜底。
+var defaultEntityDefs = []EntityDef{
+	{Prompt: "**Concept** — core idea, theory, principle, paradigm"},
+	{Prompt: "**Term** — domain-specific term, jargon, noun"},
+	{Prompt: "**Method** — methodology, process, technique, workflow"},
+	{Prompt: "**Resource** — document, book, article, webpage, reference"},
+	{Prompt: "**Tool** — software, platform, device, utility"},
+	{Prompt: "**Person** — author, expert, contributor, role"},
+	{Prompt: "**Topic** — subject, domain, category, tag"},
+	{Prompt: "**Event** — milestone, meeting, occurrence, historical event"},
+	{Prompt: "**Work** — creative output (blog, video, story, artwork, code)"},
+	{Prompt: "**Metric** — KPI, measurement, score, statistic"},
+}
+
 // buildOntology 组装完整的实体提取提示词。
-// entityDefs 是实体类型定义行列表，每个元素作为一行追加在 ### Entity Types 下。
+// entityDefs 为 EntityDef 列表，每个 def.Prompt 追加在 ### Entity Types 下，
+// 非空的 def.Schema 追加在 ### Entity Schema 下。
 // 无实体定义时使用通用兜底定义。
-//
-// 输出结构：
-//
-//	## Entity Extraction Rules
-//	### Entity Types               ← 只输出一次
-//	[entityDefs 类型定义行]
-//	### Relation Types              ← 全局统一
-//	### Extraction Constraints      ← 全局统一
-func buildOntology(entityDefs []string) string {
+func buildOntology(entityDefs []EntityDef) string {
 	// 收集非空定义
-	var defs []string
+	var defs []EntityDef
 	for _, d := range entityDefs {
-		if trimmed := strings.TrimSpace(d); trimmed != "" {
-			defs = append(defs, trimmed)
+		if trimmed := strings.TrimSpace(d.Prompt); trimmed != "" {
+			defs = append(defs, EntityDef{Prompt: trimmed, Schema: strings.TrimSpace(d.Schema)})
 		}
 	}
 
 	// 无实体定义 → 通用兜底
 	if len(defs) == 0 {
-		return "## Entity Extraction Rules\n\n" +
-			"### Entity Types\n" +
-			"**Concept** — core idea, theory, principle, paradigm\n" +
-			"**Term** — domain-specific term, jargon, noun\n" +
-			"**Method** — methodology, process, technique, workflow\n" +
-			"**Resource** — document, book, article, webpage, reference\n" +
-			"**Tool** — software, platform, device, utility\n" +
-			"**Person** — author, expert, contributor, role\n" +
-			"**Topic** — subject, domain, category, tag\n" +
-			"**Event** — milestone, meeting, occurrence, historical event\n" +
-			"**Work** — creative output (blog, video, story, artwork, code)\n" +
-			"**Metric** — KPI, measurement, score, statistic\n\n" +
-			globalRelationTypes + "\n\n" +
-			globalExtractionConstraints
+		defs = defaultEntityDefs
 	}
 
 	var b strings.Builder
 	b.WriteString("## Entity Extraction Rules\n\n")
 	b.WriteString("### Entity Types\n")
-	b.WriteString(defs[0])
+	b.WriteString(defs[0].Prompt)
 	for _, d := range defs[1:] {
 		b.WriteByte('\n')
-		b.WriteString(d)
+		b.WriteString(d.Prompt)
 	}
+
+	// Entity Schema 段（仅当有非空 Schema 时追加）
+	hasSchema := false
+	for _, d := range defs {
+		if d.Schema != "" {
+			hasSchema = true
+			break
+		}
+	}
+	if hasSchema {
+		b.WriteString("\n\n### Entity Schema\n")
+		for _, d := range defs {
+			if d.Schema == "" {
+				continue
+			}
+			b.WriteString("```json\n")
+			b.WriteString(d.Schema)
+			b.WriteString("\n```\n")
+		}
+		// 去掉末尾多余的换行
+		_ = 0
+	}
+
 	b.WriteString("\n\n")
 	b.WriteString(globalRelationTypes)
 	b.WriteString("\n\n")

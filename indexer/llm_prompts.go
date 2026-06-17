@@ -30,9 +30,12 @@ const segmentChunkingRules = `## Chunking & Title Rules
 5. Filter out meaningless content: license headers, template comments, empty boilerplate, navigation links. Do not chunk these.
 6. Merge adjacent lines that belong to the same logical topic. Avoid tiny fragments.`
 
-// segmentOutputFormat 片段 4：输出格式
+// segmentOutputFormat 片段 4：输出格式（含 positions 说明）
 const segmentOutputFormat = `## Output Format — JSON only, no markdown, no additional text
 IDs use integers (1, 2, 3...) — see Constraints for the exact rule.
+
+Important: Each [start_line, end_line] in chunk_meta.positions MUST correspond to line numbers from the "LINE_NUMBER: content" prefix shown in the input.
+The chunk.content MUST be the exact original text for those line numbers.
 
 {
   "chunks": [
@@ -94,9 +97,9 @@ ALL output text MUST be in "%s": summaries, entity names, descriptions, metadata
 - Do NOT use generic tags like "introduction", "overview", "conclusion". Be specific.`
 
 // buildSystemMessages 构建多条 SystemMessage 分片，以利于 KV Cache 复用。
-// entityDefs 为实体类型定义行列表，由 WithEntities 提供，会合并在 ### Entity Types 标题下。
+// entityDefs 为 EntityDef 列表，由 WithEntities 提供，会合并入 Prompt 的实体定义部分。
 // 调用方只需 append UserMessage 即可完成 Messages 组装。
-func buildSystemMessages(docID, lang string, entityDefs []string) []chat.Message {
+func buildSystemMessages(docID, lang string, entityDefs []EntityDef) []chat.Message {
 	return []chat.Message{
 		chat.NewSystemMessage(fmt.Sprintf(segmentRoleDefinition, docID, lang)),
 		chat.NewSystemMessage(segmentChunkingRules),

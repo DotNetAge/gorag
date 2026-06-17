@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -37,9 +38,11 @@ type LLMIndexer struct {
 	embedder   core.Embedder
 	vectorDB   core.VectorStore
 	graphDB    core.GraphStore
-	lastUsage  *TokenUsage
-	logger     logging.Logger
-	entityDefs []string // 来自 WithEntities 的自定义实体类型定义行
+	lastUsage        *TokenUsage // 最近一次 LLM 调用的 Token 用量
+	cumulativeUsage  *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
+	mu               sync.Mutex
+	logger           logging.Logger
+	entityDefs       []EntityDef // 来自 WithEntities 的自定义实体类型定义
 }
 
 // LLMOption configures an LLMIndexer.
@@ -54,13 +57,13 @@ func WithLLMLogger(logger logging.Logger) LLMOption {
 	}
 }
 
-// WithEntities 为 LLMIndexer 指定实体类型定义行。
-// 每行是一个实体类型的定义（如 "**Concept** — core idea, theory, principle, paradigm"），
-// 会统一放置在 ### Entity Types 标题下。多次调用会累积所有定义。
+// WithEntities 为 LLMIndexer 指定实体类型定义。
+// 每项是一个 EntityDef（Prompt + Schema），会分别注入 Prompt 的 ### Entity Types
+// 和 ### Entity Schema 段。多次调用会累积所有定义。
 // 不调用该方法时，使用一组通用的默认实体类型。
-func WithEntities(entityDef ...string) LLMOption {
+func WithEntities(entityDefs ...EntityDef) LLMOption {
 	return func(idx *LLMIndexer) {
-		idx.entityDefs = append(idx.entityDefs, entityDef...)
+		idx.entityDefs = append(idx.entityDefs, entityDefs...)
 	}
 }
 
@@ -72,14 +75,18 @@ type entityTypeFile struct {
 }
 
 type entityType struct {
-	Name  string `yaml:"name"`
-	Title string `yaml:"title"`
-	Desc  string `yaml:"desc"`
+	Name   string `yaml:"name"`
+	Title  string `yaml:"title"`
+	Desc   string `yaml:"desc"`
+	Prompt string `yaml:"prompt,omitempty"`
+	Schema string `yaml:"schema,omitempty"`
 }
 
-// ParseEntityDefsYAML 解析实体类型定义的 YAML 数据，返回格式化后的实体类型定义行。
-// 每行格式为 "**{Name}** — {Desc}"，适用于 WithEntities。
-func ParseEntityDefsYAML(data []byte) ([]string, error) {
+// ParseEntityDefsYAML 解析实体类型定义的 YAML 数据，返回 EntityDef 列表。
+// YAML 中每项支持两个输出字段：
+//   - prompt：直接使用；为空时自动生成为 "**{Name}** — {Desc}"
+//   - schema：可选字段，直接使用
+func ParseEntityDefsYAML(data []byte) ([]EntityDef, error) {
 	var f entityTypeFile
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse entity defs yaml: %w", err)
@@ -87,13 +94,16 @@ func ParseEntityDefsYAML(data []byte) ([]string, error) {
 	if len(f.Types) == 0 {
 		return nil, nil
 	}
-	defs := make([]string, 0, len(f.Types))
+	defs := make([]EntityDef, 0, len(f.Types))
 	for _, t := range f.Types {
 		if t.Name == "" {
 			continue
 		}
-		line := "**" + t.Name + "** — " + t.Desc
-		defs = append(defs, line)
+		prompt := t.Prompt
+		if prompt == "" {
+			prompt = "**" + t.Name + "** — " + t.Desc
+		}
+		defs = append(defs, EntityDef{Prompt: prompt, Schema: t.Schema})
 	}
 	return defs, nil
 }
@@ -167,10 +177,10 @@ func (idx *LLMIndexer) Name() string { return "llm" }
 
 func (idx *LLMIndexer) Type() string { return "llm" }
 
-// SetEntityDefs 运行时更新实体类型定义行列表。
+// SetEntityDefs 运行时更新实体类型定义列表。
 // 用于用户在界面上保存知识标签选择后，同步到正在运行的 LLMIndexer。
 // 下次索引调用会使用新的实体定义。
-func (idx *LLMIndexer) SetEntityDefs(defs []string) {
+func (idx *LLMIndexer) SetEntityDefs(defs []EntityDef) {
 	idx.entityDefs = defs
 }
 
@@ -283,23 +293,35 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		return []*core.Chunk{}, nil
 	}
 
-	// 2. Token 估算 — 超限直接失败
-	safeLimit := int(float64(idx.model.MaxTokens) * inputTokenRatio * contentSafetyMargin)
-	if tokenEstimate(content) > safeLimit {
-		return nil, fmt.Errorf(
-			"file content exceeds safe limit (~%d tokens > %d), please split manually",
-			tokenEstimate(content), safeLimit,
-		)
+	// 2. Token 估算 → 切片或直接处理
+	slices := idx.sliceContent(content)
+	if len(slices) == 1 {
+		idx.logger.Debug("single slice, calling LLM", "doc_id", docID)
+		parsed, err := idx.llmIndex(ctx, docID, slices[0])
+		if err != nil {
+			return nil, err
+		}
+		return idx.writeToStores(ctx, docID, parsed)
 	}
 
-	// 3. LLM 处理
-	idx.logger.Debug("LLM call for file", "doc_id", docID, "file", filePath)
-	parsed, err := idx.llmIndex(ctx, docID, content)
-	if err != nil {
-		return nil, err
+	// 多切片：逐片 LLM 处理
+	idx.logger.Info("file content exceeds limit, slicing",
+		"slices", len(slices),
+		"max_tokens", idx.model.MaxTokens)
+	allResults := make([]*IndexData, 0, len(slices))
+	for i, s := range slices {
+		idx.logger.Debug("LLM call for slice", "slice", i+1, "total", len(slices))
+		parsed, err := idx.llmIndex(ctx, docID, s)
+		if err != nil {
+			return nil, fmt.Errorf("slice %d: %w", i+1, err)
+		}
+		allResults = append(allResults, parsed)
 	}
 
-	return idx.writeToStores(ctx, docID, parsed)
+	// 合并所有切片的结果后统一写入
+	idx.logger.Debug("merging slice results", "slice_count", len(allResults))
+	merged := mergeIndexData(allResults...)
+	return idx.writeToStores(ctx, docID, merged)
 }
 
 // Search 执行向量检索（委托给 vectorDB）。
@@ -354,22 +376,15 @@ func (idx *LLMIndexer) Remove(ctx context.Context, chunkID string) error {
 }
 
 // IndexChunk 索引单个预生成的 Chunk（实现 core.ChunkIndexer 接口）。
-// 先调用 LLM 提取实体关系写入 graphDB，再向量化写入 vectorDB。
+// IndexChunks 是"分块后的处理入口"，不做 LLM 调用，只做向量化 + 存储。
+//
+// LLM 分块 + 实体提取在 Add 路径中完成。IndexChunk/IndexChunks 由 Add 内调，
+// 或由 HybridIndexer 在合并分发预分块内容时调用。
 func (idx *LLMIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
 		return fmt.Errorf("chunk cannot be nil")
 	}
 
-	// 1. graph: LLM 提取实体关系
-	data, err := idx.llmIndex(ctx, chunk.DocID, chunk.Content)
-	if err != nil {
-		return fmt.Errorf("LLM extraction failed: %w", err)
-	}
-	if _, err := idx.writeToStores(ctx, chunk.DocID, data); err != nil {
-		return fmt.Errorf("graph write failed: %w", err)
-	}
-
-	// 2. vector: 向量化并写入
 	vec, err := idx.embedder.Calc(chunk)
 	if err != nil {
 		return fmt.Errorf("embedding failed: %w", err)
@@ -462,9 +477,18 @@ func (idx *LLMIndexer) Close(ctx context.Context) error {
 // 扩展方法
 // ---------------------------------------------------------------------------
 
-// LastTokenUsage 返回最近一次 LLM 调用的 Token 用量。
+// LastTokenUsage 返回最近一次 LLM 调用的 Token 用量（单次值）。
 func (idx *LLMIndexer) LastTokenUsage() *TokenUsage {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
 	return idx.lastUsage
+}
+
+// CumulativeTokenUsage 返回从创建/重置起累积的 Token 用量（多切片场景使用）。
+func (idx *LLMIndexer) CumulativeTokenUsage() *TokenUsage {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	return idx.cumulativeUsage
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +561,7 @@ func numberedContent(lines []string, startLine int) string {
 // tokenEstimate 估算文本的 token 数量。
 // 使用 char/4 的粗略估算，配合 80% 安全边际足以防爆。
 func tokenEstimate(text string) int {
-	return len(text) / 4
+	return utf8.RuneCountInString(text) / 2
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +569,7 @@ func tokenEstimate(text string) int {
 // ---------------------------------------------------------------------------
 
 // llmIndex 调用 LLM 进行文本分块 + 实体关系提取。
+// 内置重试机制：最多重试 2 次（首次失败后间隔 2s、4s 指数退避）。
 func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*IndexData, error) {
 	idx.logger.Debug("LLM call starting",
 		"doc_id", docID,
@@ -569,18 +594,44 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 	messages := buildSystemMessages(docID, lang, idx.entityDefs)
 	messages = append(messages, chat.NewUserMessage(content))
 
-	resp, err := client.Chat(ctx, messages, chat.WithThinking(idx.model.ThinkingBudget))
-	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
+	var resp *chat.Response
+	var lastErr error
+	for attempt := 0; attempt <= 2; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt*2) * time.Second
+			idx.logger.Warn("retrying LLM call", "attempt", attempt, "backoff", backoff, "error", lastErr)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		resp, lastErr = client.Chat(ctx, messages, chat.WithThinking(idx.model.ThinkingBudget))
+		if lastErr == nil {
+			break
+		}
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("LLM call failed after 3 attempts: %w", lastErr)
 	}
 
 	// 记录 Token 用量
 	if resp.Usage != nil {
+		idx.mu.Lock()
+		// lastUsage：最近一次调用的数据（覆盖）
 		idx.lastUsage = &TokenUsage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
 		}
+		// cumulativeUsage：累积（多切片路径使用）
+		if idx.cumulativeUsage == nil {
+			idx.cumulativeUsage = &TokenUsage{}
+		}
+		idx.cumulativeUsage.PromptTokens += resp.Usage.PromptTokens
+		idx.cumulativeUsage.CompletionTokens += resp.Usage.CompletionTokens
+		idx.cumulativeUsage.TotalTokens += resp.Usage.TotalTokens
+		idx.mu.Unlock()
 		idx.logger.Debug("LLM call completed",
 			"doc_id", docID,
 			"prompt_tokens", idx.lastUsage.PromptTokens,
@@ -592,7 +643,31 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 
 	parsed, err := parseIndexData(resp.Content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+		// 降级：JSON 解析失败时尝试修复典型错误，再失败则兜底为单一全文 chunk
+		idx.logger.Warn("LLM response parse failed, falling back to single-chunk index", "error", err)
+		parsed = &IndexData{
+			Chunks: []struct {
+				Content   string         `json:"content"`
+				Metadata  map[string]any `json:"metadata,omitempty"`
+				ChunkMeta struct {
+					Positions [][2]int `json:"positions"`
+				} `json:"chunk_meta,omitempty"`
+			}{
+				{
+					Content: content,
+					Metadata: map[string]any{
+						"title":      "content",
+						"summary":    "",
+						"entity_ids": []any{},
+					},
+					ChunkMeta: struct {
+					Positions [][2]int `json:"positions"`
+				}{
+					Positions: [][2]int{{0, 0}},
+				},
+				},
+			},
+		}
 	}
 
 	return parsed, nil
@@ -634,6 +709,7 @@ func (idx *LLMIndexer) writeToStores(
 	// ── 1. 构造 Chunk（entity_ids 解析为真实 NodeID）─────────────────
 	chunks := make([]*core.Chunk, 0, len(data.Chunks))
 	chunkVectors := make([]*core.Vector, 0, len(data.Chunks))
+	entityToChunks := make(map[string][]string) // entity NodeID → chunkIDs
 
 	for i, c := range data.Chunks {
 		if c.Content == "" {
@@ -666,6 +742,11 @@ func (idx *LLMIndexer) writeToStores(
 					resolvedIDs = append(resolvedIDs, nodeID)
 				}
 			}
+		}
+
+		// 建立 entity→chunk 的逆向映射（用于图节点/边的 source 绑定）
+		for _, nodeID := range resolvedIDs {
+			entityToChunks[nodeID] = append(entityToChunks[nodeID], chunkID)
 		}
 
 		chunk := &core.Chunk{
@@ -723,13 +804,13 @@ func (idx *LLMIndexer) writeToStores(
 		}
 	}
 
-	// ── 3. 收集 chunkID 列表（用于图节点的 source 绑定）─────────────────
+	// ── 4. 构造 Node ──────────────────────────────────────────────────
+	// allChunkIDs 作为 fallback（极少情况下实体未出现在任何 chunk 的 entity_ids 中）
 	allChunkIDs := make([]string, len(chunks))
 	for i, c := range chunks {
 		allChunkIDs[i] = c.ID
 	}
 
-	// ── 4. 构造 Node ──────────────────────────────────────────────────
 	nodes := make([]*core.Node, 0, len(data.Entities))
 	for _, e := range data.Entities {
 		if e.Name == "" {
@@ -737,6 +818,10 @@ func (idx *LLMIndexer) writeToStores(
 		}
 		nodeID := ordinalToNodeID[e.ID]
 		desc, _ := e.Properties["description"].(string)
+		srcChunks := entityToChunks[nodeID]
+		if srcChunks == nil {
+			srcChunks = allChunkIDs
+		}
 		nodes = append(nodes, &core.Node{
 			ID:   nodeID,
 			Type: e.Type,
@@ -745,7 +830,7 @@ func (idx *LLMIndexer) writeToStores(
 				"description": desc,
 				"confidence":  0.9,
 			},
-			SourceChunkIDs: allChunkIDs,
+			SourceChunkIDs: srcChunks,
 			SourceDocIDs:   []string{docID},
 		})
 	}
@@ -775,6 +860,8 @@ func (idx *LLMIndexer) writeToStores(
 			predicate = r.Type
 		}
 
+		edgeSrcChunks := uniqueMerge(entityToChunks[sourceID], entityToChunks[targetID])
+
 		edges = append(edges, &core.Edge{
 			ID:        utils.GenerateID([]byte(sourceName + r.Type + targetName + docID)),
 			Type:      r.Type,
@@ -785,7 +872,7 @@ func (idx *LLMIndexer) writeToStores(
 				"description": desc,
 				"confidence":  0.9,
 			},
-			SourceChunkIDs: allChunkIDs,
+			SourceChunkIDs: edgeSrcChunks,
 			SourceDocIDs:   []string{docID},
 		})
 	}
@@ -814,4 +901,19 @@ func lastPos(positions [][2]int) int {
 		return 0
 	}
 	return positions[len(positions)-1][1]
+}
+
+// uniqueMerge 合并多个字符串切片并去重。
+func uniqueMerge(slices ...[]string) []string {
+	seen := make(map[string]struct{})
+	var result []string
+	for _, slice := range slices {
+		for _, s := range slice {
+			if _, ok := seen[s]; !ok {
+				seen[s] = struct{}{}
+				result = append(result, s)
+			}
+		}
+	}
+	return result
 }

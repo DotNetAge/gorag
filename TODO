@@ -1,11 +1,39 @@
-- [ ] Result 的处理还是不完善，没有完全按照RAG的理论进行对应的处理
-- [ ] Query 的增强部分还有待改善
-- [ ] 需要确认HIT的Meta中带有Source字段
-- [ ] 增加XML的解析功能
-- [ ] 增加JSON的解析功能
-- [ ] 问题 : Add() 、 AddFile() 、 Remove() 、 IndexChunk() 、 IndexChunks() 方法中存在 大量重复代码 ——相同的索引器遍历、 ChunkIndexer 接口检查、错误聚合逻辑被复制了 5 次以上
-  - 位置 : hybrid.go:L149-L194 , hybrid.go:L384-L406
-  - 建议 : 抽取通用的 distributeToIndexers() 函数，接受一个操作函数作为参数
-- [ ] 问题 : Search() 方法约 140 行，包含并发搜索调度、图索引器路由、结果融合、重排序等多个阶段
-  - 建议 : 将图索引器搜索部分抽取为 searchGraphWithRouter() 方法
-  - 位置 : hybrid.go:L244-L381
+# GoRAG 改进计划 — 完成
+
+范围说明：仅关注 LLMIndexer。
+
+## 已完成（本次迭代）
+
+### P0 — 行为错误 / 架构缺陷
+- [x] `WithEntities` 重构 `[]string` → `[]EntityDef{Prompt, Schema}`（gorag + mindx 迁移）
+- [x] EntityTag UI → Schema 文件映射，保存 `entity-defs.json` 时嵌入
+- [x] `tokenEstimate` 修复 `len/4` → `utf8.RuneCountInString/2`
+- [x] **多切片 SourceChunkIDs 绑定错误**：建立 `entity→chunk` 映射替代 `allChunkIDs`
+- [x] `lastUsage` 数据竞争（加 `sync.Mutex`）
+
+### P1 — 设计问题
+- [x] `IndexChunks` 去掉 LLM 调用，只做 embed + upsert
+- [x] 多切片合并时 Chunk 去重（按 content 去重）
+- [x] 切片行号 positions 说明明确化（prompt 中新增标注）
+
+### P2 — 健壮性 / 边界
+- [x] LLM 调用 retry（最多 3 次，2s/4s 退避）
+- [x] `LastTokenUsage` 改为单次值 + `CumulativeTokenUsage` 累积值
+- [x] LLM 响应解析失败降级为单一全文 chunk（不阻断开索引）
+- [x] `AddFile` 与 `Add` 行为对齐——超限自动切片（取消手动拆分要求）
+- [x] `fallbackIndexData` 中 positions 从字符数修正为 `[0, 0]`
+
+### 审计
+- [x] 第 1 次审计（发现 2 个问题，已修复）
+- [x] 第 2 次审计（mindx 跨项目一致性，全部通过）
+- [x] 第 3 次审计（edge cases + 整体验证，全部通过）
+
+## 本次迭代不处理
+
+| 条目 | 原因 |
+|---|---|
+| `confidence` 0.9 | 不被消费，不是问题 |
+| 超时硬编码 5min | 影响面大，单独处理 |
+| embedding 串行 | 需要 embedder batch API 支持 |
+| 大文本内存 | 需要 io.Reader 接口 |
+| Language 缺省 English | 影响面小 |
