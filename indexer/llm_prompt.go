@@ -3,8 +3,6 @@ package indexer
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/DotNetAge/gorag/core"
 )
 
 // 默认模型最大上下文窗口（token 数）
@@ -68,5 +66,4 @@ func indexOf(s, substr string) int {
 	return -1
 }
 
-// Ensure implementation of core.ChunkIndexer interface
-var _ core.ChunkIndexer = (*LLMIndexer)(nil)
+ 

@@ -87,7 +87,7 @@ func (g *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 	if len(chunks) == 0 {
 		return nil, nil
 	}
-	if err := g.IndexChunks(ctx, chunks); err != nil {
+	if err := g.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -103,7 +103,7 @@ func (g *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	if len(chunks) == 0 {
 		return nil, nil
 	}
-	if err := g.IndexChunks(ctx, chunks); err != nil {
+	if err := g.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -499,7 +499,7 @@ func (g *GraphIndexer) SearchGlobal(ctx context.Context, query string, level int
 }
 
 // IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
-func (g *GraphIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+func (g *GraphIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
 		return fmt.Errorf("chunk cannot be nil")
 	}
@@ -512,7 +512,7 @@ func (g *GraphIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error 
 //  1. 大块优先：将 ParentDoc 子块聚合到父块，减少总 chunk 数
 //  2. 分级提取：跳过低价值 chunk（纯描述、过短内容），仅对高价值 chunk 调用 LLM
 //  3. 并发提取：远程 LLM 全并发；本地 LLM（Ollama 等）串行提取但并发写入图数据库
-func (g *GraphIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+func (g *GraphIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -817,8 +817,7 @@ func (g *GraphIndexer) Count(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-// Ensure implementation of core.ChunkIndexer interface
-var _ core.ChunkIndexer = (*GraphIndexer)(nil)
+
 
 // Close 关闭图存储和缓存
 func (g *GraphIndexer) Close(ctx context.Context) error {

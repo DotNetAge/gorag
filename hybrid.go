@@ -6,7 +6,6 @@ import (
 	"maps"
 	"sort"
 	"sync"
-	"time"
 
 	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
@@ -161,7 +160,7 @@ func (h *HybridIndexer) ListIndexers() []string {
 	return names
 }
 
-// Add 将内容添加到所有索引器
+// Add 将内容添加到所有子索引器（纯透传，每个子索引器自行分块处理）
 func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
@@ -180,58 +179,32 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 		"bytes", len(content),
 	)
 
-	chunkStart := time.Now()
-	chunks, err := indexer.GetChunks(content, indexer.WithChunkLogger(h.logger))
-	if err != nil {
-		h.logger.Error("indexer.add failed at chunker", err,
-			"source", "text",
-			"stage", "chunked",
-		)
-		return nil, fmt.Errorf("failed to generate chunks: %w", err)
-	}
-	if len(chunks) == 0 {
-		return nil, fmt.Errorf("no chunks generated from content")
-	}
-	h.logger.Info("indexer.chunked",
-		"source", "text",
-		"chunks", len(chunks),
-		"chunk_id_first", chunks[0].ID,
-		"chunk_id_last", chunks[len(chunks)-1].ID,
-		"duration_ms", time.Since(chunkStart).Milliseconds(),
-	)
-
+	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
-		if chunkIndexer, ok := idx.(core.ChunkIndexer); ok {
-			if err := chunkIndexer.IndexChunks(ctx, chunks); err != nil {
-				h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", err)
-				partialErrs = append(partialErrs, err)
-			}
-		} else {
-			for _, chunk := range chunks {
-				if err := idx.IndexChunk(ctx, chunk); err != nil {
-					h.logger.Warn("partial index failure", "indexer", idx.Name(), "chunkID", chunk.ID, "error", err)
-					partialErrs = append(partialErrs, err)
-					break
-				}
-			}
+		chunks, addErr := idx.Add(ctx, content)
+		if addErr != nil {
+			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)
+			partialErrs = append(partialErrs, addErr)
+		} else if len(chunks) > 0 && allChunks == nil {
+			allChunks = chunks
 		}
 	}
 
 	if len(partialErrs) > 0 {
-		return chunks, fmt.Errorf("index succeeded partially (%d/%d indexers failed): %w",
+		return allChunks, fmt.Errorf("index succeeded partially (%d/%d indexers failed): %w",
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
 
 	h.logger.Info("indexer.add.done",
 		"source", "text",
-		"chunks", len(chunks),
+		"chunks", len(allChunks),
 	)
 
-	return chunks, nil
+	return allChunks, nil
 }
 
-// AddFile 将文件添加到所有索引器
+// AddFile 将文件添加到所有子索引器（纯透传，每个子索引器自行分块处理）
 func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
@@ -250,59 +223,30 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 		"indexers", len(indexers),
 	)
 
-	totalStart := time.Now()
-	chunkStart := time.Now()
-	chunks, err := indexer.GetFileChunks(filePath, indexer.WithChunkLogger(h.logger))
-	if err != nil {
-		h.logger.Error("indexer.add failed at chunker", err,
-			"source", "file",
-			"file", filePath,
-			"stage", "chunked",
-		)
-		return nil, fmt.Errorf("failed to generate chunks from file: %w", err)
-	}
-	if len(chunks) == 0 {
-		return nil, nil
-	}
-	h.logger.Info("indexer.chunked",
-		"source", "file",
-		"file", filePath,
-		"chunks", len(chunks),
-		"chunk_id_first", chunks[0].ID,
-		"chunk_id_last", chunks[len(chunks)-1].ID,
-		"duration_ms", time.Since(chunkStart).Milliseconds(),
-	)
-
+	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
-		if chunkIndexer, ok := idx.(core.ChunkIndexer); ok {
-			if err := chunkIndexer.IndexChunks(ctx, chunks); err != nil {
-				h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", err)
-				partialErrs = append(partialErrs, err)
-			}
-		} else {
-			for _, chunk := range chunks {
-				if err := idx.IndexChunk(ctx, chunk); err != nil {
-					h.logger.Warn("partial index failure", "indexer", idx.Name(), "chunkID", chunk.ID, "error", err)
-					partialErrs = append(partialErrs, err)
-				}
-			}
+		chunks, addErr := idx.AddFile(ctx, filePath)
+		if addErr != nil {
+			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)
+			partialErrs = append(partialErrs, addErr)
+		} else if len(chunks) > 0 && allChunks == nil {
+			allChunks = chunks
 		}
 	}
 
 	if len(partialErrs) > 0 {
-		return chunks, fmt.Errorf("indexfile succeeded partially (%d/%d indexers failed): %w",
+		return allChunks, fmt.Errorf("indexfile succeeded partially (%d/%d indexers failed): %w",
 			len(partialErrs), len(indexers), partialErrs[0])
 	}
 
 	h.logger.Info("indexer.add.done",
 		"source", "file",
 		"file", filePath,
-		"chunks", len(chunks),
-		"duration_ms", time.Since(totalStart).Milliseconds(),
+		"chunks", len(allChunks),
 	)
 
-	return chunks, nil
+	return allChunks, nil
 }
 
 // Search 从所有索引器搜索并融合结果
@@ -466,70 +410,6 @@ func (h *HybridIndexer) Remove(ctx context.Context, chunkID string) error {
 	}
 	if len(errs) > 0 {
 		h.logger.Warn("remove completed with partial failures", "total", len(indexers), "failed", len(errs))
-	}
-	return nil
-}
-
-// IndexChunk indexes a single pre-generated chunk across all indexers
-func (h *HybridIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
-	h.mu.RLock()
-	indexers := make([]core.Indexer, 0, len(h.indexers))
-	for _, idx := range h.indexers {
-		indexers = append(indexers, idx)
-	}
-	h.mu.RUnlock()
-
-	var errs []error
-	for _, idx := range indexers {
-		if err := idx.IndexChunk(ctx, chunk); err != nil {
-			h.logger.Warn("index chunk partial failure", "indexer", idx.Name(), "chunkID", chunk.ID, "error", err)
-			errs = append(errs, fmt.Errorf("%s: %w", idx.Name(), err))
-		}
-	}
-	if len(errs) == len(indexers) && len(errs) > 0 {
-		return fmt.Errorf("index chunk failed from all %d indexers: %v", len(errs), errs)
-	}
-	if len(errs) > 0 {
-		h.logger.Warn("index chunk completed with partial failures", "total", len(indexers), "failed", len(errs))
-	}
-	return nil
-}
-
-// IndexChunks indexes multiple pre-generated chunks across all indexers
-func (h *HybridIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
-	if len(chunks) == 0 {
-		return nil
-	}
-
-	h.mu.RLock()
-	indexers := make([]core.Indexer, 0, len(h.indexers))
-	for _, idx := range h.indexers {
-		indexers = append(indexers, idx)
-	}
-	h.mu.RUnlock()
-
-	var errs []error
-	for _, idx := range indexers {
-		if chunkIndexer, ok := idx.(core.ChunkIndexer); ok {
-			if err := chunkIndexer.IndexChunks(ctx, chunks); err != nil {
-				h.logger.Warn("index chunks partial failure", "indexer", idx.Name(), "error", err)
-				errs = append(errs, fmt.Errorf("%s: %w", idx.Name(), err))
-			}
-		} else {
-			for _, chunk := range chunks {
-				if err := idx.IndexChunk(ctx, chunk); err != nil {
-					h.logger.Warn("index chunk partial failure", "indexer", idx.Name(), "chunkID", chunk.ID, "error", err)
-					errs = append(errs, fmt.Errorf("%s: %w", idx.Name(), err))
-					break
-				}
-			}
-		}
-	}
-	if len(errs) == len(indexers) && len(errs) > 0 {
-		return fmt.Errorf("index chunks failed from all %d indexers: %v", len(errs), errs)
-	}
-	if len(errs) > 0 {
-		h.logger.Warn("index chunks completed with partial failures", "total", len(indexers), "failed", len(errs))
 	}
 	return nil
 }

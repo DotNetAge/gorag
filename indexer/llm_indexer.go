@@ -375,12 +375,12 @@ func (idx *LLMIndexer) Remove(ctx context.Context, chunkID string) error {
 	return idx.vectorDB.Delete(ctx, chunkID)
 }
 
-// IndexChunk 索引单个预生成的 Chunk（实现 core.ChunkIndexer 接口）。
+// saveChunk 索引单个预生成的 Chunk。
 // IndexChunks 是"分块后的处理入口"，不做 LLM 调用，只做向量化 + 存储。
 //
 // LLM 分块 + 实体提取在 Add 路径中完成。IndexChunk/IndexChunks 由 Add 内调，
 // 或由 HybridIndexer 在合并分发预分块内容时调用。
-func (idx *LLMIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+func (idx *LLMIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
 		return fmt.Errorf("chunk cannot be nil")
 	}
@@ -393,13 +393,13 @@ func (idx *LLMIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error 
 }
 
 // IndexChunks 批量索引预生成的 Chunk（实现 core.ChunkIndexer 接口）。
-func (idx *LLMIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+func (idx *LLMIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 
 	for _, chunk := range chunks {
-		if err := idx.IndexChunk(ctx, chunk); err != nil {
+		if err := idx.saveChunk(ctx, chunk); err != nil {
 			return err
 		}
 	}

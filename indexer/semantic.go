@@ -62,7 +62,7 @@ func (s *semanticIndexer) Add(ctx context.Context, content string) ([]*core.Chun
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from content")
 	}
-	if err := s.IndexChunks(ctx, chunks); err != nil {
+	if err := s.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -79,7 +79,7 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from file")
 	}
-	if err := s.IndexChunks(ctx, chunks); err != nil {
+	if err := s.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -264,7 +264,7 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 }
 
 // IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
-func (s *semanticIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+func (s *semanticIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
 		return fmt.Errorf("chunk cannot be nil")
 	}
@@ -274,7 +274,7 @@ func (s *semanticIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) err
 // IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
 // Emits a single batch-level INFO log "indexer.embedded" summarizing the embedding
 // and upsert timings so the caller can see one line per batch instead of one per chunk.
-func (s *semanticIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+func (s *semanticIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -478,5 +478,4 @@ func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
 	return s.db.Count(ctx)
 }
 
-// Ensure implementation of core.ChunkIndexer interface
-var _ core.ChunkIndexer = (*semanticIndexer)(nil)
+

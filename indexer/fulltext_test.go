@@ -317,29 +317,30 @@ func TestFulltextIndexer_Interfaces(t *testing.T) {
 	// 编译期检查已在 fulltext.go 中通过 var _ 断言
 	// 这里验证运行时行为: Indexer 和 ChunkIndexer 接口
 	var _ core.Indexer = (*fulltextIndexer)(nil)
-	var _ core.ChunkIndexer = (*fulltextIndexer)(nil)
 
 	dbPath := filepath.Join(t.TempDir(), "fulltext_iface_test")
-	idx, err := NewFulltextIndexerWithFile(dbPath)
+	fidx, err := NewFulltextIndexerWithFile(dbPath)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 
-	// 测试 IndexChunk
+	// 类型断言到 *fulltextIndexer 以调用未导出的 saveChunk/saveChunks
+	idx, ok := fidx.(*fulltextIndexer)
+	require.True(t, ok, "应能断言为 *fulltextIndexer")
+
+	// 测试 saveChunk
 	chunks, err := GetChunks("接口合规性验证文本内容。")
 	require.NoError(t, err)
 	require.NotEmpty(t, chunks)
 
-	err = idx.IndexChunk(ctx, chunks[0])
-	require.NoError(t, err, "IndexChunk 不应报错")
+	err = idx.saveChunk(ctx, chunks[0])
+	require.NoError(t, err, "saveChunk 不应报错")
 
-	// 测试 IndexChunks (批量) — 需要通过 ChunkIndexer 接口调用
-	ci, ok := idx.(core.ChunkIndexer)
-	require.True(t, ok, "应实现 ChunkIndexer 接口")
+	// 测试 saveChunks (批量)
 	moreChunks, err := GetChunks("批量索引测试内容，包含多个段落。")
 	require.NoError(t, err)
-	err = ci.IndexChunks(ctx, moreChunks)
-	require.NoError(t, err, "IndexChunks 不应报错")
+	err = idx.saveChunks(ctx, moreChunks)
+	require.NoError(t, err, "saveChunks 不应报错")
 }
 
 // truncate 截断字符串用于日志输出

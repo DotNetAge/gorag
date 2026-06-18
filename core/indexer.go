@@ -53,17 +53,6 @@ type Indexer interface {
 	//   - error: An error if the operation fails
 	Remove(ctx context.Context, chunkID string) error
 
-	// IndexChunk indexes a pre-generated chunk.
-	// This method is used by HybridIndexer to ensure all indexers use the same Chunk IDs.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation
-	//   - chunk: The chunk to index
-	//
-	// Returns:
-	//   - error: An error if the operation fails
-	IndexChunk(ctx context.Context, chunk *Chunk) error
-
 	// List returns paginated hits from the store.
 	// Only semantic (vector) indexers return actual data;
 	// BM25 and Graph indexers return empty slices.
@@ -104,18 +93,4 @@ type Indexer interface {
 	Count(ctx context.Context) (int, error)
 }
 
-// ChunkIndexer is an optional interface for indexers that support batch chunk indexing.
-// This interface is used by HybridIndexer to ensure data consistency across multiple indexers.
-type ChunkIndexer interface {
-	Indexer
-	// IndexChunks indexes multiple pre-generated chunks in batch.
-	// This method is used by HybridIndexer to ensure all indexers use the same Chunk IDs.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation
-	//   - chunks: The chunks to index
-	//
-	// Returns:
-	//   - error: An error if the operation fails
-	IndexChunks(ctx context.Context, chunks []*Chunk) error
-}
+

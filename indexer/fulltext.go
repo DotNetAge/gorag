@@ -49,7 +49,7 @@ func (f *fulltextIndexer) Add(ctx context.Context, content string) ([]*core.Chun
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks generated from content")
 	}
-	if err := f.IndexChunks(ctx, chunks); err != nil {
+	if err := f.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -72,7 +72,7 @@ func (f *fulltextIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 	if len(chunks) == 0 {
 		return nil, nil
 	}
-	if err := f.IndexChunks(ctx, chunks); err != nil {
+	if err := f.saveChunks(ctx, chunks); err != nil {
 		return nil, err
 	}
 	return chunks, nil
@@ -110,7 +110,7 @@ func (f *fulltextIndexer) Remove(ctx context.Context, chunkID string) error {
 }
 
 // IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
-func (f *fulltextIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+func (f *fulltextIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
 		return fmt.Errorf("chunk cannot be nil")
 	}
@@ -118,7 +118,7 @@ func (f *fulltextIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) err
 }
 
 // IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface)
-func (f *fulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+func (f *fulltextIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -138,8 +138,7 @@ func (f *fulltextIndexer) Count(ctx context.Context) (int, error) {
 // 私有：确保实现 core.Indexer 接口
 var _ core.Indexer = (*fulltextIndexer)(nil)
 
-// Ensure implementation of core.ChunkIndexer interface
-var _ core.ChunkIndexer = (*fulltextIndexer)(nil)
+
 
 // safeFulltextIndexer 线程安全的包装器
 type safeFulltextIndexer struct {
@@ -183,16 +182,16 @@ func (f *safeFulltextIndexer) Remove(ctx context.Context, chunkID string) error 
 	return f.inner.Remove(ctx, chunkID)
 }
 
-func (f *safeFulltextIndexer) IndexChunk(ctx context.Context, chunk *core.Chunk) error {
+func (f *safeFulltextIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.inner.IndexChunk(ctx, chunk)
+	return f.inner.saveChunk(ctx, chunk)
 }
 
-func (f *safeFulltextIndexer) IndexChunks(ctx context.Context, chunks []*core.Chunk) error {
+func (f *safeFulltextIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.inner.IndexChunks(ctx, chunks)
+	return f.inner.saveChunks(ctx, chunks)
 }
 
 func (f *safeFulltextIndexer) Count(ctx context.Context) (int, error) {
