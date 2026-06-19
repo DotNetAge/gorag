@@ -103,3 +103,5 @@ require (
 )
 
 tool golang.org/x/mobile/cmd/gobind
+
+replace github.com/DotNetAge/gograph v0.2.4 => /Users/ray/workspaces/ai-ecosystem/gograph

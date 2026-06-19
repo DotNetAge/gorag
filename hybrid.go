@@ -499,28 +499,40 @@ func (h *HybridIndexer) NewQuery(terms string) core.Query {
 	return nil
 }
 
-// List returns paginated hits from the semantic (vector) indexer only.
-// BM25 and Graph indexers return empty results by design.
+// List returns paginated hits from the primary chunk-storing indexer.
+// Tries "semantic" first; falls back to the first available indexer.
 func (h *HybridIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
 	h.mu.RLock()
-	semanticIdx, ok := h.indexers["semantic"]
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
-	if !ok {
-		return []core.Hit{}, nil
+	// Try semantic indexer first (primary chunk store)
+	for name := range h.indexers {
+		if name == "semantic" {
+			return h.indexers[name].List(ctx, offset, limit)
+		}
 	}
-	return semanticIdx.List(ctx, offset, limit)
+	// Fallback: return list from first available indexer
+	for _, idx := range h.indexers {
+		return idx.List(ctx, offset, limit)
+	}
+	return []core.Hit{}, nil
 }
 
 // GetChunks returns all chunks belonging to the specified document.
-// Delegates to the semantic (vector) indexer which stores chunk metadata.
+// Tries "semantic" first; falls back to the first available indexer.
 func (h *HybridIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
 	h.mu.RLock()
-	semanticIdx, ok := h.indexers["semantic"]
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
-	if !ok {
-		return []*core.Chunk{}, nil
+	// Try semantic indexer first (primary chunk store)
+	for name := range h.indexers {
+		if name == "semantic" {
+			return h.indexers[name].GetChunks(ctx, docId)
+		}
 	}
-	return semanticIdx.GetChunks(ctx, docId)
+	// Fallback: return from first available indexer
+	for _, idx := range h.indexers {
+		return idx.GetChunks(ctx, docId)
+	}
+	return []*core.Chunk{}, nil
 }
