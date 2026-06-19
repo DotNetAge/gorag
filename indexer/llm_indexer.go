@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -213,15 +214,25 @@ func (idx *LLMIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 	doc := document.New(content, mime)
 	docID := doc.GetID()
 
-	// 2. Token 估算 → 切片或直接处理
+	// 2. 检测内容类型 → 选择 System Prompt（代码域 / 文本域）
+	lang := idx.model.Language
+	if lang == "" {
+		lang = "English"
+	}
+	systemMsgs := buildSystemMessages(docID, lang, idx.entityDefs)
+	if isCodeContent(content) {
+		systemMsgs = buildCodeSystemMessages(docID, lang)
+	}
+
+	// 3. Token 估算 → 切片或直接处理
 	slices := idx.sliceContent(content)
 	if len(slices) == 1 {
 		idx.logger.Debug("single slice, calling LLM", "doc_id", docID)
-		parsed, err := idx.llmIndex(ctx, docID, slices[0])
+		parsed, err := idx.llmIndex(ctx, docID, slices[0], systemMsgs)
 		if err != nil {
 			return nil, err
 		}
-		return idx.writeToStores(ctx, docID, parsed)
+		return idx.writeToStores(ctx, docID, parsed, "", mime)
 	}
 
 	// 多切片：逐片 LLM 处理
@@ -231,7 +242,7 @@ func (idx *LLMIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 	allResults := make([]*IndexData, 0, len(slices))
 	for i, s := range slices {
 		idx.logger.Debug("LLM call for slice", "slice", i+1, "total", len(slices))
-		parsed, err := idx.llmIndex(ctx, docID, s)
+		parsed, err := idx.llmIndex(ctx, docID, s, systemMsgs)
 		if err != nil {
 			return nil, fmt.Errorf("slice indexing failed: %w", err)
 		}
@@ -245,7 +256,7 @@ func (idx *LLMIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, 
 		"chunks", len(merged.Chunks),
 		"entities", len(merged.Entities),
 		"relations", len(merged.Relations))
-	return idx.writeToStores(ctx, docID, merged)
+	return idx.writeToStores(ctx, docID, merged, "", mime)
 }
 
 // AddFile 从文件读取内容后执行 LLM 索引。
@@ -293,15 +304,26 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		return []*core.Chunk{}, nil
 	}
 
-	// 2. Token 估算 → 切片或直接处理
+	// 2. 检测文件类型 → 选择 System Prompt（代码域 / 文本域）
+	lang := idx.model.Language
+	if lang == "" {
+		lang = "English"
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	systemMsgs := buildSystemMessages(docID, lang, idx.entityDefs)
+	if isCodeExt(ext) {
+		systemMsgs = buildCodeSystemMessages(docID, lang)
+	}
+
+	// 3. Token 估算 → 切片或直接处理
 	slices := idx.sliceContent(content)
 	if len(slices) == 1 {
 		idx.logger.Debug("single slice, calling LLM", "doc_id", docID)
-		parsed, err := idx.llmIndex(ctx, docID, slices[0])
+		parsed, err := idx.llmIndex(ctx, docID, slices[0], systemMsgs)
 		if err != nil {
 			return nil, err
 		}
-		return idx.writeToStores(ctx, docID, parsed)
+		return idx.writeToStores(ctx, docID, parsed, doc.GetSource(), doc.GetMimeType())
 	}
 
 	// 多切片：逐片 LLM 处理
@@ -311,7 +333,7 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	allResults := make([]*IndexData, 0, len(slices))
 	for i, s := range slices {
 		idx.logger.Debug("LLM call for slice", "slice", i+1, "total", len(slices))
-		parsed, err := idx.llmIndex(ctx, docID, s)
+		parsed, err := idx.llmIndex(ctx, docID, s, systemMsgs)
 		if err != nil {
 			return nil, fmt.Errorf("slice %d: %w", i+1, err)
 		}
@@ -321,7 +343,7 @@ func (idx *LLMIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	// 合并所有切片的结果后统一写入
 	idx.logger.Debug("merging slice results", "slice_count", len(allResults))
 	merged := mergeIndexData(allResults...)
-	return idx.writeToStores(ctx, docID, merged)
+	return idx.writeToStores(ctx, docID, merged, doc.GetSource(), doc.GetMimeType())
 }
 
 // Search 执行向量检索（委托给 vectorDB）。
@@ -569,8 +591,9 @@ func tokenEstimate(text string) int {
 // ---------------------------------------------------------------------------
 
 // llmIndex 调用 LLM 进行文本分块 + 实体关系提取。
+// systemMsgs 由调用方按文档类型构建（文本域用 buildSystemMessages，代码域用 buildCodeSystemMessages）。
 // 内置重试机制：最多重试 2 次（首次失败后间隔 2s、4s 指数退避）。
-func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*IndexData, error) {
+func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string, systemMsgs []chat.Message) (*IndexData, error) {
 	idx.logger.Debug("LLM call starting",
 		"doc_id", docID,
 		"content_length", utf8.RuneCountInString(content),
@@ -586,12 +609,8 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
-	lang := idx.model.Language
-	if lang == "" {
-		lang = "English"
-	}
-
-	messages := buildSystemMessages(docID, lang, idx.entityDefs)
+	messages := make([]chat.Message, 0, len(systemMsgs)+1)
+	messages = append(messages, systemMsgs...)
 	messages = append(messages, chat.NewUserMessage(content))
 
 	var resp *chat.Response
@@ -685,14 +704,18 @@ func (idx *LLMIndexer) llmIndex(ctx context.Context, docID, content string) (*In
 //  2. 处理 Chunks：将 entity_ids 中的序数解析为真实 NodeID
 //  3. 批量写入 vectorDB
 //  4. 批量写入 graphDB（Nodes + Edges）
+//
+// sourceFile 传入原始文件路径（AddFile 路径）或空字符串（Add 路径）。
+// mimeType 传入文档的 MIME 类型。
 func (idx *LLMIndexer) writeToStores(
-	ctx context.Context, docID string, data *IndexData,
+	ctx context.Context, docID string, data *IndexData, sourceFile, mimeType string,
 ) ([]*core.Chunk, error) {
 	idx.logger.Debug("writing to stores",
 		"doc_id", docID,
 		"chunks", len(data.Chunks),
 		"entities", len(data.Entities),
-		"relations", len(data.Relations))
+		"relations", len(data.Relations),
+		"source_file", sourceFile)
 
 	// ── 0. 构建 ordinal→NodeID 映射 ──────────────────────────────────
 	ordinalToNodeID := make(map[int]string, len(data.Entities))
@@ -751,7 +774,9 @@ func (idx *LLMIndexer) writeToStores(
 
 		chunk := &core.Chunk{
 			ID:      chunkID,
+			ParentID:"",
 			DocID:   docID,
+			MIMEType: mimeType,
 			Title:   title,
 			Content: c.Content,
 			ChunkMeta: core.ChunkMeta{
@@ -762,11 +787,14 @@ func (idx *LLMIndexer) writeToStores(
 				HeadingPath:  []string{},
 			},
 			Metadata: map[string]any{
-				"title":      title,
-				"summary":    summary,
-				"tags":       tagStrs,
-				"entity_ids": resolvedIDs,
-				"positions":  c.ChunkMeta.Positions,
+				"source_file": sourceFile,
+				"parent_id":   "",
+				"mime_type":   mimeType,
+				"title":       title,
+				"summary":     summary,
+				"tags":        tagStrs,
+				"entity_ids":  resolvedIDs,
+				"positions":   c.ChunkMeta.Positions,
 			},
 		}
 		chunks = append(chunks, chunk)
@@ -779,13 +807,16 @@ func (idx *LLMIndexer) writeToStores(
 		vec.ChunkID = chunkID
 		vec.ID = utils.GenerateID([]byte("vec_" + chunkID))
 		vec.Metadata = map[string]any{
-			"doc_id":     docID,
-			"title":      title,
-			"content":    c.Content,
-			"summary":    summary,
-			"tags":       tagStrs,
-			"positions":  c.ChunkMeta.Positions,
-			"entity_ids": resolvedIDs,
+			"doc_id":      docID,
+			"source_file": sourceFile,
+			"parent_id":   "",
+			"mime_type":   mimeType,
+			"title":       title,
+			"content":     c.Content,
+			"summary":     summary,
+			"tags":        tagStrs,
+			"positions":   c.ChunkMeta.Positions,
+			"entity_ids":  resolvedIDs,
 			"chunk_meta": map[string]any{
 				"index":         float64(i),
 				"start_pos":     float64(firstPos(c.ChunkMeta.Positions)),
@@ -817,19 +848,24 @@ func (idx *LLMIndexer) writeToStores(
 			continue
 		}
 		nodeID := ordinalToNodeID[e.ID]
-		desc, _ := e.Properties["description"].(string)
 		srcChunks := entityToChunks[nodeID]
 		if srcChunks == nil {
 			srcChunks = allChunkIDs
 		}
+
+		// 保留 LLM 输出的全部结构化属性（如 code 模式下的 methods/fields/extends/generics 等），
+		// 在顶层补充固定的 confidence 标注。
+		props := make(map[string]any, len(e.Properties)+1)
+		for k, v := range e.Properties {
+			props[k] = v
+		}
+		props["confidence"] = 0.9
+
 		nodes = append(nodes, &core.Node{
 			ID:   nodeID,
 			Type: e.Type,
 			Name: e.Name,
-			Properties: map[string]any{
-				"description": desc,
-				"confidence":  0.9,
-			},
+			Properties:    props,
 			SourceChunkIDs: srcChunks,
 			SourceDocIDs:   []string{docID},
 		})
@@ -854,7 +890,6 @@ func (idx *LLMIndexer) writeToStores(
 		sourceID := ordinalToNodeID[r.Source]
 		targetID := ordinalToNodeID[r.Target]
 
-		desc, _ := r.Properties["description"].(string)
 		predicate := r.Predicate
 		if predicate == "" {
 			predicate = r.Type
@@ -862,16 +897,20 @@ func (idx *LLMIndexer) writeToStores(
 
 		edgeSrcChunks := uniqueMerge(entityToChunks[sourceID], entityToChunks[targetID])
 
+		// 保留 LLM 输出的全部关系属性，在顶层补充 confidence。
+		eProps := make(map[string]any, len(r.Properties)+1)
+		for k, v := range r.Properties {
+			eProps[k] = v
+		}
+		eProps["confidence"] = 0.9
+
 		edges = append(edges, &core.Edge{
 			ID:        utils.GenerateID([]byte(sourceName + r.Type + targetName + docID)),
 			Type:      r.Type,
 			Source:    sourceID,
 			Target:    targetID,
 			Predicate: predicate,
-			Properties: map[string]any{
-				"description": desc,
-				"confidence":  0.9,
-			},
+			Properties:    eProps,
 			SourceChunkIDs: edgeSrcChunks,
 			SourceDocIDs:   []string{docID},
 		})
