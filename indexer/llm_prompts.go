@@ -55,10 +55,31 @@ The chunk.content MUST be the exact original text for those line numbers.
   "entities": [
     {
       "id": 1,
-      "type": "ENTITY_TYPE (one of the types defined above)",
-      "name": "normalized entity name",
+      "type": "Concept",
+      "name": "entity name (e.g. Single Responsibility Principle)",
       "properties": {
-        "description": "brief description relevant to this document"
+        "description": "brief description of the concept",
+        "domain": "subject domain (e.g. software design)"
+      }
+    },
+    {
+      "id": 2,
+      "type": "Tool",
+      "name": "entity name (e.g. Jenkins)",
+      "properties": {
+        "description": "what the tool does",
+        "purpose": "its main use case",
+        "platform": "where it runs"
+      }
+    },
+    {
+      "id": 3,
+      "type": "Person",
+      "name": "entity name (e.g. Martin Fowler)",
+      "properties": {
+        "description": "who this person is",
+        "role": "their role or title",
+        "expertise": "their area of knowledge"
       }
     }
   ],
@@ -66,10 +87,11 @@ The chunk.content MUST be the exact original text for those line numbers.
     {
       "source": 1,
       "target": 2,
-      "type": "RELATION_TYPE (one of the relation types defined above)",
+      "type": "RELATION_TYPE (e.g. CONTAINS, DEPENDS_ON)",
       "predicate": "relationship phrase in the document language",
       "properties": {
-        "description": "how they relate in context of this content"
+        "description": "how they relate in context of this content",
+        "TYPE_SPECIFIC_FIELDS": "see Entity Schema for relation type properties"
       }
     }
   ]

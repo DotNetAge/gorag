@@ -1,6 +1,9 @@
 package indexer
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // =============================================================================
 // 全局统一的关系类型 — 所有领域共享，保证图数据库关系语义一致。
@@ -22,6 +25,21 @@ const globalExtractionConstraints = `### Extraction Constraints
 - Short content (<=3 lines) → extract only Topic, Term, and Concept (if applicable).
 - Always create a "Chunk DESCRIBES Entity" edge for each extracted entity.`
 
+// entityPropertyHints 常见实体类型的推荐属性。
+// 由 buildPropertyGuidance 根据类型名查找。
+var entityPropertyHints = map[string]string{
+	"Concept":  "domain_or_field",
+	"Term":     "definition",
+	"Method":   "domain, steps_or_stages",
+	"Resource": "format, source_or_author",
+	"Tool":     "purpose, platform",
+	"Person":   "role, expertise, affiliation",
+	"Topic":    "description",
+	"Event":    "date_or_time, location",
+	"Work":     "creator, format",
+	"Metric":   "measurement_unit, value_range",
+}
+
 // defaultEntityDefs 无自定义实体定义时的通用兜底。
 var defaultEntityDefs = []EntityDef{
 	{Prompt: "**Concept** — core idea, theory, principle, paradigm"},
@@ -34,6 +52,43 @@ var defaultEntityDefs = []EntityDef{
 	{Prompt: "**Event** — milestone, meeting, occurrence, historical event"},
 	{Prompt: "**Work** — creative output (blog, video, story, artwork, code)"},
 	{Prompt: "**Metric** — KPI, measurement, score, statistic"},
+}
+
+// extractTypeName 从 Prompt 格式 "**Name** — description" 中提取类型名。
+func extractTypeName(prompt string) string {
+	// 查找 **Name** 模式
+	start := strings.Index(prompt, "**")
+	if start < 0 {
+		return ""
+	}
+	start += 2
+	end := strings.Index(prompt[start:], "**")
+	if end < 0 {
+		return ""
+	}
+	return prompt[start : start+end]
+}
+
+// buildPropertyGuidance 生成 ### Entity Properties 段文本。
+// 对有 Schema 的类型引用其定义，对其他类型推断常见属性。
+func buildPropertyGuidance(defs []EntityDef) string {
+	var b strings.Builder
+	b.WriteString("### Entity Properties\n")
+	b.WriteString("Each entity's \"properties\" object MUST include \"description\" plus type-specific fields.\n")
+	for _, d := range defs {
+		typeName := extractTypeName(d.Prompt)
+		if typeName == "" {
+			continue
+		}
+		if d.Schema != "" {
+			b.WriteString(fmt.Sprintf("- **%s**: use the schema defined in ### Entity Schema\n", typeName))
+		} else if hint, ok := entityPropertyHints[typeName]; ok {
+			b.WriteString(fmt.Sprintf("- **%s**: description, %s\n", typeName, hint))
+		} else {
+			b.WriteString(fmt.Sprintf("- **%s**: description, fields semantically relevant to %s\n", typeName, typeName))
+		}
+	}
+	return b.String()
 }
 
 // buildOntology 组装完整的实体提取提示词。
@@ -63,6 +118,10 @@ func buildOntology(entityDefs []EntityDef) string {
 		b.WriteString(d.Prompt)
 	}
 
+	// Entity Properties Guidance（动态生成，每个类型不同的属性建议）
+	b.WriteString("\n\n")
+	b.WriteString(buildPropertyGuidance(defs))
+
 	// Entity Schema 段（仅当有非空 Schema 时追加）
 	hasSchema := false
 	for _, d := range defs {
@@ -72,20 +131,22 @@ func buildOntology(entityDefs []EntityDef) string {
 		}
 	}
 	if hasSchema {
-		b.WriteString("\n\n### Entity Schema\n")
+		b.WriteString("### Entity Schema — Each entity's properties MUST match its type's schema below\n")
 		for _, d := range defs {
 			if d.Schema == "" {
 				continue
+			}
+			typeName := extractTypeName(d.Prompt)
+			if typeName != "" {
+				b.WriteString(fmt.Sprintf("**%s**\n", typeName))
 			}
 			b.WriteString("```json\n")
 			b.WriteString(d.Schema)
 			b.WriteString("\n```\n")
 		}
-		// 去掉末尾多余的换行
-		_ = 0
 	}
 
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 	b.WriteString(globalRelationTypes)
 	b.WriteString("\n\n")
 	b.WriteString(globalExtractionConstraints)
