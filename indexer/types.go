@@ -17,7 +17,7 @@ type ModelConfig struct {
 	Model          string
 	Language       string // 内容语言英文名（如 "Chinese", "English", "Japanese"），直接注入提示词
 	MaxTokens      int    // 模型的最大上下文窗口（token 数），0 表示使用默认值 128000
-	ThinkingBudget int    // 思考模式的 token 预算（0 = 模型默认值），LLMIndexer 始终启用思考模式
+	ThinkingBudget int    // 思考模式的 token 预算（0 = 模型默认值），GraphIndexer 始终启用思考模式
 }
 
 // TokenUsage 单次 LLM 调用的 Token 消耗

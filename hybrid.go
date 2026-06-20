@@ -7,7 +7,6 @@ import (
 	"sort"
 	"sync"
 
-	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/indexer"
 	"github.com/DotNetAge/gorag/logging"
@@ -22,7 +21,6 @@ type HybridIndexer struct {
 	weights    map[string]float32
 	mu         sync.RWMutex
 	logger     logging.Logger
-	client     chat.Client
 	cacheStore core.CacheStore               // 图索引器的缓存（依赖注入）
 	closers    []func(context.Context) error // stores/indexers needing cleanup
 }
@@ -38,12 +36,14 @@ func WithCacheStore(cache core.CacheStore) HybridOption {
 }
 
 // NewHybridIndexer 创建混合索引器
+// 默认注册语义索引器和全文索引器。
+// 调用方可通过 AddIndexer 注册图索引器（GraphIndexer）以启用图检索能力。
+// 当图索引器已注册时，Add/AddFile 会自动跳过语义索引器（由 GraphIndexer 代劳）。
 func NewHybridIndexer(
 	logger logging.Logger,
 	vectorStore core.VectorStore,
 	graphStore core.GraphStore,
 	docStore core.FullTextStore,
-	client chat.Client,
 	embedder core.Embedder,
 	opts ...HybridOption) (*HybridIndexer, error) {
 
@@ -63,7 +63,6 @@ func NewHybridIndexer(
 		indexers: make(map[string]core.Indexer),
 		weights:  make(map[string]float32),
 		logger:   logger,
-		client:   client,
 	}
 
 	for _, opt := range opts {
@@ -77,37 +76,19 @@ func NewHybridIndexer(
 	)
 
 	fulltextIndexer, err := indexer.NewFulltextIndexer(docStore)
-
 	if err != nil {
 		logger.Error("Failed to init fulltext indexer", err)
 		return nil, err
 	}
 
-	if client != nil && graphStore != nil {
-		var graphOpts []any
-		graphOpts = append(graphOpts, client)
-		if h.cacheStore != nil {
-			graphOpts = append(graphOpts, indexer.WithCache(h.cacheStore))
-		}
-		graphIndexer := indexer.NewGraphIndexer(graphStore, graphOpts...)
-		h.AddIndexer(semanticIndexer, 0.7)
-		h.AddIndexer(fulltextIndexer, 0.2)
-		h.AddIndexer(graphIndexer, 0.1)
-	} else {
-		h.AddIndexer(semanticIndexer, 0.8)
-		h.AddIndexer(fulltextIndexer, 0.2)
-		// When graph store is not used by any indexer, register it for cleanup
-		if graphStore != nil {
-			h.closers = append(h.closers, func(ctx context.Context) error {
-				return graphStore.Close(ctx)
-			})
-		}
-		// Also close cache store when not used by graph indexer (no LLM client)
-		if h.cacheStore != nil {
-			h.closers = append(h.closers, func(ctx context.Context) error {
-				return h.cacheStore.Close()
-			})
-		}
+	h.AddIndexer(semanticIndexer, 0.8)
+	h.AddIndexer(fulltextIndexer, 0.2)
+
+	// When graph store is not wrapped by any indexer, register it for cleanup
+	if graphStore != nil {
+		h.closers = append(h.closers, func(ctx context.Context) error {
+			return graphStore.Close(ctx)
+		})
 	}
 
 	return h, nil
@@ -160,11 +141,17 @@ func (h *HybridIndexer) ListIndexers() []string {
 	return names
 }
 
-// Add 将内容添加到所有子索引器（纯透传，每个子索引器自行分块处理）
+// Add 将内容添加到所有子索引器。
+// 当图索引器（type="graph"）已注册时，语义索引器的 Add 被自动跳过，
+// 因为 GraphIndexer 的 Add 已同时写入 vectorDB + graphDB。
 func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
+	hasGraph := false
 	for _, idx := range h.indexers {
+		if idx.Type() == "graph" {
+			hasGraph = true
+		}
 		indexers = append(indexers, idx)
 	}
 	h.mu.RUnlock()
@@ -182,6 +169,10 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
+		// graph 已注册时跳过 semantic（由 graph 代劳）
+		if hasGraph && idx.Type() == "semantic" {
+			continue
+		}
 		chunks, addErr := idx.Add(ctx, content)
 		if addErr != nil {
 			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)
@@ -204,11 +195,17 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 	return allChunks, nil
 }
 
-// AddFile 将文件添加到所有子索引器（纯透传，每个子索引器自行分块处理）
+// AddFile 将文件添加到所有子索引器。
+// 当图索引器（type="graph"）已注册时，语义索引器的 AddFile 被自动跳过，
+// 因为 GraphIndexer 的 AddFile 已同时写入 vectorDB + graphDB。
 func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
+	hasGraph := false
 	for _, idx := range h.indexers {
+		if idx.Type() == "graph" {
+			hasGraph = true
+		}
 		indexers = append(indexers, idx)
 	}
 	h.mu.RUnlock()
@@ -226,6 +223,10 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
+		// graph 已注册时跳过 semantic（由 graph 代劳）
+		if hasGraph && idx.Type() == "semantic" {
+			continue
+		}
 		chunks, addErr := idx.AddFile(ctx, filePath)
 		if addErr != nil {
 			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)

@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/DotNetAge/gochat/client/openai"
-	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/core"
 	"github.com/DotNetAge/gorag/embedder"
 	"github.com/DotNetAge/gorag/indexer"
@@ -235,16 +233,7 @@ func createSemanticIndexer(dataDir, modelFile string) (core.Indexer, error) {
 }
 
 func createGraphIndexer(dataDir string) (core.Indexer, error) {
-	graphStore, err := createGraphDB(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create graph store: %w", err)
-	}
-	cacheStore, err := createCacheDB(dataDir)
-	if err != nil {
-		slog.Warn("Failed to create cache store, caching disabled", "error", err)
-		return indexer.NewGraphIndexer(graphStore), nil
-	}
-	return indexer.NewGraphIndexer(graphStore, indexer.WithCache(cacheStore)), nil
+	return nil, fmt.Errorf("graph indexer type is deprecated, use hybrid type instead")
 }
 
 func createFulltextIndexer(dataDir string) (core.Indexer, error) {
@@ -282,12 +271,7 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 		return nil, err
 	}
 
-	llm, err := createLLM()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM: %w", err)
-	}
-
-	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, llm, clip,
+	idx, err := NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, graphStore, fullTextStore, clip,
 		WithCacheStoreOrNil(dataDir))
 	if err != nil {
 		slog.Error("Failed to init indexer", "error", err)
@@ -298,30 +282,6 @@ func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, erro
 
 func getName(dataDir string) string {
 	return filepath.Base(dataDir)
-}
-
-func createLLM() (chat.Client, error) {
-	baseURL := os.Getenv(GORAG_BASE_URL)
-	apiKey := os.Getenv(GORAG_API_KEY)
-	authToken := os.Getenv(GORAG_AUTH_TOKEN)
-	model := os.Getenv(GORAG_MODEL)
-
-	if model == "" || baseURL == "" {
-		return nil, nil
-	}
-
-	c, err := openai.NewOpenAI(chat.Config{
-		APIKey:    apiKey,
-		Model:     model,
-		BaseURL:   baseURL,
-		AuthToken: authToken,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM client: %w", err)
-	}
-
-	return c, nil
 }
 
 func createVectorDB(dataDir string, modelFile string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {

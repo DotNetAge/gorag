@@ -236,7 +236,7 @@ func NewGraphStore(path string) (core.GraphStore, error) {
 }
 
 // WrapGraphStore 将已存在的 gograph 数据库包装为 core.GraphStore 接口。
-// 适用于外部已有 graphDB 实例的场景（如 daemon 共享同一个图数据库给 LLMIndexer）。
+// 适用于外部已有 graphDB 实例的场景（如 daemon 共享同一个图数据库给 GraphIndexer）。
 // 调用方负责 db 和 gs 的生命周期管理（Close）。
 func WrapGraphStore(db *api.DB, gs *api.GraphStore) core.GraphStore {
 	return &gographStore{
