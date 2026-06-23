@@ -92,6 +92,11 @@ type GraphIndexer struct {
 	entityDefs       []EntityDef // 来自 WithSchemas 的自定义实体类型定义
 	chatClient       chat.Client // 缓存的 LLM client，懒加载初始化后复用
 
+	// ── 统计计数器（累积值，跨多次 Add/AddFile 调用） ──
+	entitiesCreated int // 累计写入 graphDB 的实体数量
+	relsCreated    int // 累计写入 graphDB 的关系数量
+	statsMu        sync.Mutex
+
 	// ── 钩子回调（只读观察者模式） ──
 	OnRequest  func(docID string, messages []chat.Message, thinkingBudget int)
 	OnResponse func(docID string, resp *chat.Response)
@@ -960,6 +965,21 @@ func (idx *GraphIndexer) CumulativeTokenUsage() *TokenUsage {
 	return idx.cumulativeUsage
 }
 
+// EntityStats 返回自上次 ResetEntityStats 以来累计创建的实体和关系数量。
+func (idx *GraphIndexer) EntityStats() (entities, rels int) {
+	idx.statsMu.Lock()
+	defer idx.statsMu.Unlock()
+	return idx.entitiesCreated, idx.relsCreated
+}
+
+// ResetEntityStats 将实体/关系计数器归零（通常在每次 Sync 开始前调用）。
+func (idx *GraphIndexer) ResetEntityStats() {
+	idx.statsMu.Lock()
+	defer idx.statsMu.Unlock()
+	idx.entitiesCreated = 0
+	idx.relsCreated = 0
+}
+
 // ---------------------------------------------------------------------------
 // 内部：分页与上下文防爆
 // ---------------------------------------------------------------------------
@@ -1455,6 +1475,9 @@ func (idx *GraphIndexer) writeToStores(
 		if err := idx.graphDB.UpsertNodes(ctx, nodes); err != nil {
 			return chunks, fmt.Errorf("graphDB upsert nodes failed: %w", err)
 		}
+		idx.statsMu.Lock()
+		idx.entitiesCreated += len(nodes)
+		idx.statsMu.Unlock()
 	}
 
 	// ── 5. 构造 Edge ──────────────────────────────────────────────────
@@ -1500,6 +1523,9 @@ func (idx *GraphIndexer) writeToStores(
 		if err := idx.graphDB.UpsertEdges(ctx, edges); err != nil {
 			return chunks, fmt.Errorf("graphDB upsert edges failed: %w", err)
 		}
+		idx.statsMu.Lock()
+		idx.relsCreated += len(edges)
+		idx.statsMu.Unlock()
 	}
 
 	return chunks, nil
