@@ -116,7 +116,7 @@ func TestComprehensiveValidation(t *testing.T) {
 
 		node := &core.Node{
 			ID:         "test-node-id",
-			Type:       "Person",
+			Labels:     []string{"Person"},
 			Properties: map[string]any{"name": "Test", "age": 25},
 		}
 
@@ -218,8 +218,8 @@ func TestComprehensiveValidation(t *testing.T) {
 		ctx := context.Background()
 
 		nodes := []*core.Node{
-			{ID: "src", Type: "Person", Properties: map[string]any{"name": "Source"}},
-			{ID: "dst", Type: "Person", Properties: map[string]any{"name": "Dest"}},
+			{ID: "src", Labels: []string{"Person"}, Properties: map[string]any{"name": "Source"}},
+			{ID: "dst", Labels: []string{"Person"}, Properties: map[string]any{"name": "Dest"}},
 		}
 		err = store.UpsertNodes(ctx, nodes)
 		require.NoError(t, err)
@@ -274,8 +274,8 @@ func TestComprehensiveValidation(t *testing.T) {
 		ctx := context.Background()
 
 		node := &core.Node{
-			ID:   "test",
-			Type: "Person",
+			ID:     "test",
+			Labels: []string{"Person"},
 			Properties: map[string]any{
 				"name":    "Alice",
 				"age":     30,
@@ -533,8 +533,8 @@ func TestGraphStoreAPICompliance(t *testing.T) {
 
 	t.Run("UpsertNodes", func(t *testing.T) {
 		nodes := []*core.Node{
-			{ID: "n1", Type: "Person", Properties: map[string]any{"name": "Alice"}},
-			{ID: "n2", Type: "Person", Properties: map[string]any{"name": "Bob"}},
+			{ID: "n1", Labels: []string{"Person"}, Properties: map[string]any{"name": "Alice"}},
+			{ID: "n2", Labels: []string{"Person"}, Properties: map[string]any{"name": "Bob"}},
 		}
 
 		err := store.UpsertNodes(ctx, nodes)
@@ -559,7 +559,7 @@ func TestGraphStoreAPICompliance(t *testing.T) {
 		assert.NoError(t, err)
 		if node != nil {
 			assert.Equal(t, "n1", node.ID)
-			assert.Equal(t, "Person", node.Type)
+			assert.Equal(t, []string{"Person"}, node.Labels)
 		} else {
 			t.Log("WARNING: GetNode returned nil - this is a known issue")
 		}
@@ -577,11 +577,6 @@ func TestGraphStoreAPICompliance(t *testing.T) {
 		assert.NotEmpty(t, results)
 	})
 
-	t.Run("GetCommunitySummaries", func(t *testing.T) {
-		summaries, err := store.GetCommunitySummaries(ctx, 1)
-		assert.NoError(t, err)
-		t.Logf("Community summaries: %+v", summaries)
-	})
 }
 
 func TestPropertyTypeHandling(t *testing.T) {

@@ -63,11 +63,7 @@ func queryResultToNode(data map[string]any) *core.Node {
 		nodeID, _ = data["id"].(string)
 	}
 
-	nodeType := ""
-	if labels, ok := data["labels"].([]string); ok && len(labels) > 0 {
-		nodeType = labels[0]
-	}
-
+	labels, _ := data["labels"].([]string)
 	name := getStringProp(props, "name")
 	sourceChunkIDs := getStringSliceProp(props, "source_chunk_ids")
 	sourceDocIDs := getStringSliceProp(props, "source_doc_ids")
@@ -79,7 +75,7 @@ func queryResultToNode(data map[string]any) *core.Node {
 
 	return &core.Node{
 		ID:             nodeID,
-		Type:           nodeType,
+		Labels:         labels,
 		Name:           name,
 		Properties:     props,
 		SourceChunkIDs: sourceChunkIDs,
@@ -127,11 +123,6 @@ func queryResultToEdge(data map[string]any) *core.Edge {
 func convertNode(node *graph.Node) *core.Node {
 	props := propsToAny(node.Properties)
 
-	nodeType := ""
-	if len(node.Labels) > 0 {
-		nodeType = node.Labels[0]
-	}
-
 	nodeID := node.ID
 	if id := getStringProp(props, "ID"); id != "" {
 		nodeID = id
@@ -148,7 +139,7 @@ func convertNode(node *graph.Node) *core.Node {
 
 	return &core.Node{
 		ID:             nodeID,
-		Type:           nodeType,
+		Labels:         node.Labels,
 		Name:           name,
 		Properties:     props,
 		SourceChunkIDs: sourceChunkIDs,
@@ -253,12 +244,8 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 
 	nodeDataList := make([]*api.NodeData, 0, len(nodes))
 	for _, node := range nodes {
-		labels := []string{node.Type}
-		if node.Type == "" {
-			labels = []string{"Node"}
-		}
-
-		props := make(map[string]interface{}, len(node.Properties)+4)
+		// Labels 直接映射到 gograph.Node.Labels，使用原生标签匹配（MATCH (n:Person)）。
+		props := make(map[string]interface{}, len(node.Properties)+5)
 		props["ID"] = node.ID
 		props["name"] = node.Name
 		for k, v := range node.Properties {
@@ -271,9 +258,14 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 			props["source_doc_ids"] = node.SourceDocIDs
 		}
 
+		nodeLabels := node.Labels
+		if nodeLabels == nil {
+			nodeLabels = []string{}
+		}
+
 		nodeDataList = append(nodeDataList, &api.NodeData{
 			ID:         node.ID,
-			Labels:     labels,
+			Labels:     nodeLabels,
 			Properties: props,
 		})
 	}
@@ -416,26 +408,22 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 	return results, nil
 }
 
-// GetCommunitySummaries retrieves community summaries at the specified level.
-func (s *gographStore) GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error) {
-	query := `MATCH (c:Community) WHERE c.level = $level RETURN c.id as id, c.summary as summary, c.keywords as keywords, c.nodes as nodes`
-	results, err := s.Query(ctx, query, map[string]any{"level": level})
-	if err != nil {
-		return []map[string]any{}, nil
-	}
-	return results, nil
-}
-
 // DeleteNode deletes a node and its edges.
 func (s *gographStore) DeleteNode(ctx context.Context, id string) error {
 	_, err := s.db.Exec(ctx, "MATCH (n {ID: $id}) DETACH DELETE n", map[string]any{"id": id})
-	return err
+	if err != nil {
+		return fmt.Errorf("delete node %s: %w", id, err)
+	}
+	return nil
 }
 
 // DeleteEdge deletes an edge by ID.
 func (s *gographStore) DeleteEdge(ctx context.Context, id string) error {
 	_, err := s.db.Exec(ctx, "MATCH ()-[r {ID: $id}]-() DELETE r", map[string]any{"id": id})
-	return err
+	if err != nil {
+		return fmt.Errorf("delete edge %s: %w", id, err)
+	}
+	return nil
 }
 
 // GetAllEdgeTypes returns all distinct edge types in the graph.
@@ -470,10 +458,12 @@ func (s *gographStore) GetMultiHopPaths(ctx context.Context, nodeIDs []string, e
 
 	nodeMap := make(map[string]*core.Node)
 	edgeMap := make(map[string]*core.Edge)
+	var lastErr error
 
 	for _, nodeID := range nodeIDs {
 		results, err := s.gs.GetNeighborsByTypes(nodeID, depth, 0, edgeTypes)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 
@@ -500,6 +490,10 @@ func (s *gographStore) GetMultiHopPaths(ctx context.Context, nodeIDs []string, e
 	edges := make([]*core.Edge, 0, len(edgeMap))
 	for _, e := range edgeMap {
 		edges = append(edges, e)
+	}
+
+	if lastErr != nil {
+		return nodes, edges, fmt.Errorf("get multi-hop paths: %w", lastErr)
 	}
 
 	return nodes, edges, nil

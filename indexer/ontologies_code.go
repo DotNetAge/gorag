@@ -28,6 +28,7 @@ func isCodeExt(ext string) bool {
 // codeEntityDefs 是代码文件专用的实体类型定义列表。
 // 与文本域的 EntityDef 互斥：代码文件只加载此列表，忽略用户选择的标签。
 // 每一项包含 Prompt（注入 ### Entity Types）和 Schema（注入 ### Entity Schema）。
+// 每个 Schema 必须包含 "description" 字段，与 buildPropertyGuidance 的硬要求对齐。
 var codeEntityDefs = []EntityDef{
 	{
 		Prompt: "**Interface** — interface, protocol, trait defining a contract of methods",
@@ -36,6 +37,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "interface/protocol/trait name"},
+    "description": {"type": "string", "description": "what this interface defines or represents"},
     "methods": {"type": "array", "items": {"type": "string"}, "description": "method signatures declared in the interface"},
     "extends": {"type": "array", "items": {"type": "string"}, "description": "parent interfaces or protocols extended"},
     "generics": {"type": "array", "items": {"type": "string"}, "description": "generic type parameters"}
@@ -49,6 +51,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "struct/record/data class name"},
+    "description": {"type": "string", "description": "what this struct represents"},
     "fields": {"type": "array", "items": {"type": "string"}, "description": "field/property/attribute declarations with types"},
     "methods": {"type": "array", "items": {"type": "string"}, "description": "method signatures defined on this struct"},
     "generics": {"type": "array", "items": {"type": "string"}, "description": "generic type parameters"},
@@ -64,6 +67,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "class name"},
+    "description": {"type": "string", "description": "what this class represents"},
     "methods": {"type": "array", "items": {"type": "string"}, "description": "method signatures defined on this class"},
     "fields": {"type": "array", "items": {"type": "string"}, "description": "field/property/attribute declarations"},
     "extends": {"type": "string", "description": "parent class or base struct"},
@@ -80,6 +84,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "function/method/procedure name"},
+    "description": {"type": "string", "description": "what this function does"},
     "parameters": {"type": "array", "items": {"type": "string"}, "description": "parameter list in 'name: type' form"},
     "return_type": {"type": "string", "description": "return type annotation or void/nil"},
     "receiver": {"type": "string", "description": "receiver type for methods (e.g. Go, Rust impl blocks)"},
@@ -95,6 +100,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name", "path"],
   "properties": {
     "name": {"type": "string", "description": "package/module/namespace name"},
+    "description": {"type": "string", "description": "what this package provides"},
     "path": {"type": "string", "description": "import path or fully qualified name"},
     "exports": {"type": "array", "items": {"type": "string"}, "description": "publicly exported or accessible members"}
   }
@@ -107,6 +113,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "enum type name"},
+    "description": {"type": "string", "description": "what this enum represents"},
     "variants": {"type": "array", "items": {"type": "string"}, "description": "named members or variants of the enum"},
     "generics": {"type": "array", "items": {"type": "string"}, "description": "generic type parameters"}
   }
@@ -119,6 +126,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "alias or type definition name"},
+    "description": {"type": "string", "description": "what this alias represents"},
     "underlying_type": {"type": "string", "description": "the original or underlying type"},
     "generics": {"type": "array", "items": {"type": "string"}, "description": "generic type parameters"}
   }
@@ -131,6 +139,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["name"],
   "properties": {
     "name": {"type": "string", "description": "variable or constant name"},
+    "description": {"type": "string", "description": "what this variable stores or represents"},
     "type": {"type": "string", "description": "type annotation if present in declaration"},
     "is_const": {"type": "boolean", "description": "whether this is a constant or immutable value"},
     "scope": {"type": "string", "description": "visibility scope: global, module, local, member"}
@@ -144,6 +153,7 @@ var codeEntityDefs = []EntityDef{
   "required": ["source"],
   "properties": {
     "source": {"type": "string", "description": "import path, module name, file path being imported"},
+    "description": {"type": "string", "description": "why or what this import is used for"},
     "alias": {"type": "string", "description": "local alias, rename, or qualifier if used"}
   }
 }`,

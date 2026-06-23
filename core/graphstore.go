@@ -36,9 +36,6 @@ type GraphStore interface {
 	// This is used in hybrid search to find relationships related to semantic search results
 	GetEdgesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*Edge, error)
 
-	// GetCommunitySummaries fetches hierarchical community abstracts, which are core to Microsoft's GraphRAG paper.
-	GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error)
-
 	// GetMultiHopPaths performs multi-hop traversal from starting node IDs,
 	// optionally filtering by edge types. Returns discovered nodes and edges.
 	// depth controls how many hops to traverse (1 = direct neighbors only).

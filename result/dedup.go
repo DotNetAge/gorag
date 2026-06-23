@@ -145,9 +145,6 @@ func minHash(text string, numHash uint) []uint64 {
 
 // minHashForTokens 对词集合计算单个 hash 函数的 MinHash 值
 func minHashForTokens(tokens []string, seed uint) uint64 {
-	h := fnv.New64a()
-	h.Write([]byte(string(rune('a' + seed%26)))) // 不同 seed 不同初始字符
-
 	minVal := uint64(1 << 63) // 最大值
 	for _, tok := range tokens {
 		// 组合 token 和 seed 生成 hash

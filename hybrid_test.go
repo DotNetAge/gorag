@@ -128,7 +128,7 @@ func TestNew_HybridIndexer(t *testing.T) {
 	// 调用 New
 	idx, err := New(dataPath,
 		WithIndexType("hybrid"),
-		WithModelFile(testModel),
+		WithEmbeddingModelFile(testModel),
 		WithName("memory"),
 	)
 	require.NoError(t, err, "New 应成功创建索引器")
@@ -182,7 +182,7 @@ func TestOpen_HybridIndexer(t *testing.T) {
 	// 先创建
 	idx, err := New(dataPath,
 		WithIndexType("hybrid"),
-		WithModelFile(testModel),
+		WithEmbeddingModelFile(testModel),
 		WithName("memory"),
 	)
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestAddFile_And_Search_AllFiles(t *testing.T) {
 
 	idx, err := New(dataPath,
 		WithIndexType("hybrid"),
-		WithModelFile(testModel),
+		WithEmbeddingModelFile(testModel),
 		WithName("memory"),
 	)
 	require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestAdd_And_Search_SingleFile(t *testing.T) {
 
 	idx, err := New(dataPath,
 		WithIndexType("hybrid"),
-		WithModelFile(testModel),
+		WithEmbeddingModelFile(testModel),
 		WithName("memory"),
 	)
 	require.NoError(t, err)

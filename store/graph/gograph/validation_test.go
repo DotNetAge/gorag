@@ -306,12 +306,12 @@ func TestGraphStoreValidation(t *testing.T) {
 		nodes := []*core.Node{
 			{
 				ID:         "node-1",
-				Type:       "Person",
+				Labels:     []string{"Person"},
 				Properties: map[string]any{"name": "Alice", "age": 30},
 			},
 			{
 				ID:         "node-2",
-				Type:       "Person",
+				Labels:     []string{"Person"},
 				Properties: map[string]any{"name": "Bob", "age": 25},
 			},
 		}
@@ -325,7 +325,7 @@ func TestGraphStoreValidation(t *testing.T) {
 			if retrieved == nil {
 				t.Errorf("Node %s not found after upsert", node.ID)
 			} else {
-				t.Logf("Retrieved node %s: Type=%s, Props=%+v", retrieved.ID, retrieved.Type, retrieved.Properties)
+				t.Logf("Retrieved node %s: Labels=%v, Props=%+v", retrieved.ID, retrieved.Labels, retrieved.Properties)
 			}
 		}
 	})

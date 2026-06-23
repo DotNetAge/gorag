@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/DotNetAge/gorag/core"
@@ -23,14 +24,13 @@ func TestMain(m *testing.M) {
 }
 
 func setupTestDB(t *testing.T) (*gographStore, func()) {
-	tmpPath := "/tmp/gograph_store_test_" + t.Name()
+	tmpPath := filepath.Join(t.TempDir(), "test.db")
 	store, err := NewGraphStore(tmpPath)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
 	cleanup := func() {
 		store.Close(context.Background())
-		os.RemoveAll(tmpPath)
 	}
 	return store.(*gographStore), cleanup
 }
@@ -66,12 +66,12 @@ func TestUpsertNodes(t *testing.T) {
 	nodes := []*core.Node{
 		{
 			ID:         "node1",
-			Type:       "Person",
+			Labels:     []string{"Person"},
 			Properties: map[string]any{"name": "Alice", "age": 30},
 		},
 		{
 			ID:         "node2",
-			Type:       "Organization",
+			Labels:     []string{"Organization"},
 			Properties: map[string]any{"name": "Acme Corp"},
 		},
 	}
@@ -83,7 +83,7 @@ func TestUpsertNodes(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, retrievedNode)
 	assert.Equal(t, "node1", retrievedNode.ID)
-	assert.Equal(t, "Person", retrievedNode.Type)
+	assert.Equal(t, []string{"Person"}, retrievedNode.Labels)
 	assert.Equal(t, "Alice", retrievedNode.Name)
 }
 
@@ -106,7 +106,6 @@ func TestUpsertNodesWithEmptyType(t *testing.T) {
 	nodes := []*core.Node{
 		{
 			ID:         "node1",
-			Type:       "",
 			Properties: map[string]any{"name": "Test"},
 		},
 	}
@@ -126,8 +125,8 @@ func TestUpsertEdges(t *testing.T) {
 
 	ctx := context.Background()
 
-	node1 := &core.Node{ID: "node1", Type: "Person", Properties: map[string]any{"name": "Alice"}}
-	node2 := &core.Node{ID: "node2", Type: "Person", Properties: map[string]any{"name": "Bob"}}
+	node1 := &core.Node{ID: "node1", Labels: []string{"Person"}, Properties: map[string]any{"name": "Alice"}}
+	node2 := &core.Node{ID: "node2", Labels: []string{"Person"}, Properties: map[string]any{"name": "Bob"}}
 	err := store.UpsertNodes(ctx, []*core.Node{node1, node2})
 	require.NoError(t, err)
 
@@ -167,7 +166,7 @@ func TestGetNode(t *testing.T) {
 	nodes := []*core.Node{
 		{
 			ID:         "testNode",
-			Type:       "TestType",
+			Labels:     []string{"TestType"},
 			Properties: map[string]any{"key": "value", "number": 42},
 		},
 	}
@@ -179,7 +178,7 @@ func TestGetNode(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, retrieved)
 	assert.Equal(t, "testNode", retrieved.ID)
-	assert.Equal(t, "TestType", retrieved.Type)
+	assert.Equal(t, []string{"TestType"}, retrieved.Labels)
 	assert.Equal(t, "value", retrieved.Properties["key"])
 	assert.Equal(t, 42, retrieved.Properties["number"])
 }
@@ -202,9 +201,9 @@ func TestGetNeighbors(t *testing.T) {
 	ctx := context.Background()
 
 	nodes := []*core.Node{
-		{ID: "center", Type: "Person", Properties: map[string]any{"name": "Alice"}},
-		{ID: "neighbor1", Type: "Person", Properties: map[string]any{"name": "Bob"}},
-		{ID: "neighbor2", Type: "Person", Properties: map[string]any{"name": "Charlie"}},
+		{ID: "center", Labels: []string{"Person"}, Properties: map[string]any{"name": "Alice"}},
+		{ID: "neighbor1", Labels: []string{"Person"}, Properties: map[string]any{"name": "Bob"}},
+		{ID: "neighbor2", Labels: []string{"Person"}, Properties: map[string]any{"name": "Charlie"}},
 	}
 	err := store.UpsertNodes(ctx, nodes)
 	require.NoError(t, err)
@@ -241,8 +240,8 @@ func TestQuery(t *testing.T) {
 	ctx := context.Background()
 
 	nodes := []*core.Node{
-		{ID: "node1", Type: "Person", Properties: map[string]any{"name": "Alice", "age": 30}},
-		{ID: "node2", Type: "Person", Properties: map[string]any{"name": "Bob", "age": 25}},
+		{ID: "node1", Labels: []string{"Person"}, Properties: map[string]any{"name": "Alice", "age": 30}},
+		{ID: "node2", Labels: []string{"Person"}, Properties: map[string]any{"name": "Bob", "age": 25}},
 	}
 	err := store.UpsertNodes(ctx, nodes)
 	require.NoError(t, err)
@@ -263,17 +262,6 @@ func TestQueryEmptyResult(t *testing.T) {
 	assert.Empty(t, results)
 }
 
-func TestGetCommunitySummaries(t *testing.T) {
-	store, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	summaries, err := store.GetCommunitySummaries(ctx, 1)
-	require.NoError(t, err)
-	assert.Empty(t, summaries)
-}
-
 func TestClose(t *testing.T) {
 	tmpPath := "/tmp/gograph_close_test"
 	defer os.RemoveAll(tmpPath)
@@ -292,7 +280,6 @@ func TestInterfaceCompliance(t *testing.T) {
 		GetNode(ctx context.Context, id string) (*core.Node, error)
 		GetNeighbors(ctx context.Context, nodeID string, depth int, limit int) ([]*core.Node, []*core.Edge, error)
 		Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error)
-		GetCommunitySummaries(ctx context.Context, level int) ([]map[string]any, error)
 		Close(ctx context.Context) error
 	}
 
@@ -304,7 +291,7 @@ func TestInterfaceCompliance(t *testing.T) {
 	ctx := context.Background()
 
 	nodes := []*core.Node{
-		{ID: "test1", Type: "Test", Properties: map[string]any{"key": "value"}},
+		{ID: "test1", Labels: []string{"Test"}, Properties: map[string]any{"key": "value"}},
 	}
 	err := store.UpsertNodes(ctx, nodes)
 	require.NoError(t, err)
@@ -316,9 +303,6 @@ func TestInterfaceCompliance(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = store.Query(ctx, "MATCH (n) RETURN n", nil)
-	require.NoError(t, err)
-
-	_, err = store.GetCommunitySummaries(ctx, 0)
 	require.NoError(t, err)
 
 	err = store.Close(ctx)
@@ -333,8 +317,8 @@ func TestPropertyTypes(t *testing.T) {
 
 	nodes := []*core.Node{
 		{
-			ID:   "props",
-			Type: "Test",
+			ID:     "props",
+			Labels: []string{"Test"},
 			Properties: map[string]any{
 				"string": "hello",
 				"int":    42,
@@ -358,8 +342,8 @@ func TestEdgeProperties(t *testing.T) {
 
 	ctx := context.Background()
 
-	node1 := &core.Node{ID: "n1", Type: "A", Properties: nil}
-	node2 := &core.Node{ID: "n2", Type: "B", Properties: nil}
+	node1 := &core.Node{ID: "n1", Labels: []string{"A"}, Properties: nil}
+	node2 := &core.Node{ID: "n2", Labels: []string{"B"}, Properties: nil}
 	err := store.UpsertNodes(ctx, []*core.Node{node1, node2})
 	require.NoError(t, err)
 

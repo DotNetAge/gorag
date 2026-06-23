@@ -181,7 +181,7 @@ func runInit(cmd *cobra.Command, args []string) {
 		opts = append(opts, gorag.WithName(initName))
 	}
 	opts = append(opts, gorag.WithIndexType(initType))
-	opts = append(opts, gorag.WithModelFile(modelPath))
+	opts = append(opts, gorag.WithEmbeddingModelFile(modelPath))
 
 	idx, err := gorag.New(dataDir, opts...)
 	if err != nil {

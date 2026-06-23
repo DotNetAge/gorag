@@ -85,9 +85,9 @@ func BuildFromExtraction(ext *Extraction, chunk *core.Chunk) ([]core.Node, []cor
 		}
 
 		node := core.Node{
-			ID:   utils.GenerateID([]byte(ent.Name + chunk.DocID)),
-			Type: ent.EntityType,
-			Name: ent.Name,
+			ID:     utils.GenerateID([]byte(ent.Name + chunk.DocID)),
+			Labels: []string{ent.EntityType},
+			Name:   ent.Name,
 			Properties: map[string]any{
 				"confidence": 0.9,
 			},

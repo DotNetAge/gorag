@@ -18,8 +18,11 @@ const segmentRoleDefinition = `You are a knowledge base administrator. Your job 
 ## Document Context
 - doc_id: %s
 - language: %s
-- Content lines are prefixed with absolute line numbers (e.g. "42: func foo()").
-  Use these line numbers in start_line/end_line fields. Never invent line numbers.`
+- The content is split into multiple pages. Each page ends with a line number marker like [L23-L45].
+  Use the absolute line numbers from the marker in start_line/end_line fields.
+  For example: content within [L23-L45] where the 0th line corresponds to absolute line 23.
+  Calculate absolute line numbers as: page_start_line + local_line_index.
+  Ignore the [L{start}-L{end}] marker itself — do not include it in chunk content.`
 
 // segmentChunkingRules 片段 2：分块与摘要规则
 const segmentChunkingRules = `## Chunking & Title Rules
@@ -34,8 +37,8 @@ const segmentChunkingRules = `## Chunking & Title Rules
 const segmentOutputFormat = `## Output Format — JSON only, no markdown, no additional text
 IDs use integers (1, 2, 3...) — see Constraints for the exact rule.
 
-Important: Each [start_line, end_line] in chunk_meta.positions MUST correspond to line numbers from the "LINE_NUMBER: content" prefix shown in the input.
-The chunk.content MUST be the exact original text for those line numbers.
+Important: Each [start_line, end_line] in chunk_meta.positions MUST use absolute line numbers calculated as page_start_line + local_line_index.
+The chunk.content MUST be the exact original text for those line numbers. Do not include the [L{start}-L{end}] marker in content.
 
 {
   "chunks": [
@@ -119,7 +122,7 @@ ALL output text MUST be in "%s": summaries, entity names, descriptions, metadata
 - Do NOT use generic tags like "introduction", "overview", "conclusion". Be specific.`
 
 // buildSystemMessages 构建多条 SystemMessage 分片，以利于 KV Cache 复用。
-// entityDefs 为 EntityDef 列表，由 WithEntities 提供，会合并入 Prompt 的实体定义部分。
+// entityDefs 为 EntityDef 列表，由 WithSchemas 提供，会合并入 Prompt 的实体定义部分。
 // 调用方只需 append UserMessage 即可完成 Messages 组装。
 func buildSystemMessages(docID, lang string, entityDefs []EntityDef) []chat.Message {
 	return []chat.Message{

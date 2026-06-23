@@ -109,6 +109,14 @@ func (f *fulltextIndexer) Remove(ctx context.Context, chunkID string) error {
 	return f.store.Delete(chunkID)
 }
 
+// StoreChunk stores a pre-built chunk in the fulltext index.
+func (f *fulltextIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
+	if chunk == nil || chunk.Content == "" {
+		return fmt.Errorf("chunk content cannot be empty")
+	}
+	return f.saveChunk(ctx, chunk)
+}
+
 // IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
 func (f *fulltextIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
 	if chunk == nil {
@@ -192,6 +200,12 @@ func (f *safeFulltextIndexer) saveChunks(ctx context.Context, chunks []*core.Chu
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inner.saveChunks(ctx, chunks)
+}
+
+func (f *safeFulltextIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.StoreChunk(ctx, chunk)
 }
 
 func (f *safeFulltextIndexer) Count(ctx context.Context) (int, error) {

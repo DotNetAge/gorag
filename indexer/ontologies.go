@@ -19,6 +19,7 @@ const globalRelationTypes = `### Relation Types
 // =============================================================================
 
 const globalExtractionConstraints = `### Extraction Constraints
+- Each entity's "type" field becomes its node Label in the graph — use this to match via MATCH (n:TypeName).
 - Extract entities only from the types defined below. Normalize abbreviations.
 - Each chunk's entity_ids field MUST list all entity ids extracted from that chunk. Every entity must appear in at least one chunk's entity_ids. This creates the bidirectional link: chunk→entity via entity_ids, entity→chunk via SourceChunkIDs in the graph.
 - Max 5 entities and 5 relations per chunk.
@@ -112,6 +113,7 @@ func buildOntology(entityDefs []EntityDef) string {
 	var b strings.Builder
 	b.WriteString("## Entity Extraction Rules\n\n")
 	b.WriteString("### Entity Types\n")
+	b.WriteString("Each entity type listed below becomes a node Label (MATCH (n:TypeName)).\n")
 	b.WriteString(defs[0].Prompt)
 	for _, d := range defs[1:] {
 		b.WriteByte('\n')
@@ -131,7 +133,7 @@ func buildOntology(entityDefs []EntityDef) string {
 		}
 	}
 	if hasSchema {
-		b.WriteString("### Entity Schema — Each entity's properties MUST match its type's schema below\n")
+		b.WriteString("### Entity Schema — Each entity type's schema below is keyed by its Label (type name).\n")
 		for _, d := range defs {
 			if d.Schema == "" {
 				continue

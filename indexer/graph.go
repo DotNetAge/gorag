@@ -2,13 +2,12 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,13 +28,48 @@ import (
 // 短于此长度的文本直接静默丢弃，避免浪费 token。
 const minContentLength = 20
 
-// GraphSearchResult 图搜索结果，用于序列化为 Hit.Content
-type GraphSearchResult struct {
-	Query     string       `json:"query,omitempty"`     // 原始查询
-	Entities  []*core.Node `json:"entities,omitempty"`  // 匹配的实体节点
-	Relations []*core.Edge `json:"relations,omitempty"` // 关联的边
-	ChunkIDs  []string     `json:"chunk_ids,omitempty"` // 关联的 chunk ID 列表
-	DocIDs    []string     `json:"doc_ids,omitempty"`   // 关联的文档 ID 列表
+// IndexError 包含 LLM 索引失败的详细信息，传递给 OnFail 钩子。
+type IndexError struct {
+	DocID     string          // 文档 ID
+	Err       error           // 原始错误
+	ErrorType string          // 错误分类: network | timeout | rate_limit | auth | api | unknown
+	Attempts  int             // 重试次数
+	Duration  time.Duration   // 总耗时
+	Messages  []chat.Message  // 请求消息快照（值传递，只读）
+}
+
+// classifyLLMError 对 LLM 调用错误进行分类。
+func classifyLLMError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "rate limit") ||
+		strings.Contains(errMsg, "rate_limit") ||
+		strings.Contains(errMsg, "429") {
+		return "rate_limit"
+	}
+	if strings.Contains(errMsg, "unauthorized") ||
+		strings.Contains(errMsg, "401") ||
+		strings.Contains(errMsg, "403") ||
+		strings.Contains(errMsg, "authentication") {
+		return "auth"
+	}
+	if strings.Contains(errMsg, "read tcp") ||
+		strings.Contains(errMsg, "no such host") ||
+		strings.Contains(errMsg, "connection refused") ||
+		strings.Contains(errMsg, "i/o timeout") ||
+		strings.Contains(errMsg, "TLS handshake") {
+		return "network"
+	}
+	if strings.Contains(errMsg, "context deadline exceeded") ||
+		strings.Contains(errMsg, "timeout") {
+		return "timeout"
+	}
+	return "unknown"
 }
 
 // GraphIndexer 使用 LLM 进行文本分块、实体提取，并同时写入 VectorStore + GraphStore。
@@ -55,14 +89,40 @@ type GraphIndexer struct {
 	cumulativeUsage  *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
 	mu               sync.Mutex
 	logger           logging.Logger
-	entityDefs       []EntityDef // 来自 WithEntities 的自定义实体类型定义
+	entityDefs       []EntityDef // 来自 WithSchemas 的自定义实体类型定义
+	chatClient       chat.Client // 缓存的 LLM client，懒加载初始化后复用
+
+	// ── 钩子回调（只读观察者模式） ──
+	OnRequest  func(docID string, messages []chat.Message, thinkingBudget int)
+	OnResponse func(docID string, resp *chat.Response)
+	OnFail     func(docID string, err *IndexError)
+}
+
+// getChatClient 返回缓存的 LLM client，首次调用时懒加载初始化。
+func (idx *GraphIndexer) getChatClient() (chat.Client, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	if idx.chatClient != nil {
+		return idx.chatClient, nil
+	}
+	client, err := openai.NewOpenAI(chat.Config{
+		APIKey:  idx.model.APIKey,
+		Model:   idx.model.Model,
+		BaseURL: idx.model.BaseURL,
+		Timeout: 10 * time.Minute,
+	})
+	if err != nil {
+		return nil, err
+	}
+	idx.chatClient = client
+	return idx.chatClient, nil
 }
 
 // GraphOption configures a GraphIndexer.
 type GraphOption func(*GraphIndexer)
 
-// WithLLMLogger attaches a logger to the GraphIndexer for observation logs.
-func WithLLMLogger(logger logging.Logger) GraphOption {
+// WithLogger attaches a logger to the GraphIndexer for observation logs.
+func WithLogger(logger logging.Logger) GraphOption {
 	return func(idx *GraphIndexer) {
 		if logger != nil {
 			idx.logger = logger
@@ -70,11 +130,11 @@ func WithLLMLogger(logger logging.Logger) GraphOption {
 	}
 }
 
-// WithEntities 为 GraphIndexer 指定实体类型定义。
+// WithSchemas 为 GraphIndexer 指定实体类型定义。
 // 每项是一个 EntityDef（Prompt + Schema），会分别注入 Prompt 的 ### Entity Types
 // 和 ### Entity Schema 段。多次调用会累积所有定义。
 // 不调用该方法时，使用一组通用的默认实体类型。
-func WithEntities(entityDefs ...EntityDef) GraphOption {
+func WithSchemas(entityDefs ...EntityDef) GraphOption {
 	return func(idx *GraphIndexer) {
 		idx.entityDefs = append(idx.entityDefs, entityDefs...)
 	}
@@ -121,7 +181,7 @@ func ParseEntityDefsYAML(data []byte) ([]EntityDef, error) {
 	return defs, nil
 }
 
-// WithEntitiesFromFS 从文件系统（如 embed.FS）中读取匹配 glob 模式的实体类型配置文件，
+// WithSchemasFromFS 从文件系统（如 embed.FS）中读取匹配 glob 模式的实体类型配置文件，
 // 解析后注入到 GraphIndexer。匹配多个文件时会合并所有实体类型定义。
 //
 // 用法：
@@ -130,9 +190,9 @@ func ParseEntityDefsYAML(data []byte) ([]EntityDef, error) {
 //	var runtimeFS embed.FS
 //
 //	idx := New(cfg, embedder, vdb, gdb,
-//	    WithEntitiesFromFS(runtimeFS, "settings/entities-*.yml"),
+//	    WithSchemasFromFS(runtimeFS, "settings/entities-*.yml"),
 //	)
-func WithEntitiesFromFS(fsys fs.FS, glob string) GraphOption {
+func WithSchemasFromFS(fsys fs.FS, glob string) GraphOption {
 	return func(idx *GraphIndexer) {
 		matches, err := fs.Glob(fsys, glob)
 		if err != nil {
@@ -152,13 +212,14 @@ func WithEntitiesFromFS(fsys fs.FS, glob string) GraphOption {
 	}
 }
 
+
 // New 创建 GraphIndexer
 //
 //   - model:    LLM 模型连接配置（APIKey, BaseURL, Model, MaxTokens）
 //   - embedder: 文本向量化引擎
 //   - vectorDB: 向量存储（写入 Chunk 向量，用于语义检索）
 //   - graphDB:  图存储（写入实体/关系，用于知识图谱检索）
-//   - opts:     可选配置（WithLLMLogger 等）
+//   - opts:     可选配置（WithLogger、WithSchemas 等）
 func New(
 	model ModelConfig,
 	embedder core.Embedder,
@@ -236,39 +297,31 @@ func (idx *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk
 		systemMsgs = buildCodeSystemMessages(docID, lang)
 	}
 
-	// 3. Token 估算 → 切片或直接处理
-	slices := idx.sliceContent(content)
-	if len(slices) == 1 {
-		idx.logger.Debug("single slice, calling LLM", "doc_id", docID)
-		parsed, err := idx.llmIndex(ctx, docID, slices[0], systemMsgs)
-		if err != nil {
-			return nil, err
-		}
-		return idx.writeToStores(ctx, docID, parsed, "", mime)
+	// 3. 分页：按行将内容拆为多页，每页不超过 MaxTokens × 80%
+	pages, totalTokens, err := idx.splitIntoPages(content)
+	if err != nil {
+		return nil, err
 	}
 
-	// 多切片：逐片 LLM 处理
-	idx.logger.Info("content exceeds limit, slicing",
-		"slices", len(slices),
-		"max_tokens", idx.model.MaxTokens)
-	allResults := make([]*IndexData, 0, len(slices))
-	for i, s := range slices {
-		idx.logger.Debug("LLM call for slice", "slice", i+1, "total", len(slices))
-		parsed, err := idx.llmIndex(ctx, docID, s, systemMsgs)
-		if err != nil {
-			return nil, fmt.Errorf("slice indexing failed: %w", err)
-		}
-		allResults = append(allResults, parsed)
+	// 4. 构建 messages：SystemMessage + 每页一条 UserMessage（末尾加 [Lx-Ly] 标记）
+	messages := make([]chat.Message, 0, len(systemMsgs)+len(pages))
+	messages = append(messages, systemMsgs...)
+	for _, p := range pages {
+		pageContent := p.content + fmt.Sprintf("\n[L%d-L%d]", p.startLine, p.endLine)
+		messages = append(messages, chat.NewUserMessage(pageContent))
 	}
 
-	// 合并所有切片的结果后统一写入
-	idx.logger.Debug("merging slice results", "slice_count", len(allResults))
-	merged := mergeIndexData(allResults...)
-	idx.logger.Debug("merge complete",
-		"chunks", len(merged.Chunks),
-		"entities", len(merged.Entities),
-		"relations", len(merged.Relations))
-	return idx.writeToStores(ctx, docID, merged, "", mime)
+	idx.logger.Info("sending multi-page request",
+		"doc_id", docID,
+		"pages", len(pages),
+		"estimated_tokens", totalTokens)
+
+	// 5. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
+	parsed, err := idx.llmIndex(ctx, docID, content, messages)
+	if err != nil {
+		return nil, err
+	}
+	return idx.writeToStores(ctx, docID, parsed, "", mime)
 }
 
 // AddFile 从文件读取内容后执行 LLM 索引。
@@ -327,98 +380,175 @@ func (idx *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.
 		systemMsgs = buildCodeSystemMessages(docID, lang)
 	}
 
-	// 3. Token 估算 → 切片或直接处理
-	slices := idx.sliceContent(content)
-	if len(slices) == 1 {
-		idx.logger.Debug("single slice, calling LLM", "doc_id", docID)
-		parsed, err := idx.llmIndex(ctx, docID, slices[0], systemMsgs)
-		if err != nil {
-			return nil, err
-		}
-		return idx.writeToStores(ctx, docID, parsed, doc.GetSource(), doc.GetMimeType())
-	}
-
-	// 多切片：逐片 LLM 处理
-	idx.logger.Info("file content exceeds limit, slicing",
-		"slices", len(slices),
-		"max_tokens", idx.model.MaxTokens)
-	allResults := make([]*IndexData, 0, len(slices))
-	for i, s := range slices {
-		idx.logger.Debug("LLM call for slice", "slice", i+1, "total", len(slices))
-		parsed, err := idx.llmIndex(ctx, docID, s, systemMsgs)
-		if err != nil {
-			return nil, fmt.Errorf("slice %d: %w", i+1, err)
-		}
-		allResults = append(allResults, parsed)
-	}
-
-	// 合并所有切片的结果后统一写入
-	idx.logger.Debug("merging slice results", "slice_count", len(allResults))
-	merged := mergeIndexData(allResults...)
-	return idx.writeToStores(ctx, docID, merged, doc.GetSource(), doc.GetMimeType())
-}
-
-// Search 执行向量检索（委托给 vectorDB）。
-// 图检索的混合策略后续由 Query 对象设计时统一处理。
-func (idx *GraphIndexer) Search(ctx context.Context, qry core.Query) ([]core.Hit, error) {
-	sq, ok := qry.(*query.SemanticQuery)
-	if !ok {
-		return nil, fmt.Errorf("GraphIndexer.Search requires a *query.SemanticQuery")
-	}
-
-	queryVector := sq.Vector().Values
-
-	results, scores, err := idx.vectorDB.Search(ctx, queryVector, 10, sq.Filters())
+	// 3. 分页：按行将内容拆为多页，每页不超过 MaxTokens × 80%
+	pages, totalTokens, err := idx.splitIntoPages(content)
 	if err != nil {
 		return nil, err
 	}
 
-	hits := make([]core.Hit, 0, len(results))
-	for i, vec := range results {
-		hit := core.Hit{
-			ID:    vec.ChunkID,
-			Score: scores[i],
+	// 4. 构建 messages：SystemMessage + 每页一条 UserMessage（末尾加 [Lx-Ly] 标记）
+	messages := make([]chat.Message, 0, len(systemMsgs)+len(pages))
+	messages = append(messages, systemMsgs...)
+	for _, p := range pages {
+		pageContent := p.content + fmt.Sprintf("\n[L%d-L%d]", p.startLine, p.endLine)
+		messages = append(messages, chat.NewUserMessage(pageContent))
+	}
+
+	idx.logger.Info("sending multi-page request",
+		"doc_id", docID,
+		"pages", len(pages),
+		"estimated_tokens", totalTokens)
+
+	// 5. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
+	parsed, err := idx.llmIndex(ctx, docID, content, messages)
+	if err != nil {
+		return nil, err
+	}
+	return idx.writeToStores(ctx, docID, parsed, doc.GetSource(), doc.GetMimeType())
+}
+
+// Search 按查询类型路由搜索策略：
+//
+//   - *query.GraphQuery 含 RawCypher → graphDB 直接执行 Cypher → 转 Hits
+//   - *query.GraphQuery 含 TextQuery（无 RawCypher）→ 内部 LLM 转 Cypher → graphDB 执行 → 转 Hits
+//   - *query.GraphQuery 不含 Text/Raw → 向量检索 → Nodes/Edges 融合 → 多跳遍历 → Hits
+//   - *query.SemanticQuery → 向量检索 → Nodes/Edges 融合 → 返回 Hits
+//
+// 无论哪种查询类型，返回的 Hits 均包含 Entities/Relations 字段。
+func (idx *GraphIndexer) Search(ctx context.Context, qry core.Query) ([]core.Hit, error) {
+	switch q := qry.(type) {
+	case *query.GraphQuery:
+		if raw := q.RawCypher(); raw != "" {
+			return idx.searchCypher(ctx, raw, q.Limit)
 		}
-		if vec.Metadata != nil {
-			if c, ok := vec.Metadata["content"].(string); ok {
-				hit.Content = c
+		if text := q.TextQuery(); text != "" {
+			cypher, err := idx.text2Cypher(ctx, text)
+			if err != nil {
+				return nil, fmt.Errorf("text2cypher failed: %w", err)
 			}
-			if t, ok := vec.Metadata["title"].(string); ok {
-				hit.Title = t
-			}
-			if d, ok := vec.Metadata["doc_id"].(string); ok {
-				hit.DocID = d
-			}
-			hit.Metadata = extractMetadata(vec.Metadata)
-			if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
-				hit.ChunkMeta = mapToChunkMeta(cm)
-			}
+			return idx.searchCypher(ctx, cypher, q.Limit)
 		}
+		return idx.searchGraph(ctx, q)
+	case *query.SemanticQuery:
+		return idx.searchSemantic(ctx, q)
+	default:
+		return nil, fmt.Errorf("GraphIndexer.Search: unsupported query type %T", qry)
+	}
+}
+
+// searchGraph GraphQuery 路由：向量检索 → Nodes/Edges 融合 → 多跳遍历 → Hits
+func (idx *GraphIndexer) searchGraph(ctx context.Context, q *query.GraphQuery) ([]core.Hit, error) {
+	// 1. 向量检索（由 GraphIndexer 的 embedder 计算向量）
+	queryVector, err := idx.embedder.CalcText(q.Raw())
+	if err != nil {
+		return nil, fmt.Errorf("embedding failed: %w", err)
+	}
+	results, scores, err := idx.vectorDB.Search(ctx, queryVector.Values, q.Limit, q.Filters())
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	// 2. 收集 chunkIDs
+	chunkIDs := make([]string, len(results))
+	for i, r := range results {
+		chunkIDs[i] = r.ChunkID
+	}
+
+	// 3. Nodes/Edges 融合 + 多跳遍历
+	return idx.enrichHits(ctx, results, scores, chunkIDs, q.Depth, q.EdgeTypes)
+}
+
+// searchSemantic SemanticQuery 路由：向量检索 → Nodes/Edges 融合 → Hits
+func (idx *GraphIndexer) searchSemantic(ctx context.Context, q *query.SemanticQuery) ([]core.Hit, error) {
+	queryVector := q.Vector().Values
+	results, scores, err := idx.vectorDB.Search(ctx, queryVector, 10, q.Filters())
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	// 收集 chunkIDs 用于图融合（SemanticQuery 不做多跳，depth=1 即仅直接关联）
+	chunkIDs := make([]string, len(results))
+	for i, r := range results {
+		chunkIDs[i] = r.ChunkID
+	}
+	return idx.enrichHits(ctx, results, scores, chunkIDs, 1, nil)
+}
+
+// searchCypher 将 Cypher 查询交给 graphDB 执行，结果转成 Hits。
+// 每行结果作为一个 Hit，Content 为 key=value 格式的文本描述，便于 LLM 或用户阅读。
+func (idx *GraphIndexer) searchCypher(ctx context.Context, cypher string, limit int) ([]core.Hit, error) {
+	rows, err := idx.graphDB.Query(ctx, cypher, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cypher query failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	// 限制返回行数
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	hits := make([]core.Hit, 0, len(rows))
+	for i, row := range rows {
+		hit := cypherRowToHit(row, float32(1.0-float64(i)/float64(len(rows))))
 		hits = append(hits, hit)
 	}
 	return hits, nil
 }
 
-// SearchByChunkIDs 通过 Chunk IDs 查询关联的图结构。
-// 混合模式：由 HybridIndexer 调用，无需 LLM。
-// 流程：Chunk IDs → 查询关联 Nodes → 多跳遍历（可选边类型过滤） → 路径评分 → Hit
-//
-// 支持选项：
-//   - depth: 遍历深度（默认 1，即直接邻居）
-//   - limit: 返回结果数量上限
-//   - edgeTypes: 关系类型过滤，仅遍历指定类型的边
-func (idx *GraphIndexer) SearchByChunkIDs(ctx context.Context, chunkIDs []string, depth, limit int, edgeTypes ...[]string) ([]core.Hit, error) {
-	if len(chunkIDs) == 0 {
-		return nil, nil
+// cypherRowToHit 将 Cypher 查询结果的单行 map 转换为 Hit。
+// Content 为 key=value 格式文本，Score 按排名递减。
+func cypherRowToHit(row map[string]any, score float32) core.Hit {
+	hit := core.Hit{
+		ID:    fmt.Sprintf("cypher-%d", time.Now().UnixNano()),
+		Score: score,
 	}
 
+	var parts []string
+	for k, v := range row {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	hit.Content = strings.Join(parts, ", ")
+
+	// 尝试从行中提取结构化数据
+	if id, ok := row["id"].(string); ok {
+		hit.ID = id
+	}
+	if name, ok := row["name"].(string); ok {
+		hit.Title = name
+	}
+	return hit
+}
+
+// enrichHits 对向量检索结果执行 Nodes/Edges 融合，返回带 Entities/Relations 的 Hits。
+// depth=1 仅查询直接关联的 Nodes/Edges，depth>1 执行多跳遍历。
+func (idx *GraphIndexer) enrichHits(
+	ctx context.Context,
+	results []*core.Vector,
+	scores []float32,
+	chunkIDs []string,
+	depth int,
+	edgeTypes []string,
+) ([]core.Hit, error) {
 	// 1. 查询关联的 Nodes
 	nodes, err := idx.graphDB.GetNodesByChunkIDs(ctx, chunkIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get nodes by chunk IDs: %w", err)
+		// graphDB 不可用时降级为纯向量结果
+		return idx.toSimpleHits(results, scores), nil
 	}
 	if len(nodes) == 0 {
-		return nil, nil
+		return idx.toSimpleHits(results, scores), nil
 	}
 
 	// 2. 收集起始节点 ID
@@ -427,42 +557,30 @@ func (idx *GraphIndexer) SearchByChunkIDs(ctx context.Context, chunkIDs []string
 		nodeIDs[i] = n.ID
 	}
 
-	// 3. 多跳遍历（使用 GetMultiHopPaths 支持边类型过滤）
-	var types []string
-	if len(edgeTypes) > 0 && len(edgeTypes[0]) > 0 {
-		types = edgeTypes[0]
-	}
-
+	// 3. 多跳遍历（depth>1 时）
 	hopNodes, hopEdges := []*core.Node{}, []*core.Edge{}
-	if depth > 0 {
-		hopNodes, hopEdges, err = idx.graphDB.GetMultiHopPaths(ctx, nodeIDs, types, depth, limit)
+	if depth > 1 {
+		hopNodes, hopEdges, err = idx.graphDB.GetMultiHopPaths(ctx, nodeIDs, edgeTypes, depth, 10)
 		if err != nil {
-			// 多跳遍历失败时降级为直接查询关联边
+			// 多跳失败时降级
 			hopEdges, err = idx.graphDB.GetEdgesByChunkIDs(ctx, chunkIDs)
 			if err != nil {
 				hopEdges = nil
 			}
 		}
+	} else {
+		// depth=1 仅查询直接关联边
+		hopEdges, err = idx.graphDB.GetEdgesByChunkIDs(ctx, chunkIDs)
+		if err != nil {
+			hopEdges = nil
+		}
 	}
 
-	// 4. 合并：直接关联的 edges + 多跳发现的 edges
+	// 4. 合并所有 Nodes 和 Edges
 	edgeMap := make(map[string]*core.Edge)
 	for _, e := range hopEdges {
 		edgeMap[e.ID] = e
 	}
-	if depth <= 0 {
-		// 无多跳时，直接查询关联边
-		directEdges, err := idx.graphDB.GetEdgesByChunkIDs(ctx, chunkIDs)
-		if err == nil {
-			for _, e := range directEdges {
-				if _, exists := edgeMap[e.ID]; !exists {
-					edgeMap[e.ID] = e
-				}
-			}
-		}
-	}
-
-	// 合并节点
 	nodeMap := make(map[string]*core.Node)
 	for _, n := range nodes {
 		nodeMap[n.ID] = n
@@ -482,94 +600,199 @@ func (idx *GraphIndexer) SearchByChunkIDs(ctx context.Context, chunkIDs []string
 		allEdges = append(allEdges, e)
 	}
 
-	// 5. 收集所有 Chunk IDs 和 Doc IDs
-	allChunkIDs := make([]string, 0)
-	allDocIDs := make([]string, 0)
+	// 5. 构建 Hits：每个向量结果按 chunkID 关联对应的 Nodes/Edges
+	hits := make([]core.Hit, 0, len(results))
 	seenChunk := make(map[string]bool)
-	seenDoc := make(map[string]bool)
 
-	for _, node := range allNodes {
-		for _, chunkID := range node.SourceChunkIDs {
-			if !seenChunk[chunkID] {
-				allChunkIDs = append(allChunkIDs, chunkID)
-				seenChunk[chunkID] = true
+	for i, vec := range results {
+		if seenChunk[vec.ChunkID] {
+			continue
+		}
+		seenChunk[vec.ChunkID] = true
+
+		hit := idx.vectorToHit(vec, scores[i])
+		hit.Entities = idx.nodesForChunk(allNodes, vec.ChunkID)
+		hit.Relations = idx.edgesForChunk(allEdges, vec.ChunkID)
+		hits = append(hits, hit)
+	}
+
+	return hits, nil
+}
+
+// toSimpleHits 从向量检索结果构建基础 Hits（无图融合的降级路径）。
+func (idx *GraphIndexer) toSimpleHits(results []*core.Vector, scores []float32) []core.Hit {
+	hits := make([]core.Hit, 0, len(results))
+	for i, vec := range results {
+		hit := vectorToHit(vec)
+		hit.Score = scores[i]
+		hits = append(hits, hit)
+	}
+	return hits
+}
+
+// vectorToHit 从单个向量结果构建 Hit，携带分数。
+func (idx *GraphIndexer) vectorToHit(vec *core.Vector, score float32) core.Hit {
+	return core.Hit{
+		ID:    vec.ChunkID,
+		Score: score,
+		Metadata: func() map[string]any {
+			m := make(map[string]any, len(vec.Metadata)+1)
+			m["chunk_id"] = vec.ChunkID
+			for k, v := range vec.Metadata {
+				m[k] = v
+			}
+			return m
+		}(),
+	}
+}
+
+// nodesForChunk 从节点列表中筛选属于指定 chunk 的节点。
+func (idx *GraphIndexer) nodesForChunk(nodes []*core.Node, chunkID string) []*core.Node {
+	var result []*core.Node
+	for _, n := range nodes {
+		for _, cid := range n.SourceChunkIDs {
+			if cid == chunkID {
+				result = append(result, n)
+				break
 			}
 		}
-		for _, docID := range node.SourceDocIDs {
-			if !seenDoc[docID] {
-				allDocIDs = append(allDocIDs, docID)
-				seenDoc[docID] = true
+	}
+	return result
+}
+
+// edgesForChunk 从边列表中筛选属于指定 chunk 的边。
+func (idx *GraphIndexer) edgesForChunk(edges []*core.Edge, chunkID string) []*core.Edge {
+	var result []*core.Edge
+	for _, e := range edges {
+		for _, cid := range e.SourceChunkIDs {
+			if cid == chunkID {
+				result = append(result, e)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// SearchByChunkIDs 通过 Chunk IDs 查询关联的图结构（外部调用入口，无需向量检索）。
+// 流程：Chunk IDs → 查询关联 Nodes → 多跳遍历 → 路径评分 → Hit
+//
+// 支持选项：
+//   - depth: 遍历深度（默认 1，即直接邻居）
+//   - limit: 返回结果数量上限
+//   - edgeTypes: 关系类型过滤，仅遍历指定类型的边
+//
+// 注意：此方法不执行向量检索，直接使用提供的 chunkIDs。前端分页列表等场景可用。
+func (idx *GraphIndexer) SearchByChunkIDs(ctx context.Context, chunkIDs []string, depth, limit int, edgeTypes ...[]string) ([]core.Hit, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	// 直接查询 graphDB，无向量检索
+	nodes, err := idx.graphDB.GetNodesByChunkIDs(ctx, chunkIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes by chunk IDs: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+
+	nodeIDs := make([]string, len(nodes))
+	for i, n := range nodes {
+		nodeIDs[i] = n.ID
+	}
+
+	var types []string
+	if len(edgeTypes) > 0 && len(edgeTypes[0]) > 0 {
+		types = edgeTypes[0]
+	}
+
+	hopNodes, hopEdges := []*core.Node{}, []*core.Edge{}
+	if depth > 0 {
+		hopNodes, hopEdges, err = idx.graphDB.GetMultiHopPaths(ctx, nodeIDs, types, depth, limit)
+		if err != nil {
+			hopEdges, err = idx.graphDB.GetEdgesByChunkIDs(ctx, chunkIDs)
+			if err != nil {
+				hopEdges = nil
 			}
 		}
 	}
 
-	// 6. 构建 Hit，带路径评分
-	hits := make([]core.Hit, 0, len(chunkIDs))
+	edgeMap := make(map[string]*core.Edge)
+	for _, e := range hopEdges {
+		edgeMap[e.ID] = e
+	}
+	if depth <= 0 {
+		directEdges, err := idx.graphDB.GetEdgesByChunkIDs(ctx, chunkIDs)
+		if err == nil {
+			for _, e := range directEdges {
+				if _, exists := edgeMap[e.ID]; !exists {
+					edgeMap[e.ID] = e
+				}
+			}
+		}
+	}
+
+	nodeMap := make(map[string]*core.Node)
+	for _, n := range nodes {
+		nodeMap[n.ID] = n
+	}
+	for _, n := range hopNodes {
+		if _, exists := nodeMap[n.ID]; !exists {
+			nodeMap[n.ID] = n
+		}
+	}
+
+	allNodes := make([]*core.Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		allNodes = append(allNodes, n)
+	}
+	allEdges := make([]*core.Edge, 0, len(edgeMap))
+	for _, e := range edgeMap {
+		allEdges = append(allEdges, e)
+	}
+
+	// 收集所有 Chunk IDs
+	allChunkIDs := make([]string, 0)
+	{
+		seen := make(map[string]bool)
+		for _, node := range allNodes {
+			for _, cid := range node.SourceChunkIDs {
+				if !seen[cid] {
+					allChunkIDs = append(allChunkIDs, cid)
+					seen[cid] = true
+				}
+			}
+		}
+	}
+
+	// 构建 Hit
+	hits := make([]core.Hit, 0, len(allChunkIDs))
 	seenChunkHit := make(map[string]bool)
 
-	for _, chunkID := range chunkIDs {
+	for _, chunkID := range allChunkIDs {
 		if seenChunkHit[chunkID] {
 			continue
 		}
 		seenChunkHit[chunkID] = true
 
-		docID := ""
-		for _, node := range allNodes {
-			for _, cid := range node.SourceChunkIDs {
-				if cid == chunkID && len(node.SourceDocIDs) > 0 {
-					docID = node.SourceDocIDs[0]
-					break
-				}
-			}
-			if docID != "" {
-				break
-			}
-		}
+		entities := idx.nodesForChunk(allNodes, chunkID)
+		relations := idx.edgesForChunk(allEdges, chunkID)
+		score := scoreGraphResult(entities, relations)
 
-		chunkNodes := make([]*core.Node, 0)
-		for _, node := range allNodes {
-			if slices.Contains(node.SourceChunkIDs, chunkID) {
-				chunkNodes = append(chunkNodes, node)
-			}
-		}
-
-		chunkEdges := make([]*core.Edge, 0)
-		for _, edge := range allEdges {
-			if slices.Contains(edge.SourceChunkIDs, chunkID) {
-				chunkEdges = append(chunkEdges, edge)
-			}
-		}
-
-		result := GraphSearchResult{
-			Entities:  chunkNodes,
-			Relations: chunkEdges,
-			ChunkIDs:  []string{chunkID},
-			DocIDs:    []string{docID},
-		}
-
-		content, _ := json.Marshal(result)
-		score := scoreGraphResult(chunkNodes, chunkEdges)
 		hits = append(hits, core.Hit{
-			ID:      chunkID,
-			Score:   score,
-			DocID:   docID,
-			Content: string(content),
+			ID:        chunkID,
+			Score:     score,
+			Entities:  entities,
+			Relations: relations,
 		})
 	}
 
 	return hits, nil
 }
 
-// SearchGlobal 通过社区摘要回答全局性问题（Global Search）。
-// 适用于："数据集主要讨论了哪些主题？" 这类宏观问题。
-// 需要 client 和已构建的社区摘要；当前实现返回空（待后续扩展）。
-func (idx *GraphIndexer) SearchGlobal(ctx context.Context, query string, level int) ([]core.Hit, error) {
-	// 当前未集成社区摘要功能，返回空
-	return nil, nil
-}
-
 func (idx *GraphIndexer) NewQuery(terms string) core.Query {
-	return query.NewSemanticQuery(terms, idx.embedder)
+	return query.NewGraphQuery(terms)
 }
 
 // Remove 从 vectorDB 和 graphDB 中移除与 chunkID 关联的所有数据。
@@ -587,6 +810,17 @@ func (idx *GraphIndexer) Remove(ctx context.Context, chunkID string) error {
 		}
 	}
 	return nil
+}
+
+// StoreChunk stores a pre-built chunk directly in the index, skipping LLM processing
+// and entity extraction. The chunk's Metadata is persisted as vector metadata
+// for filter-based retrieval. This is used by the memory system to store raw memory data
+// without running through the LLM chunking/entity pipeline.
+func (idx *GraphIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
+	if chunk == nil || chunk.Content == "" {
+		return fmt.Errorf("chunk content cannot be empty")
+	}
+	return idx.saveChunk(ctx, chunk)
 }
 
 // saveChunk 索引单个预生成的 Chunk。
@@ -700,6 +934,18 @@ func (idx *GraphIndexer) CypherQuery(ctx context.Context, q string, params map[s
 	return idx.graphDB.Query(ctx, q, params)
 }
 
+// VectorDB 返回 GraphIndexer 持有的向量数据库实例。
+// 外部可通过此方法直接操作向量存储（如批量删除、统计等）。
+func (idx *GraphIndexer) VectorDB() core.VectorStore {
+	return idx.vectorDB
+}
+
+// GraphDB 返回 GraphIndexer 持有的图数据库实例。
+// 外部可通过此方法直接操作图存储（如自定义 Cypher 查询、图分析等）。
+func (idx *GraphIndexer) GraphDB() core.GraphStore {
+	return idx.graphDB
+}
+
 // LastTokenUsage 返回最近一次 LLM 调用的 Token 用量（单次值）。
 func (idx *GraphIndexer) LastTokenUsage() *TokenUsage {
 	idx.mu.Lock()
@@ -715,70 +961,71 @@ func (idx *GraphIndexer) CumulativeTokenUsage() *TokenUsage {
 }
 
 // ---------------------------------------------------------------------------
-// 内部：上下文防爆
+// 内部：分页与上下文防爆
 // ---------------------------------------------------------------------------
 
-// sliceContent 将超长内容按行切片，每行添加绝对行号前缀。
-// 切片上限 = MaxTokens * inputTokenRatio * contentSafetyMargin。
-// 返回单元素表示无需切片。
-//
-// 输出格式（行号帮助 LLM 准确定位 start_line / end_line）：
-//
-//	0: func main() {
-//	1:     fmt.Println("hello")
-//	2: }
-func (idx *GraphIndexer) sliceContent(content string) []string {
-	safeLimit := int(float64(idx.model.MaxTokens) * inputTokenRatio * contentSafetyMargin)
-	if safeLimit <= 0 {
-		return []string{numberedContent(strings.Split(content, "\n"), 0)}
-	}
+// pageInfo 表示一页内容及其在原文件中的行号范围。
+type pageInfo struct {
+	startLine int
+	endLine   int
+	content   string
+}
 
-	if tokenEstimate(content) <= safeLimit {
-		return []string{numberedContent(strings.Split(content, "\n"), 0)}
-	}
-
+// splitIntoPages 将内容按行分页，每页不超过 MaxTokens × 80%。
+// 总内容超过 ContextLength × 80% 时返回错误。
+//
+// 调用方应将每页构建为单独的一条 UserMessage，末尾加 [L{start}-L{end}] 标记。
+// 所有 UserMessage 在同一个 LLM 请求中发送，LLM 一次推理即可完成全部索引。
+func (idx *GraphIndexer) splitIntoPages(content string) ([]pageInfo, int, error) {
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 {
-		return []string{""}
+		return nil, 0, nil
 	}
 
-	avgTokensPerLine := tokenEstimate(content) / len(lines)
+	totalTokens := tokenEstimate(content)
+	totalLines := len(lines)
+
+	// 总内容阈值检查：不超过 ContextLength × 80%
+	contextLen := idx.model.ContextLength
+	if contextLen <= 0 {
+		contextLen = defaultMaxTokens
+	}
+	maxTotalTokens := int(float64(contextLen) * 0.8)
+	if totalTokens > maxTotalTokens {
+		return nil, totalTokens, fmt.Errorf(
+			"content too large: estimated %d tokens exceeds 80%% of context length (%d)",
+			totalTokens, maxTotalTokens)
+	}
+
+	// 每页预算：MaxTokens × 80%
+	maxPageTokens := int(float64(idx.model.MaxTokens) * 0.8)
+	if maxPageTokens <= 0 {
+		maxPageTokens = defaultMaxTokens
+	}
+
+	avgTokensPerLine := totalTokens / totalLines
 	if avgTokensPerLine < 1 {
 		avgTokensPerLine = 1
 	}
 
-	linesPerSlice := safeLimit / avgTokensPerLine
-	if linesPerSlice <= 0 {
-		linesPerSlice = 1
-	}
-	if linesPerSlice >= len(lines) {
-		return []string{numberedContent(lines, 0)}
+	linesPerPage := maxPageTokens / avgTokensPerLine
+	if linesPerPage <= 0 {
+		linesPerPage = 1
 	}
 
-	var slices []string
-	for i := 0; i < len(lines); i += linesPerSlice {
-		end := i + linesPerSlice
-		if end > len(lines) {
-			end = len(lines)
+	var pages []pageInfo
+	for i := 0; i < totalLines; i += linesPerPage {
+		end := i + linesPerPage
+		if end > totalLines {
+			end = totalLines
 		}
-		slices = append(slices, numberedContent(lines[i:end], i))
+		pages = append(pages, pageInfo{
+			startLine: i,
+			endLine:   end - 1,
+			content:   strings.Join(lines[i:end], "\n"),
+		})
 	}
-	return slices
-}
-
-// numberedContent 为每一行添加绝对行号前缀。
-//
-//	numberedContent([]string{"func main() {", "}"}, 10)
-//	=> "10: func main() {\n11: }"
-func numberedContent(lines []string, startLine int) string {
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(fmt.Sprintf("%d: %s", startLine+i, line))
-	}
-	return b.String()
+	return pages, totalTokens, nil
 }
 
 // tokenEstimate 估算文本的 token 数量。
@@ -792,31 +1039,32 @@ func tokenEstimate(text string) int {
 // ---------------------------------------------------------------------------
 
 // llmIndex 调用 LLM 进行文本分块 + 实体关系提取。
-// systemMsgs 由调用方按文档类型构建（文本域用 buildSystemMessages，代码域用 buildCodeSystemMessages）。
+// messages 应由调用方预先构建（含 SystemMessage + 多条 UserMessage 分页）。
+// fullContent 为原始全文，用于 LLM 响应解析失败时的兜底。
 // 内置重试机制：最多重试 2 次（首次失败后间隔 2s、4s 指数退避）。
-func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, content string, systemMsgs []chat.Message) (*IndexData, error) {
+func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, fullContent string, messages []chat.Message) (*IndexData, error) {
 	idx.logger.Debug("LLM call starting",
 		"doc_id", docID,
-		"content_length", utf8.RuneCountInString(content),
+		"num_messages", len(messages),
 		"model", idx.model.Model)
 
-	client, err := openai.NewOpenAI(chat.Config{
-		APIKey:  idx.model.APIKey,
-		Model:   idx.model.Model,
-		BaseURL: idx.model.BaseURL,
-		Timeout: 5 * time.Minute,
-	})
+	client, err := idx.getChatClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
-	messages := make([]chat.Message, 0, len(systemMsgs)+1)
-	messages = append(messages, systemMsgs...)
-	messages = append(messages, chat.NewUserMessage(content))
+	// ── OnRequest 钩子（只读，值传递） ──
+	if idx.OnRequest != nil {
+		msgs := make([]chat.Message, len(messages))
+		copy(msgs, messages)
+		idx.OnRequest(docID, msgs, idx.model.ThinkingBudget)
+	}
 
+	start := time.Now()
 	var resp *chat.Response
 	var lastErr error
-	for attempt := 0; attempt <= 2; attempt++ {
+	var attempt int
+	for attempt = 0; attempt <= 2; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(attempt*2) * time.Second
 			idx.logger.Warn("retrying LLM call", "attempt", attempt, "backoff", backoff, "error", lastErr)
@@ -832,7 +1080,25 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, content string, sy
 		}
 	}
 	if lastErr != nil {
+		// ── OnFail 钩子（所有重试均失败） ──
+		if idx.OnFail != nil {
+			msgs := make([]chat.Message, len(messages))
+			copy(msgs, messages)
+			idx.OnFail(docID, &IndexError{
+				DocID:     docID,
+				Err:       lastErr,
+				ErrorType: classifyLLMError(lastErr),
+				Attempts:  attempt,
+				Duration:  time.Since(start),
+				Messages:  msgs,
+			})
+		}
 		return nil, fmt.Errorf("LLM call failed after 3 attempts: %w", lastErr)
+	}
+
+	// ── OnResponse 钩子（LLM 调用成功） ──
+	if idx.OnResponse != nil {
+		idx.OnResponse(docID, resp)
 	}
 
 	// 记录 Token 用量
@@ -874,7 +1140,7 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, content string, sy
 				} `json:"chunk_meta,omitempty"`
 			}{
 				{
-					Content: content,
+					Content: fullContent,
 					Metadata: map[string]any{
 						"title":      "content",
 						"summary":    "",
@@ -891,6 +1157,120 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, content string, sy
 	}
 
 	return parsed, nil
+}
+
+// text2Cypher 使用 GraphIndexer 内部的 LLM 将自然语言查询转换为 Cypher 语句。
+// 复用与 llmIndex 相同的模型配置和客户端创建方式。
+func (idx *GraphIndexer) text2Cypher(ctx context.Context, text string) (string, error) {
+	client, err := idx.getChatClient()
+	if err != nil {
+		return "", fmt.Errorf("failed to create LLM client: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`You are a Cypher query generation expert for gograph, an embedded Go graph database.
+
+## Node Data Model
+
+Each node has a label matching its entity category (PascalCase). Query by label using MATCH (n:LabelName).
+Access node properties uniformly via n.propertyName syntax.
+
+  n.ID                -- unique identifier (string)
+  n.name              -- entity name (e.g. "Zhang San", "Alibaba")
+  n.source_chunk_ids  -- []string, IDs of source chunks that mention this entity
+  n.source_doc_ids    -- []string, IDs of source documents
+  n.confidence        -- float (optional), extraction confidence
+  n.frequency         -- int (optional), occurrence count
+  n.*                 -- any custom property from dynamic schema
+
+Entity category labels: Person, Organization, Location, Technology, Product, Event, Entity
+
+To query by type:   MATCH (n:Person) RETURN n
+To query by name:   MATCH (n) WHERE n.name = $name RETURN n
+
+## Edge (Relationship) Data Model
+
+  r.ID                -- unique identifier (string)
+  r.type              -- relationship type, e.g. 'KNOWS', 'WORKS_FOR', 'LOCATED_IN', 'BELONGS_TO', 'RELATED_TO'
+  r.predicate         -- human-readable description (e.g. "works at", "located in")
+  r.source_chunk_ids  -- []string
+  r.source_doc_ids    -- []string
+  r.confidence        -- float (optional)
+  r.score             -- float (optional)
+  r.evidence          -- string (optional), text evidence
+  r.*                 -- any custom property
+
+Access edge fields uniformly via r.propertyName.
+
+## RETURN Result Shape
+
+RETURN n gives: {id, labels: ["Person"], properties: {ID, name, source_chunk_ids, ...}}
+RETURN r gives: {id, type, startNodeID, endNodeID, properties: {ID, predicate, ...}}
+
+## Cypher Syntax Reference
+
+  MATCH (n:Person) RETURN n                                          -- filter by label
+  MATCH (n) WHERE n.name = $name RETURN n                           -- parameterized filter
+  MATCH (n:Person {name: 'Zhang San'}) RETURN n                     -- label + property shorthand
+  MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a, r, b             -- relationship traversal
+  MATCH (n) WHERE $cid IN n.source_chunk_ids RETURN n               -- array contains
+  RETURN n.ID, n.name, n.source_chunk_ids                            -- specific fields
+  ORDER BY n.name SKIP 10 LIMIT 20                                   -- pagination
+  MATCH (n {ID: $id}) DETACH DELETE n                                -- delete
+
+## Instructions
+
+Convert the following natural language query into a valid Cypher query.
+
+Rules:
+1. Node entity category is a LABEL, not a property -- use MATCH (n:Person), never WHERE n.type = 'Person'
+2. Entity names are in property n.name -- use WHERE n.name = $name or (n {name: 'Zhang San'})
+3. Relationship queries use (source)-[r:TYPE]->(target) patterns
+4. RETURN both nodes and relationships when relevant, e.g. RETURN a, r, b
+5. Use LIMIT 20 to control result size
+6. Use parameterized queries ($name, $id) when filtering by specific values
+7. Output ONLY the Cypher query, no explanation, no markdown code blocks
+
+## User Query
+%s
+
+Output the Cypher query directly:`, text)
+
+	messages := []chat.Message{
+		chat.NewSystemMessage(prompt),
+	}
+
+	var resp *chat.Response
+	var lastErr error
+	for attempt := 0; attempt <= 2; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt*2) * time.Second
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		resp, lastErr = client.Chat(ctx, messages)
+		if lastErr == nil {
+			break
+		}
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("text2cypher LLM call failed after 3 attempts: %w", lastErr)
+	}
+
+	// 清理响应：移除可能的 markdown 代码块标记
+	cypher := strings.TrimSpace(resp.Content)
+	cypher = strings.TrimPrefix(cypher, "```cypher")
+	cypher = strings.TrimPrefix(cypher, "```")
+	cypher = strings.TrimSuffix(cypher, "```")
+	cypher = strings.TrimSpace(cypher)
+
+	if cypher == "" {
+		return "", fmt.Errorf("LLM returned empty Cypher query")
+	}
+
+	return cypher, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,9 +1443,9 @@ func (idx *GraphIndexer) writeToStores(
 		props["confidence"] = 0.9
 
 		nodes = append(nodes, &core.Node{
-			ID:   nodeID,
-			Type: e.Type,
-			Name: e.Name,
+			ID:     nodeID,
+			Labels: []string{e.Type},
+			Name:   e.Name,
 			Properties:    props,
 			SourceChunkIDs: srcChunks,
 			SourceDocIDs:   []string{docID},

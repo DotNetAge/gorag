@@ -18,8 +18,11 @@ const codeSegmentRoleDefinition = `You are a code analysis engine. Your job is t
 ## Document Context
 - doc_id: %s
 - language: %s
-- Content lines are prefixed with absolute line numbers (e.g. "42: func foo()").
-  Use these line numbers in start_line/end_line fields. Never invent line numbers.
+- The content is split into multiple pages. Each page ends with a line number marker like [L23-L45].
+  Use the absolute line numbers from the marker in start_line/end_line fields.
+  For example: content within [L23-L45] where the 0th line corresponds to absolute line 23.
+  Calculate absolute line numbers as: page_start_line + local_line_index.
+  Ignore the [L{start}-L{end}] marker itself — do not include it in chunk content.
 
 Focus on extracting the code's structural entities and their relationships. Document-level concepts like topic tags or subject matter are not relevant.`
 
@@ -43,8 +46,8 @@ Relations link entities across the file.
 
 IDs use integers (1, 2, 3...) — see Constraints for the exact rule.
 
-Important: Each [start_line, end_line] in chunk_meta.positions MUST correspond to line numbers from the "LINE_NUMBER: content" prefix shown in the input.
-The chunk.content MUST be the exact original text for those line numbers.
+Important: Each [start_line, end_line] in chunk_meta.positions MUST use absolute line numbers calculated as page_start_line + local_line_index.
+The chunk.content MUST be the exact original text for those line numbers. Do not include the [L{start}-L{end}] marker in content.
 
 {
   "chunks": [
@@ -62,7 +65,7 @@ The chunk.content MUST be the exact original text for those line numbers.
   "entities": [
     {
       "id": 1,
-      "type": "ENTITY_TYPE (one of the code entity types defined above)",
+      "type": "ENTITY_TYPE",
       "name": "entity name",
       "properties": {
         "description": "brief description of this code entity",
@@ -125,6 +128,7 @@ func buildCodeEntityOntology() string {
 	var b strings.Builder
 	b.WriteString("## Entity Extraction Rules\n\n")
 	b.WriteString("### Entity Types\n")
+	b.WriteString("Each entity type listed below becomes a node Label (MATCH (n:TypeName)).\n")
 
 	// 写第一项
 	if len(codeEntityDefs) > 0 {
@@ -137,7 +141,7 @@ func buildCodeEntityOntology() string {
 	}
 
 	// Entity Schema 段
-	b.WriteString("\n\n### Entity Schema\n")
+	b.WriteString("\n\n### Entity Schema — Each entity type's schema below is keyed by its Label (type name).\n")
 	for _, d := range codeEntityDefs {
 		if d.Schema == "" {
 			continue

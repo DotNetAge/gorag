@@ -2,9 +2,10 @@ package indexer
 
 import "fmt"
 
-// EntityDef 定义一个实体类型的 Prompt 与 Schema，供 WithEntities 注入 LLM Prompt。
-// Schema 是可选字段；为空时不生成对应的 ### Entity Schema 段。
+// EntityDef 定义一个实体类型的 Prompt 与 Schema，供 WithSchemas 注入 LLM Prompt。
 // Prompt 写入 ### Entity Types 段，Schema 写入 ### Entity Schema 段。
+// LLM 在 output 中使用 Prompt 中的类型名作为 entity.type，该 type 最终成为
+// core.Node.Labels[0]（即 gograph 的 node Label），可用 MATCH (n:TypeName) 查询。
 type EntityDef struct {
 	Prompt string // 实体类型描述文本（如 "**Person** — author, expert, contributor"）
 	Schema string // JSON Schema 文本（如 `{"type":"object","properties":{...}}`），可选
@@ -16,7 +17,8 @@ type ModelConfig struct {
 	BaseURL        string
 	Model          string
 	Language       string // 内容语言英文名（如 "Chinese", "English", "Japanese"），直接注入提示词
-	MaxTokens      int    // 模型的最大上下文窗口（token 数），0 表示使用默认值 128000
+	MaxTokens      int    // 模型的最大输出 token 数，也用于分页预算计算，0 表示使用默认值 128000
+	ContextLength  int    // 模型的总上下文长度（token 数），0 表示使用默认值 defaultMaxTokens
 	ThinkingBudget int    // 思考模式的 token 预算（0 = 模型默认值），GraphIndexer 始终启用思考模式
 }
 

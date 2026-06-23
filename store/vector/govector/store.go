@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/DotNetAge/gorag/core"
 	gvcore "github.com/DotNetAge/govector/core"
@@ -12,13 +13,14 @@ import (
 
 // Store is an implementation of core.VectorStore using govector.
 type Store struct {
-	storage  *gvcore.Storage
+	sync.RWMutex
+	storage    *gvcore.Storage
 	collection *gvcore.Collection
-	colName   string
-	dimension int
-	dbPath    string
-	useHNSW   bool
-	readOnly  bool
+	colName    string
+	dimension  int
+	dbPath     string
+	useHNSW    bool
+	readOnly   bool
 }
 
 // Option is a function that configures a Store.
@@ -138,6 +140,9 @@ func NewStore(opts ...Option) (core.VectorStore, error) {
 // Returns:
 //   - error: Any error that occurred
 func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
+	s.Lock()
+	defer s.Unlock()
+
 	if len(vectors) == 0 {
 		return nil
 	}
@@ -178,6 +183,9 @@ func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 //   - []float32: The similarity scores
 //   - error: Any error that occurred
 func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
+	s.RLock()
+	defer s.RUnlock()
+
 	var gvFilter *gvcore.Filter
 
 	if len(filters) > 0 {
@@ -237,6 +245,9 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filters m
 // Returns:
 //   - error: Any error that occurred
 func (s *Store) Delete(ctx context.Context, id string) error {
+	s.Lock()
+	defer s.Unlock()
+
 	if id == "" {
 		return nil
 	}
@@ -260,6 +271,8 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 
 // Count returns the total number of vectors in the store.
 func (s *Store) Count(ctx context.Context) (int, error) {
+	s.RLock()
+	defer s.RUnlock()
 	return s.collection.Count(), nil
 }
 
@@ -288,6 +301,9 @@ func (s *Store) Close(ctx context.Context) error {
 //   - []*core.Vector: All vectors belonging to the document, sorted by chunk index
 //   - error: Any error that occurred
 func (s *Store) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, error) {
+	s.RLock()
+	defer s.RUnlock()
+
 	if docID == "" {
 		return nil, fmt.Errorf("docID cannot be empty")
 	}
@@ -362,6 +378,9 @@ func extractChunkIndex(v *core.Vector) int {
 //   - []*core.Vector: The paginated vectors
 //   - error: Any error that occurred during retrieval
 func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, error) {
+	s.RLock()
+	defer s.RUnlock()
+
 	if limit <= 0 {
 		limit = 20
 	}

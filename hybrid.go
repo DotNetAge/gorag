@@ -14,35 +14,23 @@ import (
 	"github.com/DotNetAge/gorag/result"
 )
 
-// HybridIndexer 混合索引器
-// 将多个索引器（语义、BM25等）组合，实现查询结果融合与重排
+// HybridIndexer 混合索引器（第二代 RAG）
+// 组合语义索引器（semantic）和全文索引器（fulltext），实现查询结果融合与重排。
+// 是 GraphIndexer（第三代）的降级方案，适用于无 LLM 配置的场景。
 type HybridIndexer struct {
-	indexers   map[string]core.Indexer
-	weights    map[string]float32
-	mu         sync.RWMutex
-	logger     logging.Logger
-	cacheStore core.CacheStore               // 图索引器的缓存（依赖注入）
-	closers    []func(context.Context) error // stores/indexers needing cleanup
+	indexers map[string]core.Indexer
+	weights  map[string]float32
+	mu       sync.RWMutex
+	logger   logging.Logger
 }
 
 // HybridOption HybridIndexer 的可选配置
 type HybridOption func(*HybridIndexer)
 
-// WithCacheStore 设置图索引器的缓存（依赖注入 core.CacheStore 接口）
-func WithCacheStore(cache core.CacheStore) HybridOption {
-	return func(h *HybridIndexer) {
-		h.cacheStore = cache
-	}
-}
-
-// NewHybridIndexer 创建混合索引器
-// 默认注册语义索引器和全文索引器。
-// 调用方可通过 AddIndexer 注册图索引器（GraphIndexer）以启用图检索能力。
-// 当图索引器已注册时，Add/AddFile 会自动跳过语义索引器（由 GraphIndexer 代劳）。
+// NewHybridIndexer 创建混合索引器（语义 + 全文）
 func NewHybridIndexer(
 	logger logging.Logger,
 	vectorStore core.VectorStore,
-	graphStore core.GraphStore,
 	docStore core.FullTextStore,
 	embedder core.Embedder,
 	opts ...HybridOption) (*HybridIndexer, error) {
@@ -72,7 +60,7 @@ func NewHybridIndexer(
 	semanticIndexer := indexer.NewSemanticIndexer(
 		vectorStore,
 		embedder,
-		indexer.WithLogger(logger),
+		indexer.WithSemanticLogger(logger),
 	)
 
 	fulltextIndexer, err := indexer.NewFulltextIndexer(docStore)
@@ -81,15 +69,9 @@ func NewHybridIndexer(
 		return nil, err
 	}
 
+	// 注册子索引器（semantic + fulltext），权重归一化到 1.0
 	h.AddIndexer(semanticIndexer, 0.8)
 	h.AddIndexer(fulltextIndexer, 0.2)
-
-	// When graph store is not wrapped by any indexer, register it for cleanup
-	if graphStore != nil {
-		h.closers = append(h.closers, func(ctx context.Context) error {
-			return graphStore.Close(ctx)
-		})
-	}
 
 	return h, nil
 }
@@ -129,6 +111,18 @@ func (h *HybridIndexer) GetIndexer(name string) (core.Indexer, bool) {
 	return idx, ok
 }
 
+// StoreChunk stores a pre-built chunk in each sub-indexer.
+func (h *HybridIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, idx := range h.indexers {
+		if err := idx.StoreChunk(ctx, chunk); err != nil {
+			h.logger.Warn("hybrid: StoreChunk failed", "indexer", idx.Name(), "error", err)
+		}
+	}
+	return nil
+}
+
 // ListIndexers 列出所有索引器名称（按字母排序，保证确定性输出）
 func (h *HybridIndexer) ListIndexers() []string {
 	h.mu.RLock()
@@ -142,16 +136,10 @@ func (h *HybridIndexer) ListIndexers() []string {
 }
 
 // Add 将内容添加到所有子索引器。
-// 当图索引器（type="graph"）已注册时，语义索引器的 Add 被自动跳过，
-// 因为 GraphIndexer 的 Add 已同时写入 vectorDB + graphDB。
 func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
-	hasGraph := false
 	for _, idx := range h.indexers {
-		if idx.Type() == "graph" {
-			hasGraph = true
-		}
 		indexers = append(indexers, idx)
 	}
 	h.mu.RUnlock()
@@ -169,10 +157,6 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
-		// graph 已注册时跳过 semantic（由 graph 代劳）
-		if hasGraph && idx.Type() == "semantic" {
-			continue
-		}
 		chunks, addErr := idx.Add(ctx, content)
 		if addErr != nil {
 			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)
@@ -196,16 +180,10 @@ func (h *HybridIndexer) Add(ctx context.Context, content string) ([]*core.Chunk,
 }
 
 // AddFile 将文件添加到所有子索引器。
-// 当图索引器（type="graph"）已注册时，语义索引器的 AddFile 被自动跳过，
-// 因为 GraphIndexer 的 AddFile 已同时写入 vectorDB + graphDB。
 func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	indexers := make([]core.Indexer, 0, len(h.indexers))
-	hasGraph := false
 	for _, idx := range h.indexers {
-		if idx.Type() == "graph" {
-			hasGraph = true
-		}
 		indexers = append(indexers, idx)
 	}
 	h.mu.RUnlock()
@@ -223,10 +201,6 @@ func (h *HybridIndexer) AddFile(ctx context.Context, filePath string) ([]*core.C
 	var allChunks []*core.Chunk
 	var partialErrs []error
 	for _, idx := range indexers {
-		// graph 已注册时跳过 semantic（由 graph 代劳）
-		if hasGraph && idx.Type() == "semantic" {
-			continue
-		}
 		chunks, addErr := idx.AddFile(ctx, filePath)
 		if addErr != nil {
 			h.logger.Warn("partial index failure", "indexer", idx.Name(), "error", addErr)
@@ -276,16 +250,8 @@ func (h *HybridIndexer) Search(ctx context.Context, query core.Query) ([]core.Hi
 	}
 
 	resultCh := make(chan searchResult, len(snaps))
-	var graphIndexer *indexer.GraphIndexer
 
 	for _, s := range snaps {
-		if s.name == "graph" {
-			if gi, ok := s.idx.(*indexer.GraphIndexer); ok {
-				graphIndexer = gi
-			}
-			continue
-		}
-
 		go func(name string, idx core.Indexer) {
 			hits, err := idx.Search(ctx, query)
 			resultCh <- searchResult{indexerName: name, hits: hits, err: err}
@@ -293,15 +259,9 @@ func (h *HybridIndexer) Search(ctx context.Context, query core.Query) ([]core.Hi
 	}
 
 	results := []result.FusionSource{}
-	chunkIDs := make([]string, 0)
-	seenChunk := make(map[string]bool)
 	var errs []error
 
 	for i := 0; i < len(snaps); i++ {
-		if snaps[i].name == "graph" {
-			continue
-		}
-
 		r := <-resultCh
 		if r.err != nil {
 			errs = append(errs, r.err)
@@ -312,66 +272,10 @@ func (h *HybridIndexer) Search(ctx context.Context, query core.Query) ([]core.Hi
 			*result.NewSource(r.indexerName,
 				weightsSnap[r.indexerName],
 				r.hits))
-
-		for _, hit := range r.hits {
-			if !seenChunk[hit.ID] {
-				chunkIDs = append(chunkIDs, hit.ID)
-				seenChunk[hit.ID] = true
-			}
-		}
 	}
 
 	if len(results) == 0 && len(errs) > 0 {
 		return nil, errs[0]
-	}
-
-	if graphIndexer != nil {
-		// 查询路由：根据查询特征选择图搜索策略
-		router := querypkg.NewQueryRouter()
-		mode := router.Route(query.Raw())
-
-		switch mode {
-		case core.SearchModeGlobal:
-			// Global Search：通过社区摘要检索（不依赖 chunkIDs）
-			globalHits, err := graphIndexer.SearchGlobal(ctx, query.Raw(), 0)
-			if err == nil && len(globalHits) > 0 {
-				results = append(results,
-					*result.NewSource("graph",
-						weightsSnap["graph"],
-						globalHits))
-			}
-		case core.SearchModeHybrid:
-			// Hybrid/DRIFT：社区摘要 + 多跳遍历
-			// Global 部分不依赖 chunkIDs
-			globalHits, err := graphIndexer.SearchGlobal(ctx, query.Raw(), 0)
-			if err == nil && len(globalHits) > 0 {
-				results = append(results,
-					*result.NewSource("graph_global",
-						weightsSnap["graph"]*0.5,
-						globalHits))
-			}
-			// Local 部分依赖 chunkIDs
-			if len(chunkIDs) > 0 {
-				graphHits, err := graphIndexer.SearchByChunkIDs(ctx, chunkIDs, 1, 10)
-				if err == nil && len(graphHits) > 0 {
-					results = append(results,
-						*result.NewSource("graph_local",
-							weightsSnap["graph"]*0.5,
-							graphHits))
-				}
-			}
-		default:
-			// Local Search：多跳遍历（依赖 chunkIDs）
-			if len(chunkIDs) > 0 {
-				graphHits, err := graphIndexer.SearchByChunkIDs(ctx, chunkIDs, 1, 10)
-				if err == nil && len(graphHits) > 0 {
-					results = append(results,
-						*result.NewSource("graph",
-							weightsSnap["graph"],
-							graphHits))
-				}
-			}
-		}
 	}
 
 	fusionHits, err := result.RRF(results...)
@@ -433,13 +337,6 @@ func (h *HybridIndexer) Close(ctx context.Context) error {
 			}
 		}
 	}
-	// Close any extra resources not wrapped by indexers (e.g., graph store when no LLM)
-	for _, c := range h.closers {
-		if err := c(ctx); err != nil {
-			h.logger.Warn("close extra resource failed", "error", err)
-			errs = append(errs, err)
-		}
-	}
 	if len(errs) > 0 {
 		return fmt.Errorf("close failed for %d indexers: %v", len(errs), errs)
 	}
@@ -459,18 +356,15 @@ func (h *HybridIndexer) Type() string {
 var _ core.Indexer = (*HybridIndexer)(nil)
 
 // Count returns the total number of indexed chunks across all sub-indexers.
-// Delegates to the semantic indexer which is the primary chunk store.
 func (h *HybridIndexer) Count(ctx context.Context) (int, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// Try semantic indexer first (primary chunk store)
 	for name := range h.indexers {
 		if name == "semantic" {
 			return h.indexers[name].Count(ctx)
 		}
 	}
-	// Fallback: return count from first available indexer
 	for _, idx := range h.indexers {
 		return idx.Count(ctx)
 	}
@@ -501,18 +395,15 @@ func (h *HybridIndexer) NewQuery(terms string) core.Query {
 }
 
 // List returns paginated hits from the primary chunk-storing indexer.
-// Tries "semantic" first; falls back to the first available indexer.
 func (h *HybridIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// Try semantic indexer first (primary chunk store)
 	for name := range h.indexers {
 		if name == "semantic" {
 			return h.indexers[name].List(ctx, offset, limit)
 		}
 	}
-	// Fallback: return list from first available indexer
 	for _, idx := range h.indexers {
 		return idx.List(ctx, offset, limit)
 	}
@@ -520,18 +411,15 @@ func (h *HybridIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit
 }
 
 // GetChunks returns all chunks belonging to the specified document.
-// Tries "semantic" first; falls back to the first available indexer.
 func (h *HybridIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// Try semantic indexer first (primary chunk store)
 	for name := range h.indexers {
 		if name == "semantic" {
 			return h.indexers[name].GetChunks(ctx, docId)
 		}
 	}
-	// Fallback: return from first available indexer
 	for _, idx := range h.indexers {
 		return idx.GetChunks(ctx, docId)
 	}

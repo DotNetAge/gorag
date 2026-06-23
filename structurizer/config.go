@@ -114,7 +114,7 @@ func (c *ConfigStructurizer) parseYAML(content string) (*core.StructureNode, err
 // parseTOML 解析 TOML 内容
 func (c *ConfigStructurizer) parseTOML(content string) (*core.StructureNode, error) {
 	var v any
-	meta, err := toml.Decode(content, &v)
+	_, err := toml.Decode(content, &v)
 	if err != nil {
 		return nil, fmt.Errorf("invalid TOML: %w", err)
 	}
@@ -131,9 +131,6 @@ func (c *ConfigStructurizer) parseTOML(content string) (*core.StructureNode, err
 	} else {
 		c.build(root, "", v, 0)
 	}
-
-	// 未解码的键（可选：记录警告）
-	_ = meta.Undecoded
 
 	return root, nil
 }

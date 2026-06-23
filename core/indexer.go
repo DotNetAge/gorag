@@ -82,6 +82,21 @@ type Indexer interface {
 	//   - error: An error if the operation fails
 	GetChunks(ctx context.Context, docId string) ([]*Chunk, error)
 
+	// StoreChunk stores a pre-built chunk directly in the index, bypassing
+	// chunking and LLM processing. The chunk's Metadata is persisted as
+	// vector metadata for filter-based retrieval.
+	//
+	// This is used by the memory system to store MemoryChunk data with
+	// agent_name, session_id, and other metadata for short/long-term memory.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation
+	//   - chunk: The pre-built chunk to store
+	//
+	// Returns:
+	//   - error: An error if the operation fails
+	StoreChunk(ctx context.Context, chunk *Chunk) error
+
 	// Count returns the total number of indexed chunks/entries.
 	//
 	// Parameters:

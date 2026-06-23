@@ -101,7 +101,10 @@ func (d *ModelDownloader) Download(modelID string, files []string) (string, erro
 	})
 
 	for _, file := range files {
-		fileSize := d.getFileSize(modelID, file)
+		fileSize, err := d.getFileSize(modelID, file)
+		if err != nil {
+			return "", fmt.Errorf("failed to get file size for %s: %w", file, err)
+		}
 		d.notify(DownloadEvent{
 			Type:    EventStart,
 			File:    file,
@@ -135,23 +138,23 @@ func (d *ModelDownloader) Download(modelID string, files []string) (string, erro
 }
 
 // getFileSize 获取文件大小
-func (d *ModelDownloader) getFileSize(modelID, file string) int64 {
+func (d *ModelDownloader) getFileSize(modelID, file string) (int64, error) {
 	url := fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s", modelID, file)
 	req, err := d.createRequest("HEAD", url)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		return resp.ContentLength
+		return resp.ContentLength, nil
 	}
-	return 0
+	return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 }
 
 // downloadFile 下载单个文件

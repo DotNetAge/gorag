@@ -61,7 +61,7 @@ func runInfo(cmd *cobra.Command, args []string) {
 
 	ui.KeyValue("名称", cfg.Name)
 	ui.KeyValue("类型", cfg.Type)
-	ui.KeyValue("模型文件", cfg.ModelFile)
+	ui.KeyValue("模型文件", cfg.EmbeddingModelFile)
 	ui.KeyValue("绝对路径", absDir)
 
 	if strings.TrimSpace(cfgRaw) != "" {

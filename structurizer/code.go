@@ -21,6 +21,7 @@ import (
 
 type CodeStructurizer struct {
 	languageParsers map[string]*sitter.Parser
+	parsers         []*sitter.Parser
 }
 
 func NewCodeStructurizer() *CodeStructurizer {
@@ -46,9 +47,15 @@ func NewCodeStructurizer() *CodeStructurizer {
 
 func (cs *CodeStructurizer) registerParser(lang string, langType *sitter.Language) {
 	parser := sitter.NewParser()
-	defer parser.Close()
 	parser.SetLanguage(langType)
 	cs.languageParsers[lang] = parser
+	cs.parsers = append(cs.parsers, parser)
+}
+
+func (cs *CodeStructurizer) Close() {
+	for _, p := range cs.parsers {
+		p.Close()
+	}
 }
 
 func (cs *CodeStructurizer) Parse(raw core.Document) (*core.StructuredDocument, error) {

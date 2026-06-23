@@ -21,8 +21,8 @@ type semanticIndexer struct {
 // SemanticOption configures a semantic indexer.
 type SemanticOption func(*semanticIndexer)
 
-// WithLogger attaches a logger to the semantic indexer for observation logs.
-func WithLogger(logger logging.Logger) SemanticOption {
+// WithSemanticLogger attaches a logger to the semantic indexer for observation logs.
+func WithSemanticLogger(logger logging.Logger) SemanticOption {
 	return func(s *semanticIndexer) {
 		if logger != nil {
 			s.logger = logger
@@ -83,6 +83,16 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 		return nil, err
 	}
 	return chunks, nil
+}
+// AddChunks 直接将分片插入向量数据库
+func (s *semanticIndexer) AddChunks(ctx context.Context, chunks []*core.Chunk) error {
+	if len(chunks) == 0 {
+		return fmt.Errorf("no chunks to add")
+	}
+	if err := s.saveChunks(ctx, chunks); err != nil {
+		return err
+	}
+	return nil
 }
 
 // indexAndStore 计算 chunk 向量并存储到数据库
@@ -271,7 +281,17 @@ func (s *semanticIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) erro
 	return s.indexAndStore(ctx, chunk)
 }
 
-// IndexChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
+// StoreChunk stores a pre-built chunk directly in the index, skipping chunking.
+// The chunk's Metadata is persisted as vector metadata for filter-based retrieval.
+// This is used by the memory system to store MemoryChunk data.
+func (s *semanticIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
+	if chunk == nil || chunk.Content == "" {
+		return fmt.Errorf("chunk content cannot be empty")
+	}
+	return s.indexAndStore(ctx, chunk)
+}
+
+// saveChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
 // Emits a single batch-level INFO log "indexer.embedded" summarizing the embedding
 // and upsert timings so the caller can see one line per batch instead of one per chunk.
 func (s *semanticIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {

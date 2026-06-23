@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ type BoltCache struct {
 	bucket  []byte
 	mu      sync.RWMutex
 	dirty   bool
+	closed  bool
 	opCh    chan diskOp // 序列化磁盘操作的通道
 	closeCh chan struct{}
 	wg      sync.WaitGroup
@@ -65,7 +67,7 @@ func NewBoltCache(cachePath string, bucketName ...string) (*BoltCache, error) {
 		db:      db,
 		mem:     make(map[string][]byte),
 		bucket:  bucket,
-		opCh:    make(chan diskOp, 256), // 带缓冲避免阻塞调用方
+		opCh:    make(chan diskOp, 1024), // 带缓冲避免阻塞调用方
 		closeCh: make(chan struct{}),
 	}
 
@@ -107,15 +109,8 @@ func (c *BoltCache) diskLoop() {
 func (c *BoltCache) submitOp(op diskOp) {
 	select {
 	case c.opCh <- op:
-	default:
-		// 通道已满时同步执行，避免死锁
-		op.fn()
-		if op.done != nil {
-			op.done <- struct{}{}
-		}
-		c.mu.Lock()
-		c.dirty = false
-		c.mu.Unlock()
+	case <-c.closeCh:
+		// 正在关闭，直接丢弃
 	}
 }
 
@@ -156,6 +151,13 @@ func (c *BoltCache) Get(key string, value any) error {
 
 // Set 实现 core.CacheStore 接口
 func (c *BoltCache) Set(key string, value any) error {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return fmt.Errorf("cache is closed")
+	}
+	c.mu.RUnlock()
+
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -180,6 +182,13 @@ func (c *BoltCache) Set(key string, value any) error {
 
 // Delete 实现 core.CacheStore 接口
 func (c *BoltCache) Delete(key string) error {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return fmt.Errorf("cache is closed")
+	}
+	c.mu.RUnlock()
+
 	c.mu.Lock()
 	delete(c.mem, key)
 	c.dirty = true
@@ -200,20 +209,19 @@ func (c *BoltCache) Delete(key string) error {
 // Flush 实现 core.CacheStore 接口
 // 同步等待所有挂起的异步操作完成，然后将当前内存快照全量刷盘
 func (c *BoltCache) Flush() error {
-	c.mu.RLock()
-	snapshot := make(map[string][]byte, len(c.mem))
-	maps.Copy(snapshot, c.mem)
-	c.mu.RUnlock()
-
-	// 先等待所有挂起的异步操作完成（提交一个 marker 操作）
+	// 先等待所有挂起的异步操作完成
 	done := make(chan struct{}, 1)
 	c.submitOp(diskOp{
-		fn: func() {
-			// marker: 标记前面的异步操作都已完成
-		},
+		fn:   func() {},
 		done: done,
 	})
-	<-done // 等待 marker 执行完毕
+	<-done
+
+	// 在写锁下拍快照 —— 此时没有并发变更
+	c.mu.Lock()
+	snapshot := make(map[string][]byte, len(c.mem))
+	maps.Copy(snapshot, c.mem)
+	c.mu.Unlock()
 
 	// 全量刷盘
 	return c.db.Update(func(tx *bolt.Tx) error {
@@ -236,12 +244,19 @@ func (c *BoltCache) Len() int {
 
 // Close 实现 core.CacheStore 接口
 func (c *BoltCache) Close() error {
-	// Flush 会等待所有挂起的异步操作完成 + 全量刷盘
-	_ = c.Flush()
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+
+	flushErr := c.Flush()
 	// 通知 diskLoop 退出并等待其完成，确保没有正在执行的 db 操作
 	close(c.closeCh)
 	c.wg.Wait()
-	return c.db.Close()
+	dbErr := c.db.Close()
+	if flushErr != nil {
+		return flushErr
+	}
+	return dbErr
 }
 
 // Ensure BoltCache implements core.CacheStore
