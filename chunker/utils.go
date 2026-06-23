@@ -7,7 +7,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // embedBatch computes embeddings for multiple texts using core.Embedder

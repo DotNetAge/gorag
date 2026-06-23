@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/DotNetAge/gorag"
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/spf13/cobra"
 )
 

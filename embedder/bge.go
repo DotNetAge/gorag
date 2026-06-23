@@ -3,7 +3,7 @@ package embedder
 import (
 	"fmt"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/google/uuid"
 	ort "github.com/yalue/onnxruntime_go"
 )

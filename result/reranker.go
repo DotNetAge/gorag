@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/query"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/query"
 )
 
 // Rerank re-ranks search results using cosine similarity between query vector and content vectors.

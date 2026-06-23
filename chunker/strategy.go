@@ -1,6 +1,6 @@
 package chunker
 
-import "github.com/DotNetAge/gorag/core"
+import "github.com/DotNetAge/gorag/v2/core"
 
 // Chunk strategy constants
 const (

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/query"
-	bledoc "github.com/DotNetAge/gorag/store/doc/bleve"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/query"
+	bledoc "github.com/DotNetAge/gorag/v2/store/doc/bleve"
 )
 
 // fulltextIndexer 基于 bleve 的全文索引器

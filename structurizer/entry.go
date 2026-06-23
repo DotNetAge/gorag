@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
 )
 
 // Structurizer 接口，定义结构化分析器的通用行为

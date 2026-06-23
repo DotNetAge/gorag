@@ -1,4 +1,4 @@
-module github.com/DotNetAge/gorag
+module github.com/DotNetAge/gorag/v2
 
 go 1.25.1
 

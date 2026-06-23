@@ -1,7 +1,7 @@
 package query
 
 import (
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // GraphQuery 图查询

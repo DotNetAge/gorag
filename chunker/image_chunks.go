@@ -3,7 +3,7 @@ package chunker
 import (
 	"encoding/base64"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // ExtractImageChunks 从 structured 文档中提取图片子分块

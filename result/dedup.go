@@ -5,7 +5,7 @@ import (
 	"sort"
 	"unicode"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // Dedup 对搜索结果语义去重

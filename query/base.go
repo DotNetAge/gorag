@@ -3,8 +3,8 @@ package query
 import (
 	"maps"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // BaseQuery is a default implementation of the core.Query interface.

@@ -9,7 +9,7 @@ import (
 	"github.com/DotNetAge/gochat/client/ollama"
 	chat "github.com/DotNetAge/gochat/core"
 
-	goragCore "github.com/DotNetAge/gorag/core"
+	goragCore "github.com/DotNetAge/gorag/v2/core"
 )
 
 // TestCompressWithLLM 验证 LLM 压缩流程（使用 ollama 真实客户端）

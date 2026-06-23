@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
 )
 
 // rawContentDoc 创建一个保留原始内容的文档，绕过 document.New 的变换逻辑

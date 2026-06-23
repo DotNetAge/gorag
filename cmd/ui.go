@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DotNetAge/gorag/formatter"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/formatter"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // UI 终端 UI 工具

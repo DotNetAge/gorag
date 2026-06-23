@@ -3,8 +3,8 @@ package document
 import (
 	"io"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 type ParseFunc func(r io.Reader) (*RawDocument, error)

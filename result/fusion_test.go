@@ -3,7 +3,7 @@ package result
 import (
 	"testing"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 func TestFusionRRFBasic(t *testing.T) {

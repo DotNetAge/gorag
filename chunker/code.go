@@ -3,7 +3,7 @@ package chunker
 import (
 	"maps"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // CodeChunker 代码分块器

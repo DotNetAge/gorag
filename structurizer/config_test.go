@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
 )
 
 func TestConfigStructurizer_Parse_JSON(t *testing.T) {

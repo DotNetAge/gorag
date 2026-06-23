@@ -4,7 +4,7 @@
 package core
 
 import (
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // StructureNode represents a structural unit within a parsed document.

@@ -3,7 +3,7 @@ package chunker
 import (
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // ParentDocChunker implements two-level chunking

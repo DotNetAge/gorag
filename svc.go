@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/logging"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/fsnotify/fsnotify"
 )
 

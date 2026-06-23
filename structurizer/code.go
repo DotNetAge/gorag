@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	sitter "github.com/smacker/go-tree-sitter"
 	clang "github.com/smacker/go-tree-sitter/c"
 	cpp "github.com/smacker/go-tree-sitter/cpp"

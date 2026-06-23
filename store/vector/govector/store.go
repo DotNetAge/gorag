@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	gvcore "github.com/DotNetAge/govector/core"
 )
 

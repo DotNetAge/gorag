@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/store/graph/gograph"
-	"github.com/DotNetAge/gorag/store/vector/govector"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/store/graph/gograph"
+	"github.com/DotNetAge/gorag/v2/store/vector/govector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -1,8 +1,8 @@
 package extractor
 
 import (
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // Extraction 原始提取结果，与特定 chunk/doc ID 无关

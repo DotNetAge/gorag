@@ -7,11 +7,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/indexer"
-	"github.com/DotNetAge/gorag/logging"
-	querypkg "github.com/DotNetAge/gorag/query"
-	"github.com/DotNetAge/gorag/result"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/logging"
+	querypkg "github.com/DotNetAge/gorag/v2/query"
+	"github.com/DotNetAge/gorag/v2/result"
 )
 
 // HybridIndexer 混合索引器（第二代 RAG）

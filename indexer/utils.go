@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DotNetAge/gorag/chunker"
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/logging"
-	"github.com/DotNetAge/gorag/structurizer"
+	"github.com/DotNetAge/gorag/v2/chunker"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/logging"
+	"github.com/DotNetAge/gorag/v2/structurizer"
 )
 
 // 默认分块策略

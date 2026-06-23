@@ -3,8 +3,8 @@ package structurizer
 import (
 	"testing"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
 )
 
 // collectAllBlocks 递归收集所有非根节点，用于扁平化的块检查

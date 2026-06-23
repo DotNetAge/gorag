@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // sentenceInfo contains sentence text with position tracking

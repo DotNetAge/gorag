@@ -1,6 +1,6 @@
 package query
 
-import "github.com/DotNetAge/gorag/core"
+import "github.com/DotNetAge/gorag/v2/core"
 
 // FulltextQuery 全文查询
 type FulltextQuery struct {

@@ -6,7 +6,7 @@ package result
 import (
 	"sort"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // FusionSource represents search results from a single source (e.g., vector, keyword, graph indexer).

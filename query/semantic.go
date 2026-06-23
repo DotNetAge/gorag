@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	chat "github.com/DotNetAge/gochat/core"
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // SemanticQuery 语义查询

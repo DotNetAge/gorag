@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	goChatCore "github.com/DotNetAge/gochat/core"
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // Compresser 实现基于 LLM 的结果压缩（LLM-based Context Compression）。

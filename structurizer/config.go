@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	toml "github.com/BurntSushi/toml"
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	"gopkg.in/yaml.v3"
 )
 

@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/store/vector/govector"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/store/vector/govector"
 )
 
 // Embedder 嵌入向量计算器 — 由平台层实现。

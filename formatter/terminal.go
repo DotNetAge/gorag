@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // ANSI 颜色码

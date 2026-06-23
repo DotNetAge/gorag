@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/DotNetAge/gorag"
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/formatter"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/formatter"
+	"github.com/DotNetAge/gorag/v2/utils"
 	"github.com/spf13/cobra"
 )
 

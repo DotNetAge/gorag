@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/embedder"
-	"github.com/DotNetAge/gorag/indexer"
-	"github.com/DotNetAge/gorag/logging"
-	"github.com/DotNetAge/gorag/store/doc/bleve"
-	"github.com/DotNetAge/gorag/store/graph/gograph"
-	"github.com/DotNetAge/gorag/store/vector/govector"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/embedder"
+	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/logging"
+	"github.com/DotNetAge/gorag/v2/store/doc/bleve"
+	"github.com/DotNetAge/gorag/v2/store/graph/gograph"
+	"github.com/DotNetAge/gorag/v2/store/vector/govector"
+	"github.com/DotNetAge/gorag/v2/utils"
 	"gopkg.in/yaml.v3"
 )
 

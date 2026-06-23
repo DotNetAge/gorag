@@ -15,12 +15,12 @@ import (
 
 	"github.com/DotNetAge/gochat/client/openai"
 	chat "github.com/DotNetAge/gochat/core"
-	"github.com/DotNetAge/gorag/chunker"
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
-	"github.com/DotNetAge/gorag/logging"
-	"github.com/DotNetAge/gorag/query"
-	"github.com/DotNetAge/gorag/utils"
+	"github.com/DotNetAge/gorag/v2/chunker"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
+	"github.com/DotNetAge/gorag/v2/logging"
+	"github.com/DotNetAge/gorag/v2/query"
+	"github.com/DotNetAge/gorag/v2/utils"
 	"gopkg.in/yaml.v3"
 )
 

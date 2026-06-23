@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // PromptConfig Prompt 格式化配置

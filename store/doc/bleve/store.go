@@ -4,7 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	blevedb "github.com/blevesearch/bleve"
 )
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 	sitter "github.com/smacker/go-tree-sitter"
 	markdown "github.com/smacker/go-tree-sitter/markdown/tree-sitter-markdown"
 )

@@ -4,8 +4,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/document"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
 )
 
 // ValidationReport contains the results of chunk validation

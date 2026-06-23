@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/DotNetAge/gorag/core"
-	"github.com/DotNetAge/gorag/logging"
-	"github.com/DotNetAge/gorag/query"
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/logging"
+	"github.com/DotNetAge/gorag/v2/query"
 )
 
 // 使用向量数据库和向量模型进行索引及检索

@@ -7,7 +7,7 @@ import (
 
 	api "github.com/DotNetAge/gograph/pkg/api"
 	"github.com/DotNetAge/gograph/pkg/graph"
-	"github.com/DotNetAge/gorag/core"
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // propsToAny converts graph properties to map[string]any.
