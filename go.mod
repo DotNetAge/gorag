@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/DotNetAge/gochat v0.2.7
-	github.com/DotNetAge/gograph v0.2.4
+	github.com/DotNetAge/gograph v0.2.6
 	github.com/DotNetAge/govector v0.1.8
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/blevesearch/bleve v1.0.14
@@ -103,5 +103,3 @@ require (
 )
 
 tool golang.org/x/mobile/cmd/gobind
-
-replace github.com/DotNetAge/gograph v0.2.4 => /Users/ray/workspaces/ai-ecosystem/gograph
