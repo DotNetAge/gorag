@@ -660,19 +660,35 @@ func (idx *GraphIndexer) toSimpleHits(results []*core.Vector, scores []float32) 
 }
 
 // vectorToHit 从单个向量结果构建 Hit，携带分数。
+// 与 semantic.go 中的包级 vectorToHit 保持行为一致：
+// - 从 vec.Metadata 提取 content/title/doc_id 到 Hit struct 顶层字段
+// - 其余元数据全部保留在 Hit.Metadata 中
 func (idx *GraphIndexer) vectorToHit(vec *core.Vector, score float32) core.Hit {
-	return core.Hit{
+	hit := core.Hit{
 		ID:    vec.ChunkID,
 		Score: score,
-		Metadata: func() map[string]any {
-			m := make(map[string]any, len(vec.Metadata)+1)
-			m["chunk_id"] = vec.ChunkID
-			for k, v := range vec.Metadata {
-				m[k] = v
-			}
-			return m
-		}(),
 	}
+	if vec.Metadata != nil {
+		if c, ok := vec.Metadata["content"].(string); ok {
+			hit.Content = c
+		}
+		if t, ok := vec.Metadata["title"].(string); ok {
+			hit.Title = t
+		}
+		if d, ok := vec.Metadata["doc_id"].(string); ok {
+			hit.DocID = d
+		}
+	}
+	// 全部 metadata + chunk_id 一并保留（供前端/kb.search 直接使用）
+	hit.Metadata = func() map[string]any {
+		m := make(map[string]any, len(vec.Metadata)+1)
+		m["chunk_id"] = vec.ChunkID
+		for k, v := range vec.Metadata {
+			m[k] = v
+		}
+		return m
+	}()
+	return hit
 }
 
 // nodesForChunk 从节点列表中筛选属于指定 chunk 的节点。
