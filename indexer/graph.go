@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sort"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -36,6 +38,28 @@ type IndexError struct {
 	Attempts  int             // 重试次数
 	Duration  time.Duration   // 总耗时
 	Messages  []chat.Message  // 请求消息快照（值传递，只读）
+}
+
+// regionContextKey is used to carry region_id through context.
+// When set, writeToStores uses this value as the region_id for all chunks,
+// rather than deriving it from the source file path.
+//
+// Usage (orchestration layer):
+//
+//	ctx := goragindexer.WithRegionID(ctx, regionID)
+//	indexer.AddFile(ctx, filePath)
+type regionContextKey struct{}
+
+// WithRegionID attaches a region ID to context. When passed to AddFile,
+// all chunks produced will carry this region_id in their metadata.
+func WithRegionID(ctx context.Context, regionID string) context.Context {
+	return context.WithValue(ctx, regionContextKey{}, regionID)
+}
+
+// RegionIDFromContext extracts a region ID from context, or returns "".
+func RegionIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(regionContextKey{}).(string)
+	return id
 }
 
 // classifyLLMError 对 LLM 调用错误进行分类。
@@ -1318,6 +1342,17 @@ func (idx *GraphIndexer) writeToStores(
 		"relations", len(data.Relations),
 		"source_file", sourceFile)
 
+	// ── 0. 计算 region_id：优先使用 context 注入的值 ────────────
+	// 调用方（如 MindX IndexService）通过 WithRegionID(ctx, id) 在索引会话
+	// 级别设置 regionID，避免每次从 sourceFile 重新计算。
+	// 如果 context 未设置，从 sourceFile 所在目录的 SHA256 回退计算。
+	regionID := RegionIDFromContext(ctx)
+	if regionID == "" && sourceFile != "" {
+		dir := filepath.Dir(sourceFile)
+		hash := sha256.Sum256([]byte(dir))
+		regionID = fmt.Sprintf("%x", hash)
+	}
+
 	// ── 0. 构建 ordinal→NodeID 映射 ──────────────────────────────────
 	ordinalToNodeID := make(map[int]string, len(data.Entities))
 	entityNameByOrdinal := make(map[int]string, len(data.Entities))
@@ -1335,12 +1370,16 @@ func (idx *GraphIndexer) writeToStores(
 	chunkVectors := make([]*core.Vector, 0, len(data.Chunks))
 	entityToChunks := make(map[string][]string) // entity NodeID → chunkIDs
 
+	// ordinal→chunkID 映射表，用于解析 parent_ordinal 跨分片引用
+	ordinalChunkID := make(map[int]string, len(data.Chunks))
+
 	for i, c := range data.Chunks {
 		if c.Content == "" {
 			continue
 		}
 
 		chunkID := chunker.GenerateChunkID(docID, i, c.Content)
+		ordinalChunkID[i] = chunkID
 
 		// 从 metadata 中提取 summary
 		summary, _ := c.Metadata["summary"].(string)
@@ -1373,9 +1412,28 @@ func (idx *GraphIndexer) writeToStores(
 			entityToChunks[nodeID] = append(entityToChunks[nodeID], chunkID)
 		}
 
+		// 确定分片层级类型：文档级 summary (root) vs 普通分段 (segment)
+		// LLM 根据 Prompt 规则 7 在 metadata.type 中标记
+		chunkType := "segment"
+		if t, ok := c.Metadata["type"].(string); ok && t == "document" {
+			chunkType = "root"
+		}
+
+		// 解析 parent_ordinal（LLM 输出的分片数组下标）→ 真实 ParentID
+		// LLM 根据 Prompt 规则 8 设置此值，形成 Root → Chapter → Section 层级链
+		parentID := ""
+		if po, ok := c.Metadata["parent_ordinal"].(float64); ok && chunkType != "root" {
+			parentOrdinal := int(po)
+			if parentOrdinal < i { // 父分片必须在子分片之前出现
+				if pid, ok := ordinalChunkID[parentOrdinal]; ok {
+					parentID = pid
+				}
+			}
+		}
+
 		chunk := &core.Chunk{
 			ID:      chunkID,
-			ParentID:"",
+			ParentID: parentID,
 			DocID:   docID,
 			MIMEType: mimeType,
 			Title:   title,
@@ -1389,7 +1447,9 @@ func (idx *GraphIndexer) writeToStores(
 			},
 			Metadata: map[string]any{
 				"source_file": sourceFile,
-				"parent_id":   "",
+				"region_id":   regionID,
+				"chunk_type":  chunkType,
+				"parent_id":   parentID,
 				"mime_type":   mimeType,
 				"title":       title,
 				"summary":     summary,
@@ -1410,7 +1470,9 @@ func (idx *GraphIndexer) writeToStores(
 		vec.Metadata = map[string]any{
 			"doc_id":      docID,
 			"source_file": sourceFile,
-			"parent_id":   "",
+			"region_id":   regionID,
+			"chunk_type":  chunkType,
+			"parent_id":   parentID,
 			"mime_type":   mimeType,
 			"title":       title,
 			"content":     c.Content,
@@ -1427,6 +1489,109 @@ func (idx *GraphIndexer) writeToStores(
 			},
 		}
 		chunkVectors = append(chunkVectors, vec)
+	}
+
+	// ── 1b. 基于 line range containment 推导 ParentID（补充 parent_ordinal 未覆盖的场景）─
+	// 代码域等没有 parent_ordinal 的场景，通过 positions 的包含关系自动推导层级。
+	// 仅对 ParentID 仍为空的 chunk 生效，不影响文本域已有的 parent_ordinal 链路。
+	type posItem struct {
+		chunk     *core.Chunk
+		vec       *core.Vector
+		startLine int
+		endLine   int
+	}
+
+	var posItems []posItem
+	for idx := range chunks {
+		c := chunks[idx]
+		if c.ParentID != "" {
+			continue // 已有 parent_ordinal 解析出的 ParentID
+		}
+		start := c.ChunkMeta.StartPos
+		end := c.ChunkMeta.EndPos
+		if start == 0 && end == 0 {
+			continue // 无位置信息，无法推导
+		}
+		posItems = append(posItems, posItem{
+			chunk:     c,
+			vec:       chunkVectors[idx],
+			startLine: start,
+			endLine:   end,
+		})
+	}
+
+	if len(posItems) > 1 {
+		// 按 start_line 升序、end_line 降序排序
+		// 保证父级在子级之前出现，且同一起点的宽范围在前
+		sort.Slice(posItems, func(i, j int) bool {
+			if posItems[i].startLine != posItems[j].startLine {
+				return posItems[i].startLine < posItems[j].startLine
+			}
+			return posItems[i].endLine > posItems[j].endLine
+		})
+
+		// containment 匹配：每个 chunk 找最紧密的父级
+		for i, p := range posItems {
+			if p.chunk.ParentID != "" {
+				continue
+			}
+			for j := i - 1; j >= 0; j-- {
+				parent := posItems[j]
+				if parent.startLine <= p.startLine && p.endLine <= parent.endLine {
+					// 严格包含（非同一范围，防止自包含）
+					if parent.startLine < p.startLine || p.endLine < parent.endLine {
+						p.chunk.ParentID = parent.chunk.ID
+						if p.vec.Metadata == nil {
+							p.vec.Metadata = make(map[string]any)
+						}
+						p.vec.Metadata["parent_id"] = parent.chunk.ID
+						if p.chunk.Metadata == nil {
+							p.chunk.Metadata = make(map[string]any)
+						}
+						p.chunk.Metadata["parent_id"] = parent.chunk.ID
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// ── 1c. 从 ParentID 链推导 Level（层级深度） ──────────────────────
+	// Level 是层级结构的快速路径——O(1) 即可知道 chunk 的语义深度。
+	// 语义：Level 0 = 文档/文件级摘要或顶级声明（无父分片）
+	//       Level 1 = 顶级章节 / 类 / 接口 / 顶级函数
+	//       Level 2 = 子节 / 类方法
+	//       Level N = 逐层递进
+	//
+	// 推导方式：从 chunk 的 ParentID 链向上回溯，深度即为 Level。
+	// 因为 parent_ordinal < i 且 containment 排序保证父在前，此值确定。
+	chunkMap := make(map[string]*core.Chunk, len(chunks))
+	for _, c := range chunks {
+		chunkMap[c.ID] = c
+	}
+
+	levelCache := make(map[string]int, len(chunks))
+	var walkLevel func(id string) int
+	walkLevel = func(id string) int {
+		if l, ok := levelCache[id]; ok {
+			return l
+		}
+		c, ok := chunkMap[id]
+		if !ok || c.ParentID == "" || c.ParentID == id {
+			levelCache[id] = 0
+			return 0
+		}
+		l := walkLevel(c.ParentID) + 1
+		levelCache[id] = l
+		return l
+	}
+
+	for i, c := range chunks {
+		level := walkLevel(c.ID)
+		c.Metadata["level"] = level
+		if i < len(chunkVectors) && chunkVectors[i] != nil {
+			chunkVectors[i].Metadata["level"] = level
+		}
 	}
 
 	// ── 2. 批量写入 vectorDB ───────────────────────────────────────────
@@ -1480,8 +1645,66 @@ func (idx *GraphIndexer) writeToStores(
 		idx.statsMu.Unlock()
 	}
 
+	// ── 4c. 构造 Document Root Node ──────────────────────────────────
+	// 每个文件有且仅有一个 Document Node，Labels 包含 "Document"，
+	// 作为文件级入口节点，通过 CONTAINS 边连接到该文件的所有实体。
+	// 这与 Chunk 层中的 root chunk（chunk_type="root"）对应——
+	// 一个代表文件的摘要内容，一个代表文件本身。
+	rootChunkID := ""
+	for _, c := range chunks {
+		if ct, ok := c.Metadata["chunk_type"].(string); ok && ct == "root" {
+			rootChunkID = c.ID
+			break
+		}
+	}
+
+	docNodeID := utils.GenerateID([]byte(docID + ":document"))
+	docSourceChunks := []string{}
+	if rootChunkID != "" {
+		docSourceChunks = []string{rootChunkID}
+	} else {
+		docSourceChunks = allChunkIDs
+	}
+
+	docNode := &core.Node{
+		ID:     docNodeID,
+		Labels: []string{"Document"},
+		Name:   filepath.Base(sourceFile),
+		Properties: map[string]any{
+			"source_file": sourceFile,
+			"confidence":  0.9,
+		},
+		SourceChunkIDs: docSourceChunks,
+		SourceDocIDs:   []string{docID},
+	}
+	if err := idx.graphDB.UpsertNodes(ctx, []*core.Node{docNode}); err != nil {
+		return chunks, fmt.Errorf("graphDB upsert doc node failed: %w", err)
+	}
+	idx.statsMu.Lock()
+	idx.entitiesCreated++
+	idx.statsMu.Unlock()
+
 	// ── 5. 构造 Edge ──────────────────────────────────────────────────
-	edges := make([]*core.Edge, 0, len(data.Relations))
+	edges := make([]*core.Edge, 0, len(data.Relations)+len(nodes))
+	// 5a. Document → Entity CONTAINS 边（文件级图入口）
+	for _, n := range nodes {
+		if n.ID == docNodeID {
+			continue
+		}
+		edges = append(edges, &core.Edge{
+			ID:        utils.GenerateID([]byte(docNodeID + "CONTAINS" + n.ID + docID)),
+			Type:      "CONTAINS",
+			Source:    docNodeID,
+			Target:    n.ID,
+			Predicate: "CONTAINS",
+			Properties: map[string]any{
+				"confidence": 0.9,
+			},
+			SourceChunkIDs: uniqueMerge(docSourceChunks, n.SourceChunkIDs),
+			SourceDocIDs:   []string{docID},
+		})
+	}
+	// 5b. LLM 输出的实体间关系
 	for _, r := range data.Relations {
 		sourceName, ok := entityNameByOrdinal[r.Source]
 		if !ok {

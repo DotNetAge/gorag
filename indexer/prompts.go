@@ -31,7 +31,9 @@ const segmentChunkingRules = `## Chunking & Title Rules
 3. Generate a short, descriptive title (<60 chars) for each chunk, based on its main topic.
 4. The chunk "content" field must contain the EXACT original text lines for the chunk range. Do not paraphrase, do not summarize the content field itself — only the "title" and "summary" fields are for condensation.
 5. Filter out meaningless content: license headers, template comments, empty boilerplate, navigation links. Do not chunk these.
-6. Merge adjacent lines that belong to the same logical topic. Avoid tiny fragments.`
+6. Merge adjacent lines that belong to the same logical topic. Avoid tiny fragments.
+7. The FIRST chunk MUST be a document-level summary covering the entire document. Set metadata.type = "document" for this chunk, and metadata.type = "segment" for all other chunks. This document chunk's content is a 1-2 sentence document overview, and its summary describes the document as a whole. Include all key entities from the document in this chunk's entity_ids.
+8. For each non-root chunk, set metadata.parent_ordinal to the 0-based array index of its parent chunk. The root chunk (index 0, type "document") has no parent_ordinal. Top-level sections set parent_ordinal = 0 (root chunk). Nested subsections reference their direct parent chunk's index. This creates a hierarchical parent-child chain through the document structure.`
 
 // segmentOutputFormat 片段 4：输出格式（含 positions 说明）
 const segmentOutputFormat = `## Output Format — JSON only, no markdown, no additional text
