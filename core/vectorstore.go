@@ -108,4 +108,31 @@ type VectorStore interface {
 	//   - []*Vector: The paginated vectors (sorted by insertion order)
 	//   - error: Any error that occurred during retrieval
 	List(ctx context.Context, offset, limit int) ([]*Vector, error)
+
+	// ListFiltered returns paginated vectors filtered by metadata conditions.
+	// Each FilterCondition is ANDed together (all must match).
+	//
+	// Supported ConditionType values:
+	//   "exact"  - exact value match on metadata key
+	//   "prefix" - prefix match on metadata key (string value only)
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - offset: Number of vectors to skip (0-based)
+	//   - limit: Maximum number of vectors to return
+	//   - filters: Metadata filter conditions (AND semantics)
+	//
+	// Returns:
+	//   - []*Vector: The paginated filtered vectors
+	//   - int: Total count of vectors matching the filter (before pagination)
+	//   - error: Any error that occurred during retrieval
+	ListFiltered(ctx context.Context, offset, limit int, filters []FilterCondition) ([]*Vector, int, error)
+}
+
+// FilterCondition represents a single metadata filter condition.
+// Used with ListFiltered to narrow results by vector metadata.
+type FilterCondition struct {
+	Key   string      `json:"key"`
+	Type  string      `json:"type"`  // "exact" or "prefix"
+	Value any         `json:"value"`
 }

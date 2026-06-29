@@ -99,7 +99,7 @@ func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Regi
 	if len(vectors) == 0 {
 		r.logger.Warn("region: no vectors found, creating empty region",
 			"dir", dir, "region_id", regionID)
-		return r.writeRegion(ctx, regionID, title, "", nil, dir,
+		return r.writeRegion(ctx, regionID, title, title, nil, dir,
 			nil, nil)
 	}
 
@@ -194,8 +194,12 @@ func (r *RegionIndexer) writeRegion(
 	if err != nil {
 		return region, fmt.Errorf("region: embed summary: %w", err)
 	}
+	if vec == nil {
+		return region, fmt.Errorf("region: embed summary returned nil vector")
+	}
 	vec.ID = utils.GenerateID([]byte("region_" + regionID))
 	vec.ChunkID = "region:" + regionID
+	regionNodeID := utils.GenerateID([]byte("region:" + regionID))
 	vec.Metadata = map[string]any{
 		"region_id":  regionID,
 		"region":     true, // 标记为 Region 向量，区别于普通 Chunk
@@ -204,7 +208,11 @@ func (r *RegionIndexer) writeRegion(
 		"tags":       tags,
 		"dir":        dir,
 		"summary":    summary,
+		"entity_ids": []string{regionNodeID},
 	}
+
+	// 先删除旧 Region 向量（如存在），防止 HNSW 重复 Add 同一 key 时 panic
+	_ = r.vectorDB.Delete(ctx, vec.ID)
 
 	if err := r.vectorDB.Upsert(ctx, []*core.Vector{vec}); err != nil {
 		return region, fmt.Errorf("region: upsert vector: %w", err)
@@ -212,7 +220,7 @@ func (r *RegionIndexer) writeRegion(
 
 	// ── 图层面：Region Node + 边 ──
 	if r.graphDB != nil {
-		regionNodeID := utils.GenerateID([]byte("region:" + regionID))
+		regionNodeID = utils.GenerateID([]byte("region:" + regionID))
 		regionNode := &core.Node{
 			ID:     regionNodeID,
 			Labels: []string{"Region"},
@@ -221,6 +229,7 @@ func (r *RegionIndexer) writeRegion(
 				"dir":        dir,
 				"confidence": 0.9,
 			},
+			SourceChunkIDs: []string{"region:" + regionID},
 		}
 		if err := r.graphDB.UpsertNodes(ctx, []*core.Node{regionNode}); err != nil {
 			return region, fmt.Errorf("region: upsert node: %w", err)

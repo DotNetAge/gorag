@@ -45,12 +45,27 @@ The chunk.content MUST be the exact original text for those line numbers. Do not
 {
   "chunks": [
     {
-      "content": "exact original text lines for this chunk",
+      "content": "exact original text lines (first/root chunk — document-level overview)",
       "metadata": {
+        "type": "document",
         "title": "short descriptive title (<60 chars)",
         "summary": "concise summary of semantic meaning (<300 chars)",
         "tags": ["topic_tag1", "topic_tag2", "topic_tag3"],
         "entity_ids": [1, 2, 3]
+      },
+      "chunk_meta": {
+        "positions": [[start_line, end_line], [start_line, end_line]]
+      }
+    },
+    {
+      "content": "exact original text lines (subsequent chunk — segment)",
+      "metadata": {
+        "type": "segment",
+        "title": "short descriptive title (<60 chars)",
+        "summary": "concise summary of semantic meaning (<300 chars)",
+        "tags": ["topic_tag1", "topic_tag2", "topic_tag3"],
+        "entity_ids": [1, 2, 3],
+        "parent_ordinal": 0
       },
       "chunk_meta": {
         "positions": [[start_line, end_line], [start_line, end_line]]

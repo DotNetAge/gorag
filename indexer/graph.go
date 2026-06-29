@@ -912,6 +912,20 @@ func (idx *GraphIndexer) List(ctx context.Context, offset, limit int) ([]core.Hi
 	return hits, nil
 }
 
+// ListFiltered 从 vectorDB 中按 metadata 条件分页获取结果。
+// 返回分页后的 hits、匹配条件的总条数（分页前）、以及错误。
+func (idx *GraphIndexer) ListFiltered(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]core.Hit, int, error) {
+	vectors, total, err := idx.vectorDB.ListFiltered(ctx, offset, limit, filters)
+	if err != nil {
+		return nil, 0, err
+	}
+	hits := make([]core.Hit, 0, len(vectors))
+	for _, vec := range vectors {
+		hits = append(hits, vectorToHit(vec))
+	}
+	return hits, total, nil
+}
+
 // GetChunks 根据 docID 从 vectorDB 中获取所有 Chunk。
 func (idx *GraphIndexer) GetChunks(ctx context.Context, docID string) ([]*core.Chunk, error) {
 	vectors, err := idx.vectorDB.GetByDocID(ctx, docID)
@@ -1014,6 +1028,9 @@ func (idx *GraphIndexer) EntityStats() (entities, rels int) {
 
 // ResetEntityStats 将实体/关系计数器归零（通常在每次 Sync 开始前调用）。
 func (idx *GraphIndexer) ResetEntityStats() {
+	if idx == nil {
+		return
+	}
 	idx.statsMu.Lock()
 	defer idx.statsMu.Unlock()
 	idx.entitiesCreated = 0
@@ -1389,6 +1406,10 @@ func (idx *GraphIndexer) writeToStores(
 	// ordinal→chunkID 映射表，用于解析 parent_ordinal 跨分片引用
 	ordinalChunkID := make(map[int]string, len(data.Chunks))
 
+	// 预计算 Document Node ID，后续加入每个 chunk 的 entity_ids，
+	// 使前端能通过 entity_ids 过滤出属于该 Document 的 chunks。
+	docNodeID := utils.GenerateID([]byte(docID + ":document"))
+
 	for i, c := range data.Chunks {
 		if c.Content == "" {
 			continue
@@ -1414,7 +1435,7 @@ func (idx *GraphIndexer) writeToStores(
 
 		// 从 metadata 中提取 entity_ids 序数 → 解析为真实 NodeID
 		entityIDs, _ := c.Metadata["entity_ids"].([]any)
-		resolvedIDs := make([]string, 0, len(entityIDs))
+		resolvedIDs := make([]string, 0, len(entityIDs)+1)
 		for _, id := range entityIDs {
 			if ordinal, ok := id.(float64); ok {
 				if nodeID, ok2 := ordinalToNodeID[int(ordinal)]; ok2 {
@@ -1422,6 +1443,9 @@ func (idx *GraphIndexer) writeToStores(
 				}
 			}
 		}
+		// 将 Document Node ID 加入每个 chunk 的 entity_ids，
+		// 使前端点击 Document 节点时能通过 entity_ids 过滤出所属 chunks。
+		resolvedIDs = append(resolvedIDs, docNodeID)
 
 		// 建立 entity→chunk 的逆向映射（用于图节点/边的 source 绑定）
 		for _, nodeID := range resolvedIDs {
@@ -1674,7 +1698,6 @@ func (idx *GraphIndexer) writeToStores(
 		}
 	}
 
-	docNodeID := utils.GenerateID([]byte(docID + ":document"))
 	docSourceChunks := []string{}
 	if rootChunkID != "" {
 		docSourceChunks = []string{rootChunkID}
@@ -1712,7 +1735,7 @@ func (idx *GraphIndexer) writeToStores(
 			Type:      "CONTAINS",
 			Source:    docNodeID,
 			Target:    n.ID,
-			Predicate: "CONTAINS",
+			Predicate: "属于",
 			Properties: map[string]any{
 				"confidence": 0.9,
 			},

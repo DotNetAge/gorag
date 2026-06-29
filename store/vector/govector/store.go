@@ -378,6 +378,14 @@ func extractChunkIndex(v *core.Vector) int {
 //   - []*core.Vector: The paginated vectors
 //   - error: Any error that occurred during retrieval
 func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, error) {
+	vectors, _, err := s.ListFiltered(ctx, offset, limit, nil)
+	return vectors, err
+}
+
+// ListFiltered returns paginated vectors filtered by metadata conditions.
+// Each FilterCondition is ANDed together (all must match).
+// Returns the filtered vectors, total count before pagination, and any error.
+func (s *Store) ListFiltered(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]*core.Vector, int, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -388,11 +396,36 @@ func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, er
 		offset = 0
 	}
 
-	// Retrieve all points with an empty filter (matches everything)
-	points, err := s.collection.GetPointsByFilter(&gvcore.Filter{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list vectors: %w", err)
+	// Build govector filter from generic filter conditions
+	gvFilter := &gvcore.Filter{}
+	for _, fc := range filters {
+		cond := gvcore.Condition{
+			Key:  fc.Key,
+			Type: gvcore.ConditionType(fc.Type),
+		}
+		// Normalize filter value: JSON numbers come as float64, but protobuf
+		// stores int metadata as int64. Direct comparison fails in Go.
+		val := fc.Value
+		if f64, ok := val.(float64); ok && f64 == float64(int64(f64)) {
+			val = int64(f64)
+		}
+		switch fc.Type {
+		case "exact":
+			cond.Match = gvcore.MatchValue{Value: val}
+		case "prefix":
+			if s, ok := val.(string); ok {
+				cond.Match = gvcore.MatchValue{Value: s}
+			}
+		}
+		gvFilter.Must = append(gvFilter.Must, cond)
 	}
+
+	points, err := s.collection.GetPointsByFilter(gvFilter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list filtered vectors: %w", err)
+	}
+
+	total := len(points)
 
 	// Apply pagination
 	end := offset + limit
@@ -400,7 +433,7 @@ func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, er
 		end = len(points)
 	}
 	if offset >= len(points) {
-		return []*core.Vector{}, nil
+		return []*core.Vector{}, total, nil
 	}
 
 	vectors := make([]*core.Vector, 0, end-offset)
@@ -425,5 +458,5 @@ func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, er
 		})
 	}
 
-	return vectors, nil
+	return vectors, total, nil
 }

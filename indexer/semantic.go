@@ -84,6 +84,7 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 	}
 	return chunks, nil
 }
+
 // AddChunks 直接将分片插入向量数据库
 func (s *semanticIndexer) AddChunks(ctx context.Context, chunks []*core.Chunk) error {
 	if len(chunks) == 0 {
@@ -271,14 +272,6 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 	// - govector store 会识别 chunk_ 前缀，按 Payload["chunk_id"] filter 删除
 	// - 这确保只删除指定分块的向量，保留同一文档的其他分块
 	return s.db.Delete(ctx, chunkID)
-}
-
-// IndexChunk indexes a pre-generated chunk (implements core.Indexer interface)
-func (s *semanticIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error {
-	if chunk == nil {
-		return fmt.Errorf("chunk cannot be nil")
-	}
-	return s.indexAndStore(ctx, chunk)
 }
 
 // StoreChunk stores a pre-built chunk directly in the index, skipping chunking.
@@ -497,5 +490,3 @@ func vectorToHit(vec *core.Vector) core.Hit {
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
 	return s.db.Count(ctx)
 }
-
-
