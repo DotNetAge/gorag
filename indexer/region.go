@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,15 +16,43 @@ import (
 	"github.com/DotNetAge/gorag/v2/utils"
 )
 
-// RegionIndexer 对一个已索引目录生成 Region 级聚合摘要并写入 VectorStore。
+// RegionFileName 是 Region 描述文件的文件名。
+// 每个目录下的该文件作为 Region 的实体化载体，
+// 其内容会被索引为普通文档，提取的实体/关系成为 Region 的知识源。
+const RegionFileName = ".README.md"
+
+// IsRegionDescriptor 判断文件是否为 Region 描述文件。
+func IsRegionDescriptor(path string) bool {
+	if path == "" {
+		return false
+	}
+	return filepath.Base(path) == RegionFileName
+}
+
+// StripExt 去除文件名中的扩展名。
+// "file.md" → "file", "notes.txt" → "notes", 无扩展名时原样返回。
+func StripExt(filename string) string {
+	ext := filepath.Ext(filename)
+	if ext == "" {
+		return filename
+	}
+	return filename[:len(filename)-len(ext)]
+}
+
+// RegionIndexer 对一个已索引目录生成 Region 描述文件（.README.md）。
 //
 // Region 是"摘要的摘要"——它的聚合输入只包含该目录下两类摘要级向量：
 //
 //  1. 本层文件的 Root Chunk（chunk_type = "root"）：文件级摘要
-//  2. 子目录的子 Region（region = true）：子目录级摘要
+//  2. 子目录的子 Region（.README.md）：子目录级摘要
 //
 // 普通分段（chunk_type = "segment"）不参与 Region 聚合，确保 Region
 // 只做层级抽象而不被细节污染。
+//
+// 生成流程：
+//  1. 聚合摘要 → 写入 .README.md 文件
+//  2. 在图数据库中创建 Region Node + CONTAINS 边
+//  3. 调用方负责将 .README.md 通过 GraphIndexer 索引
 //
 // 时序要求：IndexRegion 必须在目标目录下所有文件的 Chunk 已写入 VectorStore
 // 之后调用。调用方（通常是编排层）负责确保时序正确。
@@ -73,20 +102,34 @@ func RegionWithGraphStore(gs core.GraphStore) RegionOption {
 	}
 }
 
-// IndexRegion 对指定目录生成 Region 聚合摘要并写入 VectorStore。
+// RegionResult 是 IndexRegion 的返回结果。
+type RegionResult struct {
+	*core.Region
+	RegionFilePath string // 生成的 .README.md 文件路径，为空表示无需索引
+}
+
+// IndexRegion 对指定目录生成 Region 描述文件（.README.md）并创建图结构。
 //
 // 聚合过程：
 //
 //	1. 通过 region_id 过滤查询 VectorStore
 //	2. 只取摘要级向量：
 //	   - chunk_type = "root"  → 文件级文档摘要
-//	   - region = true        → 子目录级 Region 摘要
+//	   - region = true        → 子目录级 Region 摘要（兼容旧版，新版来自 .README.md 的向量）
 //	   - chunk_type = "segment" → 忽略（不入聚合）
-//	3. 用 LLM 对摘要做二次抽象（摘要的摘要）
-//	4. 向量化后写回 VectorStore（标记为 region 类型向量）
-func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Region, error) {
+//	3. 用 LLM 对摘要做二次抽象（摘要的摘要 + 实体关系补充）
+//	4. 将内容写入目录下的 .README.md 文件
+//	5. 在图数据库中创建/更新 Region Node + CONTAINS 边
+//
+// 返回的 RegionResult 包含 RegionFilePath，调用方应将其通过 GraphIndexer.AddFile 索引。
+//
+// 特殊情况：
+//   - 目录无内容（无任何向量）：删除已有的 .README.md（如存在），返回 nil
+//   - 目录有文件但无摘要级向量：生成降级摘要，仍会写入 .README.md
+func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*RegionResult, error) {
 	regionID := regionIDFromDir(dir)
-	title := filepath.Base(dir)
+	title := StripExt(filepath.Base(dir))
+	regionFilePath := filepath.Join(dir, RegionFileName)
 
 	r.logger.Info("region: indexing", "dir", dir, "region_id", regionID)
 
@@ -96,15 +139,17 @@ func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Regi
 		return nil, fmt.Errorf("region: query vectors: %w", err)
 	}
 
+	// ── 空目录：删除 .README.md（如存在） ──
 	if len(vectors) == 0 {
-		r.logger.Warn("region: no vectors found, creating empty region",
+		r.logger.Warn("region: no vectors found, cleaning up region file",
 			"dir", dir, "region_id", regionID)
-		return r.writeRegion(ctx, regionID, title, title, nil, dir,
-			nil, nil)
+		if err := r.deleteRegionFile(regionFilePath); err != nil {
+			r.logger.Warn("region: failed to delete region file", "path", regionFilePath, "error", err)
+		}
+		return nil, nil
 	}
 
 	// 2. 分离摘要级向量和 tags
-	//    只取两类：文档级 Root Chunk + 子 Region
 	var abstractSummaries []string
 	var allTags []string
 	var docCount, subRegionCount int
@@ -129,6 +174,12 @@ func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Regi
 
 		// ── 文档级 Root Chunk 摘要 ──
 		if ct, _ := v.Metadata["chunk_type"].(string); ct == "root" {
+			// 跳过 .README.md 自身的 Root Chunk，防止自引用循环。
+			// .README.md 由 RegionIndexer 在上一次 Sync 中生成，
+			// 其摘要不应作为本次聚合的输入。
+			if sf, _ := v.Metadata["source_file"].(string); IsRegionDescriptor(sf) {
+				continue
+			}
 			if s, ok := v.Metadata["summary"].(string); ok && s != "" {
 				abstractSummaries = append(abstractSummaries, s)
 				docCount++
@@ -143,15 +194,25 @@ func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Regi
 		// ── 普通分段 chunk (chunk_type = "segment") → 忽略 ──
 	}
 
-	if len(abstractSummaries) == 0 {
-		r.logger.Warn("region: no abstract-level vectors found",
-			"dir", dir, "total_vectors", len(vectors))
-		return r.writeRegion(ctx, regionID, title, "", allTags, dir,
-			docIDs, childRegionIDs)
+	// ── 无实质性内容（所有向量均来自 .README.md 或全为 segment）──
+	if docCount == 0 && subRegionCount == 0 {
+		r.logger.Info("region: no substantive content, removing region file",
+			"dir", dir, "region_id", regionID)
+		if err := r.deleteRegionFile(regionFilePath); err != nil {
+			r.logger.Warn("region: failed to delete region file", "path", regionFilePath, "error", err)
+		}
+		return nil, nil
 	}
 
-	// 3. LLM 聚合（输入全是摘要级内容）
-	summary := r.aggregateSummary(ctx, title, abstractSummaries, docCount, subRegionCount)
+	// 3. 生成摘要内容
+	var summary string
+	if len(abstractSummaries) == 0 {
+		r.logger.Warn("region: no abstract-level vectors found, creating minimal region",
+			"dir", dir, "total_vectors", len(vectors))
+		summary = ""
+	} else {
+		summary = r.aggregateSummary(ctx, title, abstractSummaries, docCount, subRegionCount)
+	}
 
 	r.logger.Info("region: completed",
 		"dir", dir,
@@ -160,8 +221,31 @@ func (r *RegionIndexer) IndexRegion(ctx context.Context, dir string) (*core.Regi
 		"tags", len(allTags),
 		"summary_len", len(summary))
 
-	return r.writeRegion(ctx, regionID, title, summary, allTags, dir,
-		docIDs, childRegionIDs)
+	// 4. 写入 .README.md 文件
+	if err := r.writeRegionFile(regionFilePath, title, summary, allTags); err != nil {
+		return nil, fmt.Errorf("region: write region file: %w", err)
+	}
+
+	// 5. 图层面：Region Node + 边
+	if r.graphDB != nil {
+		if err := r.upsertRegionGraph(ctx, regionID, title, dir, docIDs, childRegionIDs); err != nil {
+			return nil, fmt.Errorf("region: upsert graph: %w", err)
+		}
+	}
+
+	return &RegionResult{
+		Region: &core.Region{
+			ID:      regionID,
+			Title:   title,
+			Summary: summary,
+			Tags:    allTags,
+			Dir:     dir,
+			Meta: map[string]any{
+				"child_region_ids": childRegionIDs,
+			},
+		},
+		RegionFilePath: regionFilePath,
+	}, nil
 }
 
 // queryRegionVectors 通过 metadata filter 查询指定 Region 下的全部向量。
@@ -173,115 +257,103 @@ func (r *RegionIndexer) queryRegionVectors(ctx context.Context, regionID string)
 	return results, err
 }
 
-// writeRegion 将 Region 向量化后写入 VectorStore，并在 graphDB 中创建 Region Node 和边。
-func (r *RegionIndexer) writeRegion(
-	ctx context.Context, regionID, title, summary string, tags []string, dir string,
-	docIDs, childRegionIDs []string,
-) (*core.Region, error) {
-	region := &core.Region{
-		ID:      regionID,
-		Title:   title,
-		Summary: summary,
-		Tags:    tags,
-		Dir:     dir,
-		Meta: map[string]any{
-			"child_region_ids": childRegionIDs,
-		},
-	}
-
-	// 向量化摘要
-	vec, err := r.embedder.CalcText(summary)
-	if err != nil {
-		return region, fmt.Errorf("region: embed summary: %w", err)
-	}
-	if vec == nil {
-		return region, fmt.Errorf("region: embed summary returned nil vector")
-	}
-	vec.ID = utils.GenerateID([]byte("region_" + regionID))
-	vec.ChunkID = "region:" + regionID
-	regionNodeID := utils.GenerateID([]byte("region:" + regionID))
-	vec.Metadata = map[string]any{
-		"region_id":  regionID,
-		"region":     true, // 标记为 Region 向量，区别于普通 Chunk
-		"chunk_type": "region",
-		"title":      title,
-		"tags":       tags,
-		"dir":        dir,
-		"summary":    summary,
-		"entity_ids": []string{regionNodeID},
-	}
-
-	// 先删除旧 Region 向量（如存在），防止 HNSW 重复 Add 同一 key 时 panic
-	_ = r.vectorDB.Delete(ctx, vec.ID)
-
-	if err := r.vectorDB.Upsert(ctx, []*core.Vector{vec}); err != nil {
-		return region, fmt.Errorf("region: upsert vector: %w", err)
-	}
-
-	// ── 图层面：Region Node + 边 ──
-	if r.graphDB != nil {
-		regionNodeID = utils.GenerateID([]byte("region:" + regionID))
-		regionNode := &core.Node{
-			ID:     regionNodeID,
-			Labels: []string{"Region"},
-			Name:   title,
-			Properties: map[string]any{
-				"dir":        dir,
-				"confidence": 0.9,
-			},
-			SourceChunkIDs: []string{"region:" + regionID},
+// writeRegionFile 将摘要内容写入 .README.md 文件。
+func (r *RegionIndexer) writeRegionFile(path, title, summary string, tags []string) error {
+	var content string
+	if summary == "" {
+		content = fmt.Sprintf("# %s\n\n_This directory has no indexed content._\n", title)
+	} else {
+		var tagLine string
+		if len(tags) > 0 {
+			tagLine = "\n\nTags: " + strings.Join(tags, ", ")
 		}
-		if err := r.graphDB.UpsertNodes(ctx, []*core.Node{regionNode}); err != nil {
-			return region, fmt.Errorf("region: upsert node: %w", err)
-		}
-
-		// Region CONTAINS Document（指向该目录下的文档根节点）
-		var edges []*core.Edge
-		for _, dID := range docIDs {
-			docNodeID := utils.GenerateID([]byte(dID + ":document"))
-			edges = append(edges, &core.Edge{
-				ID:        utils.GenerateID([]byte(regionNodeID + "CONTAINS" + dID)),
-				Type:      "CONTAINS",
-				Source:    regionNodeID,
-				Target:    docNodeID,
-				Predicate: "CONTAINS",
-				Properties: map[string]any{
-					"confidence": 0.9,
-				},
-			})
-		}
-
-		// Parent Region CHILD_REGION 子 Region（指向该目录下的子 Region）
-		for _, crID := range childRegionIDs {
-			childNodeID := utils.GenerateID([]byte("region:" + crID))
-			edges = append(edges, &core.Edge{
-				ID:        utils.GenerateID([]byte(regionNodeID + "CHILD_REGION" + crID)),
-				Type:      "CHILD_REGION",
-				Source:    regionNodeID,
-				Target:    childNodeID,
-				Predicate: "CHILD_REGION",
-				Properties: map[string]any{
-					"confidence": 0.9,
-				},
-			})
-		}
-
-		if len(edges) > 0 {
-			if err := r.graphDB.UpsertEdges(ctx, edges); err != nil {
-				return region, fmt.Errorf("region: upsert edges: %w", err)
-			}
-		}
-
-		r.logger.Info("region: graph nodes and edges created",
-			"region_id", regionID,
-			"doc_nodes", len(docIDs),
-			"child_regions", len(childRegionIDs))
+		content = fmt.Sprintf("# %s\n\n%s%s\n", title, summary, tagLine)
 	}
 
-	return region, nil
+	// 确保目录存在（理论上已存在，但安全起见）
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
-// aggregateSummary 用 LLM 对摘要级内容做二次抽象（摘要的摘要）。
+// deleteRegionFile 删除 .README.md 文件（若存在）。
+func (r *RegionIndexer) deleteRegionFile(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // 文件不存在，无需处理
+	}
+	return os.Remove(path)
+}
+
+// upsertRegionGraph 在 graphDB 中创建/更新 Region Node 和关联边。
+func (r *RegionIndexer) upsertRegionGraph(
+	ctx context.Context, regionID, title, dir string,
+	docIDs, childRegionIDs []string,
+) error {
+	regionNodeID := utils.GenerateID([]byte("region:" + regionID))
+
+	// Region Node
+	regionNode := &core.Node{
+		ID:     regionNodeID,
+		Labels: []string{"Region"},
+		Name:   title,
+		Properties: map[string]any{
+			"dir":        dir,
+			"confidence": 0.9,
+		},
+	}
+	if err := r.graphDB.UpsertNodes(ctx, []*core.Node{regionNode}); err != nil {
+		return fmt.Errorf("upsert region node: %w", err)
+	}
+
+	// 构建边：Region CONTAINS Document + CHILD_REGION
+	var edges []*core.Edge
+
+	for _, dID := range docIDs {
+		docNodeID := utils.GenerateID([]byte(dID + ":document"))
+		edges = append(edges, &core.Edge{
+			ID:        utils.GenerateID([]byte(regionNodeID + "CONTAINS" + dID)),
+			Type:      "CONTAINS",
+			Source:    regionNodeID,
+			Target:    docNodeID,
+			Predicate: "CONTAINS",
+			Properties: map[string]any{
+				"confidence": 0.9,
+			},
+		})
+	}
+
+	for _, crID := range childRegionIDs {
+		childNodeID := utils.GenerateID([]byte("region:" + crID))
+		edges = append(edges, &core.Edge{
+			ID:        utils.GenerateID([]byte(regionNodeID + "CHILD_REGION" + crID)),
+			Type:      "CHILD_REGION",
+			Source:    regionNodeID,
+			Target:    childNodeID,
+			Predicate: "CHILD_REGION",
+			Properties: map[string]any{
+				"confidence": 0.9,
+			},
+		})
+	}
+
+	if len(edges) > 0 {
+		if err := r.graphDB.UpsertEdges(ctx, edges); err != nil {
+			return fmt.Errorf("upsert region edges: %w", err)
+		}
+	}
+
+	r.logger.Info("region: graph nodes and edges created",
+		"region_id", regionID,
+		"doc_nodes", len(docIDs),
+		"child_regions", len(childRegionIDs))
+
+	return nil
+}
+
+// aggregateSummary 用 LLM 对摘要级内容做二次抽象并生成 .README.md 内容。
 // LLM 不可用或不返回内容时降级为统计摘要。
 func (r *RegionIndexer) aggregateSummary(
 	ctx context.Context, title string, summaries []string, docCount, subRegionCount int,
@@ -314,14 +386,18 @@ func (r *RegionIndexer) aggregateSummary(
 
 %s
 
-Generate a concise 2-3 sentence abstract describing what this directory is collectively about.
-Focus on the high-level purpose and structure rather than individual file details.
-This abstract will be used as a navigation entry point for knowledge retrieval.
+Generate a .README.md document that describes this directory's overall purpose and structure.
+Include:
+1. A high-level summary of what this directory is collectively about
+2. Key entities (concepts, technologies, components) mentioned across files
+3. Relationships between these entities where applicable
+
+This document serves as a navigation entry point for knowledge retrieval.
 
 Summaries:
 %s
 
-Directory abstract:`,
+.README.md content:`,
 		title, contextLine, strings.Join(summaries, "\n---\n"))
 
 	messages := []chat.Message{

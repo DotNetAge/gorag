@@ -836,6 +836,163 @@ func (idx *GraphIndexer) SearchByChunkIDs(ctx context.Context, chunkIDs []string
 	return hits, nil
 }
 
+// Tree 返回语义分片树（ChunkNode）。
+//
+// 用于 Sidebar 导航展示，与力导向实体图（Search）各自独立。
+// 分片树和实体图通过 ChunkIDs 关联，而非直接嵌套。
+//
+// regionID 为空时返回全局树（所有 Region 为第一级子节点），
+// 非空时返回该 Region 的子树。
+//
+// 不会修改 Search 方法。
+func (idx *GraphIndexer) Tree(ctx context.Context, regionID string, depth int) (*core.ChunkNode, error) {
+	if idx.graphDB == nil {
+		return nil, fmt.Errorf("graphDB not available")
+	}
+	if depth < 1 {
+		depth = 1
+	}
+
+	root := &core.ChunkNode{
+		ID:   "root",
+		Name: "知识库",
+		Type: "root",
+	}
+
+	if regionID != "" {
+		// ── 单 Region 树 ─────────────────────────────────────────
+		regionNodeID := utils.GenerateID([]byte("region:" + regionID))
+		regionNode, err := idx.graphDB.GetNode(ctx, regionNodeID)
+		if err != nil {
+			return nil, fmt.Errorf("get region node: %w", err)
+		}
+		if regionNode == nil {
+			return nil, fmt.Errorf("region not found: %s", regionID)
+		}
+		regionCN := nodeToChunkNode(regionNode, "region")
+		if err := idx.populateTree(ctx, regionCN, depth); err != nil {
+			return nil, fmt.Errorf("populate region %s: %w", regionID, err)
+		}
+		root.Children = append(root.Children, regionCN)
+
+		return root, nil
+	}
+
+	// ── 全局树：查询所有 Region ────────────────────────────────
+	rows, err := idx.graphDB.Query(ctx, "MATCH (r:Region) RETURN r", nil)
+	if err != nil {
+		return nil, fmt.Errorf("query all regions: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	for _, row := range rows {
+		regionID, regionName, regionDir := extractRegionData(row)
+		if regionID == "" || seen[regionID] {
+			continue
+		}
+		seen[regionID] = true
+
+		regionCN := &core.ChunkNode{
+			ID:   regionID,
+			Name: regionName,
+			Type: "region",
+		}
+		if regionDir != "" {
+			regionCN.Source = regionDir
+		}
+		if err := idx.populateTree(ctx, regionCN, depth); err != nil {
+			continue // 跳过有问题的 Region
+		}
+		root.Children = append(root.Children, regionCN)
+	}
+
+	return root, nil
+}
+
+// populateTree 填充 ChunkNode 的子节点。
+//
+// 处理两种边：
+//   - CONTAINS → 子 Document 节点
+//   - CHILD_REGION → 子 Region 节点（递归填充）
+//
+// Document 节点携带 ChunkIDs，供 UI 独立加载分片或查询实体图。
+func (idx *GraphIndexer) populateTree(ctx context.Context, parent *core.ChunkNode, depth int) error {
+	if depth < 1 {
+		return nil
+	}
+
+	nodes, edges, err := idx.graphDB.GetNeighbors(ctx, parent.ID, 1, -1)
+	if err != nil {
+		return fmt.Errorf("get neighbors for %s: %w", parent.ID, err)
+	}
+
+	nodeMap := make(map[string]*core.Node, len(nodes))
+	for _, n := range nodes {
+		nodeMap[n.ID] = n
+	}
+
+	for _, edge := range edges {
+		childNode, ok := nodeMap[edge.Target]
+		if !ok {
+			continue
+		}
+
+		switch {
+		case edge.Type == "CONTAINS" && edge.Source == parent.ID:
+			child := nodeToChunkNode(childNode, "document")
+			parent.AddChild(child)
+
+		case edge.Type == "CHILD_REGION" && edge.Source == parent.ID:
+			child := nodeToChunkNode(childNode, "region")
+			if err := idx.populateTree(ctx, child, depth); err != nil {
+				child.Meta = map[string]any{"error": err.Error()}
+			}
+			parent.AddChild(child)
+		}
+	}
+
+	return nil
+}
+
+// nodeToChunkNode 将 graphDB Node 转换为 ChunkNode。
+// Document 节点的 SourceChunkIDs 会映射到 ChunkIDs，供 UI 加载分片/实体图。
+func nodeToChunkNode(n *core.Node, nodeType string) *core.ChunkNode {
+	cn := &core.ChunkNode{
+		ID:   n.ID,
+		Name: n.Name,
+		Type: nodeType,
+		ChunkIDs: n.SourceChunkIDs,
+	}
+	if sourceFile, ok := n.Properties["source_file"].(string); ok {
+		cn.Source = sourceFile
+	}
+	if dir, ok := n.Properties["dir"].(string); ok {
+		cn.Source = dir
+	}
+	return cn
+}
+
+// extractRegionData 从 Cypher 查询结果行中提取 Region 节点数据。
+// 兼容两种返回格式：
+//   - {r: {id, name, properties: {dir}}}
+//   - {r.id, r.name, r.dir}
+func extractRegionData(row map[string]any) (id, name, dir string) {
+	// 格式 1: r 是嵌套 map
+	if r, ok := row["r"].(map[string]any); ok {
+		id, _ = r["id"].(string)
+		name, _ = r["name"].(string)
+		if props, ok := r["properties"].(map[string]any); ok {
+			dir, _ = props["dir"].(string)
+		}
+		return
+	}
+	// 格式 2: 拍平字段
+	id, _ = row["r.id"].(string)
+	name, _ = row["r.name"].(string)
+	dir, _ = row["r.dir"].(string)
+	return
+}
+
 func (idx *GraphIndexer) NewQuery(terms string) core.Query {
 	return query.NewGraphQuery(terms)
 }
@@ -1708,7 +1865,7 @@ func (idx *GraphIndexer) writeToStores(
 	docNode := &core.Node{
 		ID:     docNodeID,
 		Labels: []string{"Document"},
-		Name:   filepath.Base(sourceFile),
+		Name:   StripExt(filepath.Base(sourceFile)),
 		Properties: map[string]any{
 			"source_file": sourceFile,
 			"confidence":  0.9,
@@ -1722,6 +1879,29 @@ func (idx *GraphIndexer) writeToStores(
 	idx.statsMu.Lock()
 	idx.entitiesCreated++
 	idx.statsMu.Unlock()
+
+	// ── 4d. Region 描述文件链路：Region Node → Document Node ──────────
+	// 如果当前文件是 Region 描述文件（.README.md），自动建立
+	// Region Node → Document Node 的 CONTAINS 边。
+	// Region Node 本身由 RegionIndexer.IndexRegion 创建。
+	if IsRegionDescriptor(sourceFile) && regionID != "" {
+		regionNodeID := utils.GenerateID([]byte("region:" + regionID))
+		regionEdge := &core.Edge{
+			ID:        utils.GenerateID([]byte(regionNodeID + "CONTAINS" + docID)),
+			Type:      "CONTAINS",
+			Source:    regionNodeID,
+			Target:    docNodeID,
+			Predicate: "CONTAINS",
+			Properties: map[string]any{
+				"confidence": 0.9,
+			},
+			SourceChunkIDs: docSourceChunks,
+			SourceDocIDs:   []string{docID},
+		}
+		// 幂等 upsert，Region Node 可能尚不存在（尚未执行 IndexRegion），
+		// 但不影响——graphDB.UpsertEdges 会在 Region Node 创建后关联上。
+		_ = idx.graphDB.UpsertEdges(ctx, []*core.Edge{regionEdge})
+	}
 
 	// ── 5. 构造 Edge ──────────────────────────────────────────────────
 	edges := make([]*core.Edge, 0, len(data.Relations)+len(nodes))
