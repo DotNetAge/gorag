@@ -113,8 +113,9 @@ type GraphIndexer struct {
 	cumulativeUsage *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
 	mu              sync.Mutex
 	logger          logging.Logger
-	entityDefs      []EntityDef // 来自 WithSchemas 的自定义实体类型定义
-	chatClient      chat.Client // 缓存的 LLM client，懒加载初始化后复用
+	entityDefs       []EntityDef          // 来自 WithSchemas 的全局实体类型定义
+	regionEntityDefs map[string][]EntityDef // 按 regionID 隔离的实体类型定义
+	chatClient       chat.Client            // 缓存的 LLM client，懒加载初始化后复用
 
 	// ── 统计计数器（累积值，跨多次 Add/AddFile 调用） ──
 	entitiesCreated int // 累计写入 graphDB 的实体数量
@@ -279,11 +280,32 @@ func (idx *GraphIndexer) Name() string { return "graph" }
 
 func (idx *GraphIndexer) Type() string { return "graph" }
 
-// SetEntityDefs 运行时更新实体类型定义列表。
+// SetEntityDefs 运行时更新全局实体类型定义列表。
 // 用于用户在界面上保存知识标签选择后，同步到正在运行的 GraphIndexer。
 // 下次索引调用会使用新的实体定义。
 func (idx *GraphIndexer) SetEntityDefs(defs []EntityDef) {
 	idx.entityDefs = defs
+}
+
+// SetEntityDefsByRegion 设置指定 region 的实体类型定义。
+// regionID 通常为项目目录的 SHA256 哈希。
+// AddFile 时会优先使用 region 级定义，没有时才回退到全局 entityDefs。
+func (idx *GraphIndexer) SetEntityDefsByRegion(regionID string, defs []EntityDef) {
+	if idx.regionEntityDefs == nil {
+		idx.regionEntityDefs = make(map[string][]EntityDef)
+	}
+	idx.regionEntityDefs[regionID] = defs
+}
+
+// getEntityDefs 返回当前 context 对应的实体类型定义。
+// 优先使用 regionEntityDefs（从 context 中提取 regionID），没有则回退到全局 entityDefs。
+func (idx *GraphIndexer) getEntityDefs(ctx context.Context) []EntityDef {
+	if regionID := RegionIDFromContext(ctx); regionID != "" {
+		if defs, ok := idx.regionEntityDefs[regionID]; ok && len(defs) > 0 {
+			return defs
+		}
+	}
+	return idx.entityDefs
 }
 
 // Add 对一段文本执行 LLM 索引。
@@ -320,7 +342,7 @@ func (idx *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk
 	if lang == "" {
 		lang = "English"
 	}
-	systemMsgs := buildSystemMessages(docID, lang, idx.entityDefs)
+	systemMsgs := buildSystemMessages(docID, lang, idx.getEntityDefs(ctx))
 	if isCodeContent(content) {
 		systemMsgs = buildCodeSystemMessages(docID, lang)
 	}
@@ -403,7 +425,7 @@ func (idx *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.
 		lang = "English"
 	}
 	ext := strings.ToLower(filepath.Ext(filePath))
-	systemMsgs := buildSystemMessages(docID, lang, idx.entityDefs)
+	systemMsgs := buildSystemMessages(docID, lang, idx.getEntityDefs(ctx))
 	if isCodeExt(ext) {
 		systemMsgs = buildCodeSystemMessages(docID, lang)
 	}
