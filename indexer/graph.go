@@ -9,8 +9,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -32,12 +32,12 @@ const minContentLength = 20
 
 // IndexError 包含 LLM 索引失败的详细信息，传递给 OnFail 钩子。
 type IndexError struct {
-	DocID     string          // 文档 ID
-	Err       error           // 原始错误
-	ErrorType string          // 错误分类: network | timeout | rate_limit | auth | api | unknown
-	Attempts  int             // 重试次数
-	Duration  time.Duration   // 总耗时
-	Messages  []chat.Message  // 请求消息快照（值传递，只读）
+	DocID     string         // 文档 ID
+	Err       error          // 原始错误
+	ErrorType string         // 错误分类: network | timeout | rate_limit | auth | api | unknown
+	Attempts  int            // 重试次数
+	Duration  time.Duration  // 总耗时
+	Messages  []chat.Message // 请求消息快照（值传递，只读）
 }
 
 // regionContextKey is used to carry region_id through context.
@@ -105,21 +105,21 @@ func classifyLLMError(err error) string {
 //	  → 未超限 → LLM (分块+实体提取) → 写入 vectorDB + graphDB
 //	  → 超限 → 切片 → N 次 LLM 调用 → 合并结果 → 写入
 type GraphIndexer struct {
-	model      ModelConfig
-	embedder   core.Embedder
-	vectorDB   core.VectorStore
-	graphDB    core.GraphStore
-	lastUsage        *TokenUsage // 最近一次 LLM 调用的 Token 用量
-	cumulativeUsage  *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
-	mu               sync.Mutex
-	logger           logging.Logger
-	entityDefs       []EntityDef // 来自 WithSchemas 的自定义实体类型定义
-	chatClient       chat.Client // 缓存的 LLM client，懒加载初始化后复用
+	model           ModelConfig
+	embedder        core.Embedder
+	vectorDB        core.VectorStore
+	graphDB         core.GraphStore
+	lastUsage       *TokenUsage // 最近一次 LLM 调用的 Token 用量
+	cumulativeUsage *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
+	mu              sync.Mutex
+	logger          logging.Logger
+	entityDefs      []EntityDef // 来自 WithSchemas 的自定义实体类型定义
+	chatClient      chat.Client // 缓存的 LLM client，懒加载初始化后复用
 
 	// ── 统计计数器（累积值，跨多次 Add/AddFile 调用） ──
 	entitiesCreated int // 累计写入 graphDB 的实体数量
-	relsCreated    int // 累计写入 graphDB 的关系数量
-	statsMu        sync.Mutex
+	relsCreated     int // 累计写入 graphDB 的关系数量
+	statsMu         sync.Mutex
 
 	// ── 钩子回调（只读观察者模式） ──
 	OnRequest  func(docID string, messages []chat.Message, thinkingBudget int)
@@ -240,7 +240,6 @@ func WithSchemasFromFS(fsys fs.FS, glob string) GraphOption {
 		}
 	}
 }
-
 
 // New 创建 GraphIndexer
 //
@@ -958,9 +957,9 @@ func (idx *GraphIndexer) populateTree(ctx context.Context, parent *core.ChunkNod
 // Document 节点的 SourceChunkIDs 会映射到 ChunkIDs，供 UI 加载分片/实体图。
 func nodeToChunkNode(n *core.Node, nodeType string) *core.ChunkNode {
 	cn := &core.ChunkNode{
-		ID:   n.ID,
-		Name: n.Name,
-		Type: nodeType,
+		ID:       n.ID,
+		Name:     n.Name,
+		Type:     nodeType,
 		ChunkIDs: n.SourceChunkIDs,
 	}
 	if sourceFile, ok := n.Properties["source_file"].(string); ok {
@@ -1127,6 +1126,14 @@ func (idx *GraphIndexer) GetChunks(ctx context.Context, docID string) ([]*core.C
 // Count 返回 vectorDB 中的索引总数。
 func (idx *GraphIndexer) Count(ctx context.Context) (int, error) {
 	return idx.vectorDB.Count(ctx)
+}
+
+// CountByRegion 返回指定路径下（source_file 前缀匹配）的分片总数。
+func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, error) {
+	_, total, err := idx.vectorDB.ListFiltered(ctx, 0, 1, []core.FilterCondition{
+		{Key: "source_file", Type: "prefix", Value: path},
+	})
+	return total, err
 }
 
 // Close 关闭底层存储。
@@ -1381,10 +1388,10 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, fullContent string
 						"entity_ids": []any{},
 					},
 					ChunkMeta: struct {
-					Positions [][2]int `json:"positions"`
-				}{
-					Positions: [][2]int{{0, 0}},
-				},
+						Positions [][2]int `json:"positions"`
+					}{
+						Positions: [][2]int{{0, 0}},
+					},
 				},
 			},
 		}
@@ -1629,12 +1636,12 @@ func (idx *GraphIndexer) writeToStores(
 		}
 
 		chunk := &core.Chunk{
-			ID:      chunkID,
+			ID:       chunkID,
 			ParentID: parentID,
-			DocID:   docID,
+			DocID:    docID,
 			MIMEType: mimeType,
-			Title:   title,
-			Content: c.Content,
+			Title:    title,
+			Content:  c.Content,
 			ChunkMeta: core.ChunkMeta{
 				Index:        i,
 				StartPos:     firstPos(c.ChunkMeta.Positions),
@@ -1825,10 +1832,10 @@ func (idx *GraphIndexer) writeToStores(
 		props["confidence"] = 0.9
 
 		nodes = append(nodes, &core.Node{
-			ID:     nodeID,
-			Labels: []string{e.Type},
-			Name:   e.Name,
-			Properties:    props,
+			ID:             nodeID,
+			Labels:         []string{e.Type},
+			Name:           e.Name,
+			Properties:     props,
 			SourceChunkIDs: srcChunks,
 			SourceDocIDs:   []string{docID},
 		})
@@ -1951,12 +1958,12 @@ func (idx *GraphIndexer) writeToStores(
 		eProps["confidence"] = 0.9
 
 		edges = append(edges, &core.Edge{
-			ID:        utils.GenerateID([]byte(sourceName + r.Type + targetName + docID)),
-			Type:      r.Type,
-			Source:    sourceID,
-			Target:    targetID,
-			Predicate: predicate,
-			Properties:    eProps,
+			ID:             utils.GenerateID([]byte(sourceName + r.Type + targetName + docID)),
+			Type:           r.Type,
+			Source:         sourceID,
+			Target:         targetID,
+			Predicate:      predicate,
+			Properties:     eProps,
 			SourceChunkIDs: edgeSrcChunks,
 			SourceDocIDs:   []string{docID},
 		})
