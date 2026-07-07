@@ -1909,12 +1909,27 @@ func (idx *GraphIndexer) writeToStores(
 	idx.entitiesCreated++
 	idx.statsMu.Unlock()
 
-	// ── 4d. Region 描述文件链路：Region Node → Document Node ──────────
-	// 如果当前文件是 Region 描述文件（.README.md），自动建立
-	// Region Node → Document Node 的 CONTAINS 边。
-	// Region Node 本身由 RegionIndexer.IndexRegion 创建。
-	if IsRegionDescriptor(sourceFile) && regionID != "" {
+	// ── 4d. Region Node + CONTAINS 边 ─────────────────────────────────
+	// 每个文件索引后，自动为其父目录创建/更新 Region Node 和 CONTAINS 边，
+	// 确保 Region → Document 层级链完整，不依赖后续 IndexRegion 调用。
+	// Region Node 通过 Upsert 幂等写入，IndexRegion 后续会补充更多属性。
+	if regionID != "" && idx.graphDB != nil {
+		dir := filepath.Dir(sourceFile)
+		regionName := StripExt(filepath.Base(dir))
 		regionNodeID := utils.GenerateID([]byte("region:" + regionID))
+
+		if err := idx.graphDB.UpsertNodes(ctx, []*core.Node{{
+			ID:     regionNodeID,
+			Labels: []string{"Region"},
+			Name:   regionName,
+			Properties: map[string]any{
+				"dir":        dir,
+				"confidence": 0.9,
+			},
+		}}); err != nil {
+			idx.logger.Error("graph: upsert region node failed", err, "region_id", regionID)
+		}
+
 		regionEdge := &core.Edge{
 			ID:        utils.GenerateID([]byte(regionNodeID + "CONTAINS" + docID)),
 			Type:      "CONTAINS",
@@ -1927,9 +1942,9 @@ func (idx *GraphIndexer) writeToStores(
 			SourceChunkIDs: docSourceChunks,
 			SourceDocIDs:   []string{docID},
 		}
-		// 幂等 upsert，Region Node 可能尚不存在（尚未执行 IndexRegion），
-		// 但不影响——graphDB.UpsertEdges 会在 Region Node 创建后关联上。
-		_ = idx.graphDB.UpsertEdges(ctx, []*core.Edge{regionEdge})
+		if err := idx.graphDB.UpsertEdges(ctx, []*core.Edge{regionEdge}); err != nil {
+			idx.logger.Error("graph: upsert region edge failed", err, "region_id", regionID)
+		}
 	}
 
 	// ── 5. 构造 Edge ──────────────────────────────────────────────────

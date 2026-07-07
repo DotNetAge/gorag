@@ -112,14 +112,14 @@ type RegionResult struct {
 //
 // 聚合过程：
 //
-//	1. 通过 region_id 过滤查询 VectorStore
-//	2. 只取摘要级向量：
-//	   - chunk_type = "root"  → 文件级文档摘要
-//	   - region = true        → 子目录级 Region 摘要（兼容旧版，新版来自 .README.md 的向量）
-//	   - chunk_type = "segment" → 忽略（不入聚合）
-//	3. 用 LLM 对摘要做二次抽象（摘要的摘要 + 实体关系补充）
-//	4. 将内容写入目录下的 .README.md 文件
-//	5. 在图数据库中创建/更新 Region Node + CONTAINS 边
+//  1. 通过 region_id 过滤查询 VectorStore
+//  2. 只取摘要级向量：
+//     - chunk_type = "root"  → 文件级文档摘要
+//     - region = true        → 子目录级 Region 摘要（兼容旧版，新版来自 .README.md 的向量）
+//     - chunk_type = "segment" → 忽略（不入聚合）
+//  3. 用 LLM 对摘要做二次抽象（摘要的摘要 + 实体关系补充）
+//  4. 将内容写入目录下的 .README.md 文件
+//  5. 在图数据库中创建/更新 Region Node + CONTAINS 边
 //
 // 返回的 RegionResult 包含 RegionFilePath，调用方应将其通过 GraphIndexer.AddFile 索引。
 //
@@ -355,11 +355,19 @@ func (r *RegionIndexer) upsertRegionGraph(
 
 // aggregateSummary 用 LLM 对摘要级内容做二次抽象并生成 .README.md 内容。
 // LLM 不可用或不返回内容时降级为统计摘要。
+//
+// 特殊优化：仅 1 个输入摘要时直接透传，零 LLM 调用。
+// 此种情形发生在单文件目录的首次摘要——Region 摘要 = 文件摘要，
+// 不需要也做不出更有意义的聚合。
 func (r *RegionIndexer) aggregateSummary(
 	ctx context.Context, title string, summaries []string, docCount, subRegionCount int,
 ) string {
 	if len(summaries) == 0 {
 		return fmt.Sprintf("Directory: %s (no summaries)", title)
+	}
+	// 仅 1 个输入摘要 → 直接透传，零 LLM
+	if len(summaries) == 1 {
+		return summaries[0]
 	}
 
 	client, err := r.getLLMClient()
