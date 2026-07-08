@@ -27,6 +27,9 @@ type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CacheTokens is the number of cached prompt tokens read from cache.
+	// Populated from resp.Usage.PromptTokensDetails.CachedTokens.
+	CacheTokens int `json:"cache_tokens,omitempty"`
 }
 
 // IndexData LLM 返回的顶层 JSON 结构。

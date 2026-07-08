@@ -105,15 +105,15 @@ func classifyLLMError(err error) string {
 //	  → 未超限 → LLM (分块+实体提取) → 写入 vectorDB + graphDB
 //	  → 超限 → 切片 → N 次 LLM 调用 → 合并结果 → 写入
 type GraphIndexer struct {
-	model           ModelConfig
-	embedder        core.Embedder
-	vectorDB        core.VectorStore
-	graphDB         core.GraphStore
-	lastUsage       *TokenUsage // 最近一次 LLM 调用的 Token 用量
-	cumulativeUsage *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
-	mu              sync.Mutex
-	logger          logging.Logger
-	entityDefs       []EntityDef          // 来自 WithSchemas 的全局实体类型定义
+	model            ModelConfig
+	embedder         core.Embedder
+	vectorDB         core.VectorStore
+	graphDB          core.GraphStore
+	lastUsage        *TokenUsage // 最近一次 LLM 调用的 Token 用量
+	cumulativeUsage  *TokenUsage // 从创建/重置起累积的 Token 用量，多切片场景使用
+	mu               sync.Mutex
+	logger           logging.Logger
+	entityDefs       []EntityDef            // 来自 WithSchemas 的全局实体类型定义
 	regionEntityDefs map[string][]EntityDef // 按 regionID 隔离的实体类型定义
 	chatClient       chat.Client            // 缓存的 LLM client，懒加载初始化后复用
 
@@ -272,6 +272,28 @@ func New(
 	return idx
 }
 
+// CheckReady 检查 GraphIndexer 的核心存储组件是否都已就绪。
+// 在调用 Add/AddFile 前调用此方法可以避免在组件未初始化时浪费 LLM 调用。
+// 返回 error 时日志已在内部以 Error 级别输出。
+func (idx *GraphIndexer) CheckReady() error {
+	if idx.embedder == nil {
+		err := fmt.Errorf("graph indexer: embedder is nil")
+		idx.logger.Error("indexer: component not ready", err)
+		return err
+	}
+	if idx.vectorDB == nil {
+		err := fmt.Errorf("graph indexer: vectorDB is nil")
+		idx.logger.Error("indexer: component not ready", err)
+		return err
+	}
+	if idx.graphDB == nil {
+		err := fmt.Errorf("graph indexer: graphDB is nil")
+		idx.logger.Error("indexer: component not ready", err)
+		return err
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // core.Indexer 接口实现
 // ---------------------------------------------------------------------------
@@ -366,7 +388,12 @@ func (idx *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk
 		"pages", len(pages),
 		"estimated_tokens", totalTokens)
 
-	// 5. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
+	// 5. 在 LLM 调用前检查存储组件是否就绪，避免浪费 token
+	if err := idx.CheckReady(); err != nil {
+		return nil, err
+	}
+
+	// 6. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
 	parsed, err := idx.llmIndex(ctx, docID, content, messages)
 	if err != nil {
 		return nil, err
@@ -449,7 +476,12 @@ func (idx *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.
 		"pages", len(pages),
 		"estimated_tokens", totalTokens)
 
-	// 5. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
+	// 5. 在 LLM 调用前检查存储组件是否就绪，避免浪费 token
+	if err := idx.CheckReady(); err != nil {
+		return nil, err
+	}
+
+	// 6. 单次 LLM 调用，LLM 一次看到所有页面，统一返回分块/实体/关系
 	parsed, err := idx.llmIndex(ctx, docID, content, messages)
 	if err != nil {
 		return nil, err
@@ -1372,6 +1404,7 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, fullContent string
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
+			CacheTokens:      cacheFromDetails(resp.Usage.PromptTokensDetails),
 		}
 		// cumulativeUsage：累积（多切片路径使用）
 		if idx.cumulativeUsage == nil {
@@ -1380,6 +1413,7 @@ func (idx *GraphIndexer) llmIndex(ctx context.Context, docID, fullContent string
 		idx.cumulativeUsage.PromptTokens += resp.Usage.PromptTokens
 		idx.cumulativeUsage.CompletionTokens += resp.Usage.CompletionTokens
 		idx.cumulativeUsage.TotalTokens += resp.Usage.TotalTokens
+		idx.cumulativeUsage.CacheTokens += cacheFromDetails(resp.Usage.PromptTokensDetails)
 		idx.mu.Unlock()
 		idx.logger.Debug("LLM call completed",
 			"doc_id", docID,
@@ -2098,4 +2132,12 @@ func scoreGraphResult(nodes []*core.Node, edges []*core.Edge) float32 {
 		return 1.0
 	}
 	return total
+}
+
+// cacheFromDetails extracts cached tokens from PromptTokensDetails, which may be nil.
+func cacheFromDetails(d *chat.PromptTokensDetails) int {
+	if d == nil {
+		return 0
+	}
+	return d.CachedTokens
 }
