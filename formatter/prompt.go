@@ -29,7 +29,7 @@ type PromptConfig struct {
 	Separator string
 }
 
-// DefaultPromptConfig 默认 Prompt 配置
+// DefaultPromptConfig 默认 Prompt 配置（英文版）
 func DefaultPromptConfig() *PromptConfig {
 	return &PromptConfig{
 		SystemPrompt: `You are a knowledgeable assistant. Answer the user's question based strictly on the reference documents provided below.
@@ -48,6 +48,34 @@ Requirements:
 
 Please answer the following question based on the reference documents above: {{.Query}}`,
 		DocumentTemplate: `[Document {{.Index}}]{{if .Score}} (relevance: {{printf "%.2f" .Score}}){{end}}
+{{.Content}}`,
+		IncludeScore:  true,
+		IncludeSource: true,
+		ContentMax:    1000,
+		MaxDocuments:  10,
+		Separator:     "\n\n---\n\n",
+	}
+}
+
+// DefaultPromptConfigZH 默认 Prompt 配置（中文版）
+func DefaultPromptConfigZH() *PromptConfig {
+	return &PromptConfig{
+		SystemPrompt: `你是一个知识渊博的助手。请严格基于下面提供的参考文档来回答用户的问题。
+
+要求：
+1. 你的回答必须完全基于提供的参考文档。
+2. 如果参考文档中没有相关信息，请明确说明："根据提供的文档，我无法回答这个问题。"
+3. 不要编造或推断文档中不存在的信息。
+4. 你可以引用文档编号来支持你的回答。
+5. 使用与用户问题相同的语言回答。如果用户用中文提问，用中文回答；如果用英文提问，用英文回答，以此类推。`,
+		ContextTemplate: `以下是相关的参考文档：
+
+{{range $i, $doc := .Documents}}
+{{$doc}}
+{{end}}
+
+请根据上面的参考文档回答以下问题：{{.Query}}`,
+		DocumentTemplate: `[文档 {{.Index}}]{{if .Score}} (相关度: {{printf "%.2f" .Score}}){{end}}
 {{.Content}}`,
 		IncludeScore:  true,
 		IncludeSource: true,

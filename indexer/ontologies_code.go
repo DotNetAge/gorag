@@ -166,3 +166,50 @@ const codeRelationTypes = `### Relation Types (Code Domain)
 **Structural**: IMPLEMENTS, EXTENDS, CONTAINS, PARAMETER_OF
 **Semantic**: CALLS, IMPORTS, DEFINES, RETURNS
 **Metadata**: ANNOTATED_BY`
+
+// codeRelationTypesZH 是代码域专属的关系类型定义 — 中文版。
+const codeRelationTypesZH = `### 关系类型（代码域）
+**结构关系**: IMPLEMENTS, EXTENDS, CONTAINS, PARAMETER_OF
+**语义关系**: CALLS, IMPORTS, DEFINES, RETURNS
+**元数据**: ANNOTATED_BY`
+
+// codeEntityDefsZH 是代码文件专用的中文实体类型定义列表。
+// 类型名保持英文（因为是图节点标签），描述翻译为中文。
+var codeEntityDefsZH = []EntityDef{
+	{
+		Prompt: "**Interface** — 接口、协议、trait，定义方法契约",
+		Schema: codeEntityDefs[0].Schema,
+	},
+	{
+		Prompt: "**Struct** — 结构体、记录、数据类，包含命名字段和可选方法",
+		Schema: codeEntityDefs[1].Schema,
+	},
+	{
+		Prompt: "**Class** — 类，包含字段、方法、继承（OOP 范式）",
+		Schema: codeEntityDefs[2].Schema,
+	},
+	{
+		Prompt: "**Function** — 函数、方法、过程、闭包定义",
+		Schema: codeEntityDefs[3].Schema,
+	},
+	{
+		Prompt: "**Package** — 包、模块、命名空间、库，组织代码",
+		Schema: codeEntityDefs[4].Schema,
+	},
+	{
+		Prompt: "**Enum** — 枚举，包含命名变体或常量值",
+		Schema: codeEntityDefs[5].Schema,
+	},
+	{
+		Prompt: "**TypeAlias** — 类型别名、typedef，创建替代名称",
+		Schema: codeEntityDefs[6].Schema,
+	},
+	{
+		Prompt: "**Variable** — 变量、常量、全局变量、配置值声明",
+		Schema: codeEntityDefs[7].Schema,
+	},
+	{
+		Prompt: "**Import** — import、include、require、using 指令，引用外部代码",
+		Schema: codeEntityDefs[8].Schema,
+	},
+}

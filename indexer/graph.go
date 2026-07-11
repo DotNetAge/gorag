@@ -26,9 +26,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// minContentLength 是图索引的最小内容长度（按字符数，非 token）。
+// minContentLength 是图索引最小内容长度（按字符数，非 token）。
 // 短于此长度的文本直接静默丢弃，避免浪费 token。
 const minContentLength = 20
+
+// Prompt language constants.
+const (
+	LangEN = "en"
+	LangZH = "zh"
+)
 
 // IndexError 包含 LLM 索引失败的详细信息，传递给 OnFail 钩子。
 type IndexError struct {
@@ -116,6 +122,7 @@ type GraphIndexer struct {
 	entityDefs       []EntityDef            // 来自 WithSchemas 的全局实体类型定义
 	regionEntityDefs map[string][]EntityDef // 按 regionID 隔离的实体类型定义
 	chatClient       chat.Client            // 缓存的 LLM client，懒加载初始化后复用
+	promptLang       string                 // Prompt 模板语言: "zh"(默认) | "en"
 
 	// ── 统计计数器（累积值，跨多次 Add/AddFile 调用） ──
 	entitiesCreated int // 累计写入 graphDB 的实体数量
@@ -260,11 +267,12 @@ func New(
 		model.MaxTokens = defaultMaxTokens
 	}
 	idx := &GraphIndexer{
-		model:    model,
-		embedder: embedder,
-		vectorDB: vectorDB,
-		graphDB:  graphDB,
-		logger:   logging.DefaultNoopLogger(),
+		model:      model,
+		embedder:   embedder,
+		vectorDB:   vectorDB,
+		graphDB:    graphDB,
+		logger:     logging.DefaultNoopLogger(),
+		promptLang: LangZH,
 	}
 	for _, opt := range opts {
 		opt(idx)
@@ -292,6 +300,12 @@ func (idx *GraphIndexer) CheckReady() error {
 		return err
 	}
 	return nil
+}
+
+// UseEnglish switches prompt templates to English.
+// Default is Chinese. Call this to use English prompts instead.
+func (idx *GraphIndexer) UseEnglish() {
+	idx.promptLang = LangEN
 }
 
 // ---------------------------------------------------------------------------
@@ -364,9 +378,9 @@ func (idx *GraphIndexer) Add(ctx context.Context, content string) ([]*core.Chunk
 	if lang == "" {
 		lang = "English"
 	}
-	systemMsgs := buildSystemMessages(docID, lang, idx.getEntityDefs(ctx))
+	systemMsgs := buildSystemMessages(docID, lang, idx.promptLang, idx.getEntityDefs(ctx))
 	if isCodeContent(content) {
-		systemMsgs = buildCodeSystemMessages(docID, lang)
+		systemMsgs = buildCodeSystemMessages(docID, lang, idx.promptLang)
 	}
 
 	// 3. 分页：按行将内容拆为多页，每页不超过 MaxTokens × 80%
@@ -452,9 +466,9 @@ func (idx *GraphIndexer) AddFile(ctx context.Context, filePath string) ([]*core.
 		lang = "English"
 	}
 	ext := strings.ToLower(filepath.Ext(filePath))
-	systemMsgs := buildSystemMessages(docID, lang, idx.getEntityDefs(ctx))
+	systemMsgs := buildSystemMessages(docID, lang, idx.promptLang, idx.getEntityDefs(ctx))
 	if isCodeExt(ext) {
-		systemMsgs = buildCodeSystemMessages(docID, lang)
+		systemMsgs = buildCodeSystemMessages(docID, lang, idx.promptLang)
 	}
 
 	// 3. 分页：按行将内容拆为多页，每页不超过 MaxTokens × 80%
