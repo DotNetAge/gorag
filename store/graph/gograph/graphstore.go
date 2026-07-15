@@ -443,6 +443,15 @@ func (s *gographStore) GetAllEdgeTypes(ctx context.Context) ([]string, error) {
 	return types, nil
 }
 
+// Clear removes all nodes and edges from the graph store.
+func (s *gographStore) Clear(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, "MATCH (n) DETACH DELETE n", nil)
+	if err != nil {
+		return fmt.Errorf("clear graph: %w", err)
+	}
+	return nil
+}
+
 // GetMultiHopPaths performs multi-hop traversal from starting nodes.
 // If edgeTypes is non-empty, only edges matching those types are traversed.
 func (s *gographStore) GetMultiHopPaths(ctx context.Context, nodeIDs []string, edgeTypes []string, depth int, limit int) ([]*core.Node, []*core.Edge, error) {

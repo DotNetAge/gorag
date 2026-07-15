@@ -214,6 +214,12 @@ func (f *safeFulltextIndexer) Count(ctx context.Context) (int, error) {
 	return f.inner.Count(ctx)
 }
 
+func (f *safeFulltextIndexer) Clear(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.Clear(ctx)
+}
+
 // NewSafeFulltextIndexer 创建线程安全的全文索引器
 func NewSafeFulltextIndexer(dbPath string) (core.Indexer, error) {
 	inner, err := NewFulltextIndexerWithFile(dbPath)
@@ -255,6 +261,10 @@ func (s *safeFulltextIndexer) GetChunks(ctx context.Context, docId string) ([]*c
 
 func (s *fulltextIndexer) NewQuery(terms string) core.Query {
 	return query.NewFulltextQuery(terms)
+}
+
+func (f *fulltextIndexer) Clear(ctx context.Context) error {
+	return f.store.Clear()
 }
 
 // List returns empty result — BM25 indexer does not support chunk browsing.

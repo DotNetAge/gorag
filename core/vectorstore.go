@@ -86,6 +86,16 @@ type VectorStore interface {
 	//   - error: Any error that occurred
 	Count(ctx context.Context) (int, error)
 
+	// Clear removes all vectors from the store.
+	// After Clear, the store is ready for new data (no reinitialization needed).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: Any error that occurred during the operation
+	Clear(ctx context.Context) error
+
 	// Close gracefully shuts down the vector store connection.
 	// It should release all resources and close any open connections.
 	//

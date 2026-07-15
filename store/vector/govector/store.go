@@ -267,8 +267,36 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 			Match: gvcore.MatchValue{Value: id},
 		}},
 	}
-	_, err = s.collection.Delete(nil, filter)
-	return err
+	deleted, err = s.collection.Delete(nil, filter)
+	if err != nil {
+		return err
+	}
+	if deleted == 0 {
+		return fmt.Errorf("vector with chunk_id %q not found", id)
+	}
+	return nil
+}
+
+// Clear removes all vectors from the store by dropping and recreating the collection.
+func (s *Store) Clear(ctx context.Context) error {
+	s.Lock()
+	defer s.Unlock()
+
+	if err := s.storage.DropCollection(s.colName); err != nil {
+		return fmt.Errorf("clear: drop collection failed: %w", err)
+	}
+
+	if err := s.storage.EnsureCollection(s.colName); err != nil {
+		return fmt.Errorf("clear: ensure collection failed: %w", err)
+	}
+
+	newCol, err := gvcore.NewCollection(s.colName, s.dimension, gvcore.Cosine, s.storage, s.useHNSW)
+	if err != nil {
+		return fmt.Errorf("clear: recreate collection failed: %w", err)
+	}
+	s.collection = newCol
+
+	return nil
 }
 
 // Count returns the total number of vectors in the store.

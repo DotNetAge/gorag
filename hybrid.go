@@ -343,6 +343,28 @@ func (h *HybridIndexer) Close(ctx context.Context) error {
 	return nil
 }
 
+// Clear 清除所有子索引器中的数据
+func (h *HybridIndexer) Clear(ctx context.Context) error {
+	h.mu.RLock()
+	indexers := make([]core.Indexer, 0, len(h.indexers))
+	for _, idx := range h.indexers {
+		indexers = append(indexers, idx)
+	}
+	h.mu.RUnlock()
+
+	var errs []error
+	for _, idx := range indexers {
+		if err := idx.Clear(ctx); err != nil {
+			h.logger.Warn("clear partial failure", "indexer", idx.Name(), "error", err)
+			errs = append(errs, fmt.Errorf("%s: %w", idx.Name(), err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("clear failed for %d indexers: %v", len(errs), errs)
+	}
+	return nil
+}
+
 // Name 返回索引器名称
 func (h *HybridIndexer) Name() string {
 	return "hybrid"

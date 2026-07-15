@@ -13,6 +13,9 @@ type FullTextStore interface {
 
 	// Count 返回全文索引中的文档总数
 	Count() (int, error)
+
+	// Clear 清除全文索引中的所有数据
+	Clear() error
 }
 
 // FullTextSearchResult 全文搜索结果

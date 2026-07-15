@@ -46,6 +46,16 @@ type GraphStore interface {
 	// Useful for introspection and building UI filters.
 	GetAllEdgeTypes(ctx context.Context) ([]string, error)
 
+	// Clear removes all nodes and edges from the graph store.
+	// After Clear, the graph is empty and ready for new data.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: Any error that occurred during the operation
+	Clear(ctx context.Context) error
+
 	// Close cleanly tears down Graph Store connections
 	Close(ctx context.Context) error
 }

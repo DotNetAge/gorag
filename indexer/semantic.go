@@ -403,7 +403,8 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 	// 联动删除所有从属维度向量（无对应维度的 chunk 删不到也无副作用）
 	for _, dim := range semanticDimensions {
 		if err := s.db.Delete(ctx, chunkID+dim.suffix); err != nil {
-			return err
+			// 从属维度向量可能不存在（无对应字段可提取），不视为错误
+			s.logger.Warn("remove dimension vector: %v", err)
 		}
 	}
 	return nil
@@ -692,4 +693,9 @@ func vectorToHit(vec *core.Vector) core.Hit {
 // Count returns the total number of indexed chunks.
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
 	return s.db.Count(ctx)
+}
+
+// Clear removes all vectors from the semantic indexer.
+func (s *semanticIndexer) Clear(ctx context.Context) error {
+	return s.db.Clear(ctx)
 }

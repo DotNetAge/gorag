@@ -1091,7 +1091,8 @@ func (idx *GraphIndexer) Remove(ctx context.Context, chunkID string) error {
 	// 联动删除所有从属维度向量（title + summary）
 	for _, dim := range graphDimensions {
 		if err := idx.vectorDB.Delete(ctx, chunkID+dim.suffix); err != nil {
-			return err
+			// 从属维度向量可能不存在（无对应字段可提取），不视为错误
+			idx.logger.Warn("remove graph dimension vector: %v", err)
 		}
 	}
 	// 从 graphDB 移除关联的节点和边（级联删除）
@@ -1300,6 +1301,27 @@ func (idx *GraphIndexer) Close(ctx context.Context) error {
 		return err
 	}
 	return idx.graphDB.Close(ctx)
+}
+
+// Clear 清空索引中的所有数据（向量 + 图谱）。
+func (idx *GraphIndexer) Clear(ctx context.Context) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.logger.Info("GraphIndexer.Clear: clearing vectorDB")
+	if err := idx.vectorDB.Clear(ctx); err != nil {
+		idx.logger.Error("GraphIndexer.Clear: vectorDB.Clear failed", err)
+		return fmt.Errorf("clear vectorDB: %w", err)
+	}
+	idx.logger.Info("GraphIndexer.Clear: vectorDB cleared successfully, clearing graphDB")
+	if err := idx.graphDB.Clear(ctx); err != nil {
+		idx.logger.Error("GraphIndexer.Clear: graphDB.Clear failed", err)
+		return fmt.Errorf("clear graphDB: %w", err)
+	}
+	// 重置累计统计
+	idx.entitiesCreated = 0
+	idx.relsCreated = 0
+	idx.logger.Info("GraphIndexer.Clear: all stores cleared successfully")
+	return nil
 }
 
 // ---------------------------------------------------------------------------

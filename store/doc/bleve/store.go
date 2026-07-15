@@ -124,6 +124,32 @@ func (s *BleveStore) Count() (int, error) {
 	return int(count), nil
 }
 
+// Clear 清除全文索引中的所有数据
+func (s *BleveStore) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 关闭当前索引
+	if s.index != nil {
+		if err := s.index.Close(); err != nil {
+			return err
+		}
+	}
+
+	// 删除索引目录
+	if err := os.RemoveAll(s.dbPath); err != nil {
+		return err
+	}
+
+	// 重新创建索引
+	index, err := blevedb.New(s.dbPath, blevedb.NewIndexMapping())
+	if err != nil {
+		return err
+	}
+	s.index = index
+	return nil
+}
+
 // Close 关闭索引
 func (s *BleveStore) Close() error {
 	s.mu.Lock()

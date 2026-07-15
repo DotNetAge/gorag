@@ -100,12 +100,22 @@ type Indexer interface {
 	// Count returns the total number of indexed chunks/entries.
 	//
 	// Parameters:
-	//   - ctx: Context for cancellation
+	//   - ctx: Context for cancellation and timeout
 	//
 	// Returns:
 	//   - int: The total count of indexed items
-	//   - error: An error if the operation fails
+	//   - error: Any error that occurred
 	Count(ctx context.Context) (int, error)
+
+	// Clear removes all data from the indexer.
+	// After Clear, the indexer is empty and ready for new data.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: Any error that occurred during the operation
+	Clear(ctx context.Context) error
 }
 
 
