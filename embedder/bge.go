@@ -287,6 +287,7 @@ func newVector(chunk *core.Chunk, embedding []float32) *core.Vector {
 		"heading_path":  chunk.ChunkMeta.HeadingPath,
 	}
 	meta["chunk_meta"] = chunkMetaMap
+	meta["chunk_id"] = chunk.ID
 
 	return &core.Vector{
 		ID:       uuid.NewString(),

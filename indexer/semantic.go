@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/DotNetAge/gorag/v2/core"
@@ -105,6 +106,129 @@ func (s *semanticIndexer) indexAndStore(ctx context.Context, chunk *core.Chunk) 
 	return s.db.Upsert(ctx, []*core.Vector{vector})
 }
 
+// ── 多维度从属索引 ──────────────────────────────────────────────
+// 为同一 chunk 增加多个向量维度（主索引 content 不变），解决短文本查询命中长内容向量困难的问题。
+// 从属向量 ChunkID = <chunk_id>:<suffix>，metadata 留空（不重复存储主向量数据），
+// 命中后回查主向量获取完整内容。
+
+// vectorDimension 描述一个从属索引维度
+type vectorDimension struct {
+	suffix  string                      // ":title" / ":summary"
+	extract func(map[string]any) string // 从 metadata 提取向量化文本
+}
+
+var (
+	dimTitle = vectorDimension{":title", func(m map[string]any) string {
+		t, _ := m["title"].(string)
+		return t
+	}}
+	dimSummary = vectorDimension{":summary", func(m map[string]any) string {
+		s, _ := m["summary"].(string)
+		return s
+	}}
+)
+
+// semanticDimensions 是 semanticIndexer 启用的从属维度（规则分块器无 summary，仅 title）
+var semanticDimensions = []vectorDimension{dimTitle}
+
+// graphDimensions 是 GraphIndexer 启用的从属维度（LLM 生成，含 title + summary）
+var graphDimensions = []vectorDimension{dimTitle, dimSummary}
+
+// indexDimensionVectors 为 chunk 生成所有从属维度的向量并 Upsert。
+// 对应字段为空的维度自然跳过。供 semanticIndexer 和 GraphIndexer 共用。
+func indexDimensionVectors(ctx context.Context, db core.VectorStore, embedder core.Embedder, chunkID string, metadata map[string]any, dims []vectorDimension) error {
+	for _, dim := range dims {
+		text := dim.extract(metadata)
+		if text == "" {
+			continue
+		}
+		vec, err := embedder.CalcText(text)
+		if err != nil {
+			return err
+		}
+		if vec == nil {
+			continue
+		}
+		vec.ChunkID = chunkID + dim.suffix
+		if err := db.Upsert(ctx, []*core.Vector{vec}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stripDimSuffix 检查 chunkID 是否为某个从属维度（以已知后缀结尾），
+// 是则返回原 chunk_id 和 true，否则返回原值和 false。
+func stripDimSuffix(chunkID string, dims []vectorDimension) (string, bool) {
+	for _, dim := range dims {
+		if strings.HasSuffix(chunkID, dim.suffix) {
+			return strings.TrimSuffix(chunkID, dim.suffix), true
+		}
+	}
+	return chunkID, false
+}
+
+// getVectorByChunkID 按 chunk_id 精确查询单个向量（用于从属索引回查）。
+// 复用 ListFiltered + chunk_id exact 匹配，无需扩展 VectorStore 接口。
+func getVectorByChunkID(ctx context.Context, db core.VectorStore, chunkID string) (*core.Vector, error) {
+	vecs, _, err := db.ListFiltered(ctx, 0, 1, []core.FilterCondition{
+		{Key: "chunk_id", Type: "exact", Value: chunkID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(vecs) == 0 {
+		return nil, nil
+	}
+	return vecs[0], nil
+}
+
+// resolveDimensions 处理搜索结果中的从属维度向量：
+// 后缀匹配的向量回查主向量获取完整数据，按原 chunk_id 去重保留较高分。
+// 返回处理后的 results 和 scores（保持对齐）。供 semanticIndexer 和 GraphIndexer 共用。
+func resolveDimensions(ctx context.Context, db core.VectorStore, results []*core.Vector, scores []float32, dims []vectorDimension) ([]*core.Vector, []float32, error) {
+	type entry struct {
+		vec   *core.Vector
+		score float32
+	}
+	byID := make(map[string]*entry)
+	order := make([]string, 0, len(results))
+	for i, vec := range results {
+		if vec == nil {
+			continue
+		}
+		score := scores[i]
+		chunkID := vec.ChunkID
+		if baseID, ok := stripDimSuffix(chunkID, dims); ok {
+			mainVec, err := getVectorByChunkID(ctx, db, baseID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve dimension for %s: %w", chunkID, err)
+			}
+			if mainVec == nil {
+				continue
+			}
+			vec = mainVec
+			chunkID = baseID
+		}
+		if e, exists := byID[chunkID]; exists {
+			if score > e.score {
+				e.score = score
+			}
+			continue
+		}
+		byID[chunkID] = &entry{vec: vec, score: score}
+		order = append(order, chunkID)
+	}
+	out := make([]*core.Vector, 0, len(order))
+	outScores := make([]float32, 0, len(order))
+	for _, id := range order {
+		e := byID[id]
+		out = append(out, e.vec)
+		outScores = append(outScores, e.score)
+	}
+	return out, outScores, nil
+}
+
 func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit, error) {
 	// 1. 从查询获取向量 - 优先使用 Query 中的预计算向量，否则实时计算
 	var queryVector []float32
@@ -138,10 +262,15 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 	// 4. ParentDoc 处理：如果结果是子块，替换为父块
 	results = s.resolveParentChunks(results)
 
-	// 5. 构建 Hit 返回
-	// 注意：返回 vec.ChunkID（chunk ID）而不是 vec.ID（UUID）
-	// 这是为了与 fulltextIndexer.Search 返回的 ID 格式一致
-	// 确保混合搜索 RRF 融合时能正确匹配
+	// 5. 从属维度处理：后缀匹配的向量回查主向量，按原 chunk_id 去重保留较高分
+	results, scores, err = resolveDimensions(ctx, s.db, results, scores, semanticDimensions)
+	if err != nil {
+		return nil, err
+	}
+
+	// 6. 构建 Hit 返回
+	// 注意：返回主向量的 ChunkID（chunk ID）而不是 vec.ID（UUID），
+	// 与 fulltextIndexer.Search 返回的 ID 格式一致，确保混合搜索 RRF 融合时能正确匹配。
 	hits := make([]core.Hit, 0, len(results))
 	for i, vec := range results {
 		hit := core.Hit{
@@ -170,7 +299,6 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 				hit.ChunkMeta = mapToChunkMeta(cm)
 			}
 		}
-
 		hits = append(hits, hit)
 	}
 
@@ -268,10 +396,17 @@ func (s *semanticIndexer) extractChunkContent(vec *core.Vector) string {
 }
 
 func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
-	// 删除时通过 chunk_id 匹配：
-	// - govector store 会识别 chunk_ 前缀，按 Payload["chunk_id"] filter 删除
-	// - 这确保只删除指定分块的向量，保留同一文档的其他分块
-	return s.db.Delete(ctx, chunkID)
+	// 删除主向量（通过 chunk_id 匹配：govector store 按 Payload["chunk_id"] filter 删除）
+	if err := s.db.Delete(ctx, chunkID); err != nil {
+		return err
+	}
+	// 联动删除所有从属维度向量（无对应维度的 chunk 删不到也无副作用）
+	for _, dim := range semanticDimensions {
+		if err := s.db.Delete(ctx, chunkID+dim.suffix); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // StoreChunk stores a pre-built chunk directly in the index, skipping chunking.
@@ -282,6 +417,68 @@ func (s *semanticIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) err
 		return fmt.Errorf("chunk content cannot be empty")
 	}
 	return s.indexAndStore(ctx, chunk)
+}
+
+// Refill 为已有分片补充从属维度的向量（title/summary 等）。
+// 用于存量数据迁移到多维度索引。幂等：已存在的从属向量会跳过，支持中断重跑。
+func (s *semanticIndexer) Refill(ctx context.Context) error {
+	const pageSize = 100
+	offset := 0
+	refilled := 0
+	for {
+		vecs, err := s.db.List(ctx, offset, pageSize)
+		if err != nil {
+			return fmt.Errorf("refill list at offset %d: %w", offset, err)
+		}
+		if len(vecs) == 0 {
+			break
+		}
+		for _, vec := range vecs {
+			// 跳过从属维度向量，只处理主向量
+			if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
+				continue
+			}
+			if vec.Metadata == nil {
+				continue
+			}
+			// 遍历所有从属维度，逐个检查并补充
+			for _, dim := range semanticDimensions {
+				text := dim.extract(vec.Metadata)
+				if text == "" {
+					continue
+				}
+				dimID := vec.ChunkID + dim.suffix
+				// 幂等检查：已存在则跳过
+				existing, err := getVectorByChunkID(ctx, s.db, dimID)
+				if err != nil {
+					return fmt.Errorf("refill check %s: %w", dimID, err)
+				}
+				if existing != nil {
+					continue
+				}
+				dimVec, err := s.embedder.CalcText(text)
+				if err != nil {
+					s.logger.Error("refill embed dimension failed", err, "chunk_id", dimID)
+					continue
+				}
+				if dimVec == nil {
+					continue
+				}
+				dimVec.ChunkID = dimID
+				if err := s.db.Upsert(ctx, []*core.Vector{dimVec}); err != nil {
+					s.logger.Error("refill upsert dimension failed", err, "chunk_id", dimID)
+					continue
+				}
+				refilled++
+			}
+		}
+		offset += len(vecs)
+		if len(vecs) < pageSize {
+			break
+		}
+	}
+	s.logger.Info("indexer.refilled", "refilled", refilled)
+	return nil
 }
 
 // saveChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
@@ -298,6 +495,12 @@ func (s *semanticIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) 
 		if err := s.indexAndStore(ctx, chunk); err != nil {
 			embedErrCount++
 			s.logger.Error("indexer.embed failed", err, "chunk_id", chunk.ID)
+			continue
+		}
+		// 补充从属维度向量（title 等），无对应字段的 chunk 自然跳过
+		if err := indexDimensionVectors(ctx, s.db, s.embedder, chunk.ID, chunk.Metadata, semanticDimensions); err != nil {
+			embedErrCount++
+			s.logger.Error("indexer.embed dimensions failed", err, "chunk_id", chunk.ID)
 		}
 	}
 	embedDur := time.Since(embedStart)

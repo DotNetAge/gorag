@@ -532,7 +532,7 @@ func (idx *GraphIndexer) Search(ctx context.Context, qry core.Query) ([]core.Hit
 	}
 }
 
-// searchGraph GraphQuery 路由：向量检索 → Nodes/Edges 融合 → 多跳遍历 → Hits
+// searchGraph GraphQuery 路由：向量检索 → 从属维度回查 → Nodes/Edges 融合 → 多跳遍历 → Hits
 func (idx *GraphIndexer) searchGraph(ctx context.Context, q *query.GraphQuery) ([]core.Hit, error) {
 	// 1. 向量检索（由 GraphIndexer 的 embedder 计算向量）
 	queryVector, err := idx.embedder.CalcText(q.Raw())
@@ -547,20 +547,38 @@ func (idx *GraphIndexer) searchGraph(ctx context.Context, q *query.GraphQuery) (
 		return nil, nil
 	}
 
-	// 2. 收集 chunkIDs
+	// 2. 从属维度处理：后缀匹配的向量回查主向量，按原 chunk_id 去重保留较高分
+	results, scores, err = resolveDimensions(ctx, idx.vectorDB, results, scores, graphDimensions)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	// 3. 收集 chunkIDs
 	chunkIDs := make([]string, len(results))
 	for i, r := range results {
 		chunkIDs[i] = r.ChunkID
 	}
 
-	// 3. Nodes/Edges 融合 + 多跳遍历
+	// 4. Nodes/Edges 融合 + 多跳遍历
 	return idx.enrichHits(ctx, results, scores, chunkIDs, q.Depth, q.EdgeTypes)
 }
 
-// searchSemantic SemanticQuery 路由：向量检索 → Nodes/Edges 融合 → Hits
+// searchSemantic SemanticQuery 路由：向量检索 → 从属维度回查 → Nodes/Edges 融合 → Hits
 func (idx *GraphIndexer) searchSemantic(ctx context.Context, q *query.SemanticQuery) ([]core.Hit, error) {
 	queryVector := q.Vector().Values
 	results, scores, err := idx.vectorDB.Search(ctx, queryVector, 10, q.Filters())
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	// 从属维度处理：后缀匹配的向量回查主向量，按原 chunk_id 去重保留较高分
+	results, scores, err = resolveDimensions(ctx, idx.vectorDB, results, scores, graphDimensions)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,9 +1084,15 @@ func (idx *GraphIndexer) NewQuery(terms string) core.Query {
 
 // Remove 从 vectorDB 和 graphDB 中移除与 chunkID 关联的所有数据。
 func (idx *GraphIndexer) Remove(ctx context.Context, chunkID string) error {
-	// 从 vectorDB 移除 chunk 向量
+	// 从 vectorDB 移除 chunk 主向量
 	if err := idx.vectorDB.Delete(ctx, chunkID); err != nil {
 		return err
+	}
+	// 联动删除所有从属维度向量（title + summary）
+	for _, dim := range graphDimensions {
+		if err := idx.vectorDB.Delete(ctx, chunkID+dim.suffix); err != nil {
+			return err
+		}
 	}
 	// 从 graphDB 移除关联的节点和边（级联删除）
 	if idx.graphDB != nil {
@@ -1106,7 +1130,11 @@ func (idx *GraphIndexer) saveChunk(ctx context.Context, chunk *core.Chunk) error
 	if err != nil {
 		return fmt.Errorf("embedding failed: %w", err)
 	}
-	return idx.vectorDB.Upsert(ctx, []*core.Vector{vec})
+	if err := idx.vectorDB.Upsert(ctx, []*core.Vector{vec}); err != nil {
+		return err
+	}
+	// 补充从属维度向量（title + summary），无对应字段的 chunk 自然跳过
+	return indexDimensionVectors(ctx, idx.vectorDB, idx.embedder, chunk.ID, chunk.Metadata, graphDimensions)
 }
 
 // IndexChunks 批量索引预生成的 Chunk（实现 core.ChunkIndexer 接口）。
@@ -1120,6 +1148,68 @@ func (idx *GraphIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) e
 			return err
 		}
 	}
+	return nil
+}
+
+// Refill 为已有分片补充从属维度的向量（title/summary）。
+// 用于存量数据迁移到多维度索引。幂等：已存在的从属向量会跳过，支持中断重跑。
+func (idx *GraphIndexer) Refill(ctx context.Context) error {
+	const pageSize = 100
+	offset := 0
+	refilled := 0
+	for {
+		vecs, err := idx.vectorDB.List(ctx, offset, pageSize)
+		if err != nil {
+			return fmt.Errorf("refill list at offset %d: %w", offset, err)
+		}
+		if len(vecs) == 0 {
+			break
+		}
+		for _, vec := range vecs {
+			// 跳过从属维度向量，只处理主向量
+			if _, isDim := stripDimSuffix(vec.ChunkID, graphDimensions); isDim {
+				continue
+			}
+			if vec.Metadata == nil {
+				continue
+			}
+			// 遍历所有从属维度，逐个检查并补充
+			for _, dim := range graphDimensions {
+				text := dim.extract(vec.Metadata)
+				if text == "" {
+					continue
+				}
+				dimID := vec.ChunkID + dim.suffix
+				// 幂等检查：已存在则跳过
+				existing, err := getVectorByChunkID(ctx, idx.vectorDB, dimID)
+				if err != nil {
+					return fmt.Errorf("refill check %s: %w", dimID, err)
+				}
+				if existing != nil {
+					continue
+				}
+				dimVec, err := idx.embedder.CalcText(text)
+				if err != nil {
+					idx.logger.Error("refill embed dimension failed", err, "chunk_id", dimID)
+					continue
+				}
+				if dimVec == nil {
+					continue
+				}
+				dimVec.ChunkID = dimID
+				if err := idx.vectorDB.Upsert(ctx, []*core.Vector{dimVec}); err != nil {
+					idx.logger.Error("refill upsert dimension failed", err, "chunk_id", dimID)
+					continue
+				}
+				refilled++
+			}
+		}
+		offset += len(vecs)
+		if len(vecs) < pageSize {
+			break
+		}
+	}
+	idx.logger.Info("indexer.refilled", "refilled", refilled)
 	return nil
 }
 
@@ -1872,6 +1962,12 @@ func (idx *GraphIndexer) writeToStores(
 	if len(chunkVectors) > 0 {
 		if err := idx.vectorDB.Upsert(ctx, chunkVectors); err != nil {
 			return chunks, fmt.Errorf("vectorDB upsert failed: %w", err)
+		}
+		// 补充从属维度向量（title + summary），无对应字段的 chunk 自然跳过
+		for _, c := range chunks {
+			if err := indexDimensionVectors(ctx, idx.vectorDB, idx.embedder, c.ID, c.Metadata, graphDimensions); err != nil {
+				idx.logger.Error("index dimension vectors failed", err, "chunk_id", c.ID)
+			}
 		}
 	}
 

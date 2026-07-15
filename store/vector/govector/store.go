@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/DotNetAge/gorag/v2/core"
@@ -252,20 +251,23 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		return nil
 	}
 
-	// If id starts with "chunk_", it's a chunk_id - use filter to delete
-	if strings.HasPrefix(id, "chunk_") {
-		filter := &gvcore.Filter{
-			Must: []gvcore.Condition{{
-				Key:   "chunk_id",
-				Match: gvcore.MatchValue{Value: id},
-			}},
-		}
-		_, err := s.collection.Delete(nil, filter)
+	// 尝试按 vector UUID 删除
+	deleted, err := s.collection.Delete([]string{id}, nil)
+	if err != nil {
 		return err
 	}
+	if deleted > 0 {
+		return nil
+	}
 
-	// Otherwise treat as vector UUID
-	_, err := s.collection.Delete([]string{id}, nil)
+	// UUID 未命中，回退到按 chunk_id 元数据过滤删除
+	filter := &gvcore.Filter{
+		Must: []gvcore.Condition{{
+			Key:   "chunk_id",
+			Match: gvcore.MatchValue{Value: id},
+		}},
+	}
+	_, err = s.collection.Delete(nil, filter)
 	return err
 }
 
