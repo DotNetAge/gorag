@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/indexer"
 	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/fsnotify/fsnotify"
 )
@@ -30,7 +31,7 @@ type IndexingService struct {
 	watchs       []string            // 监控的文件目录
 	pendingFiles []string            // 待索引文件列表
 	indexedFiles map[string]*indexedDoc // 已索引文件记录（filePath → 元数据）
-	indexer      core.Indexer        // 索引器实例
+	indexer      indexer.Indexer     // 索引器实例
 	logger       logging.Logger      // 日志记录器
 	workerCount  int                 // worker pool 大小
 
@@ -419,8 +420,14 @@ func (s *IndexingService) removeFileIndex(ctx context.Context, file string) erro
 	}
 
 	var errs []error
+	// Remove 在 IndexerAdmin 接口上，需 type-assert
+	admin, hasAdmin := s.indexer.(indexer.IndexerAdmin)
 	for _, chunkID := range chunkIDs {
-		if err := s.indexer.Remove(ctx, chunkID); err != nil {
+		if !hasAdmin {
+			errs = append(errs, fmt.Errorf("indexer 未实现 IndexerAdmin"))
+			break
+		}
+		if err := admin.Remove(ctx, chunkID); err != nil {
 			errs = append(errs, err)
 			s.logger.Warn("failed to remove chunk", "file", file, "chunkID", chunkID, "error", err)
 		}
@@ -571,9 +578,9 @@ func (s *IndexingService) Stop() error {
 	}
 	s.wg.Wait()
 
-	// 关闭索引器
-	if closer, ok := s.indexer.(interface{ Close() error }); ok {
-		return closer.Close()
+	// 关闭索引器（IndexerCloser 接口 Close(ctx)）
+	if closer, ok := s.indexer.(indexer.IndexerCloser); ok {
+		return closer.Close(context.Background())
 	}
 
 	return nil

@@ -60,75 +60,81 @@ Content-Type: text/html; charset="utf-8"
 func TestParseEML_Basic(t *testing.T) {
 	doc, err := ParseEML(strings.NewReader(createMinimalEML()))
 	if err != nil {
-		t.Fatalf("ParseEML failed: %v", err)
+		t.Fatalf("ParseEML 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseEML returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseEML 返回空内容")
 	}
 
 	// 验证元数据
-	if doc.Meta["subject"] != "Test Email Subject" {
-		t.Errorf("Expected subject 'Test Email Subject', got: %v", doc.Meta["subject"])
+	meta := doc.Meta()
+	if meta["subject"] != "Test Email Subject" {
+		t.Errorf("期望 subject 'Test Email Subject', 实际: %v", meta["subject"])
 	}
-	if doc.Meta["from"] != "sender@example.com" {
-		t.Errorf("Expected from 'sender@example.com', got: %v", doc.Meta["from"])
+	if meta["from"] != "sender@example.com" {
+		t.Errorf("期望 from 'sender@example.com', 实际: %v", meta["from"])
 	}
-	if doc.Meta["to"] != "recipient@example.com" {
-		t.Errorf("Expected to 'recipient@example.com', got: %v", doc.Meta["to"])
+	if meta["to"] != "recipient@example.com" {
+		t.Errorf("期望 to 'recipient@example.com', 实际: %v", meta["to"])
 	}
-	if doc.Meta["email"] != true {
-		t.Error("Expected email flag to be true")
+	if meta["email"] != true {
+		t.Error("期望 email 标记为 true")
 	}
 
-	// 验证正文内容存在于 Markdown 输出中
-	if !strings.Contains(doc.Text, "Hello") {
-		t.Error("Output should contain email body text starting with Hello")
+	// V2：EML 归一化为 JSON，验证正文与发件人字段均存在于 JSON 输出中
+	if !strings.Contains(doc.Content(), "Hello") {
+		t.Error("输出应包含以 Hello 开头的邮件正文")
 	}
-	if !strings.Contains(doc.Text, "From:") {
-		t.Error("Output should contain From header")
+	if !strings.Contains(doc.Content(), `"from":`) {
+		t.Error("输出应包含 'from' JSON key")
+	}
+
+	// V2：EML 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Errorf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
 	}
 }
 
 func TestParseEML_HTMLBody(t *testing.T) {
 	doc, err := ParseEML(strings.NewReader(createEMLWithHTML()))
 	if err != nil {
-		t.Fatalf("ParseEML failed for HTML body: %v", err)
+		t.Fatalf("ParseEML 处理 HTML 正文失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseEML returned empty text for HTML body")
+	if doc.Content() == "" {
+		t.Fatal("ParseEML 处理 HTML 正文返回空内容")
 	}
 
-	// HTML 应该被转为 Markdown
-	if !strings.Contains(doc.Text, "HTML Email") {
-		t.Error("Output should contain heading text from HTML")
+	// HTML 标签应被剥离为纯文本
+	if !strings.Contains(doc.Content(), "HTML Email") {
+		t.Error("输出应包含 HTML 中的标题文本")
 	}
-	if strings.Contains(doc.Text, "<h1>") || strings.Contains(doc.Text, "<html>") {
-		t.Error("Output should not contain raw HTML tags")
+	if strings.Contains(doc.Content(), "<h1>") || strings.Contains(doc.Content(), "<html>") {
+		t.Error("输出不应包含原始 HTML 标签")
 	}
 }
 
 func TestParseEML_Multipart(t *testing.T) {
 	doc, err := ParseEML(strings.NewReader(createMultipartEML()))
 	if err != nil {
-		t.Fatalf("ParseEML failed for multipart: %v", err)
+		t.Fatalf("ParseEML 处理 multipart 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseEML returned empty text for multipart")
+	if doc.Content() == "" {
+		t.Fatal("ParseEML 处理 multipart 返回空内容")
 	}
 
 	// multipart/alternative 应该优先返回 text/plain
-	if !strings.Contains(doc.Text, "Plain text version") {
-		t.Error("Output should contain the plain text version")
+	if !strings.Contains(doc.Content(), "Plain text version") {
+		t.Error("输出应包含纯文本版本")
 	}
 }
 
 func TestParseEML_EmptyInput(t *testing.T) {
 	_, err := ParseEML(strings.NewReader(""))
 	if err == nil {
-		t.Fatal("Expected error for empty EML input")
+		t.Fatal("空 EML 输入应返回错误")
 	}
 }
 
@@ -143,21 +149,23 @@ Body content`
 
 	doc, err := ParseEML(strings.NewReader(eml))
 	if err != nil {
-		t.Fatalf("ParseEML failed for MIME-encoded headers: %v", err)
+		t.Fatalf("ParseEML 处理 MIME 编码头失败: %v", err)
 	}
 
-	if doc.Meta["subject"] != "测试邮件" {
-		t.Errorf("Expected decoded subject '测试邮件', got: %q", doc.Meta["subject"])
+	if doc.Meta()["subject"] != "测试邮件" {
+		t.Errorf("期望解码后 subject '测试邮件', 实际: %q", doc.Meta()["subject"])
 	}
 }
 
 func TestParseEML_ViaNew(t *testing.T) {
 	emlContent := createMinimalEML()
-	doc := New(emlContent, "message/rfc822")
+	// V2：New 不会解析内容，调用方需保证 content 已归一化。
+	// EML 归一化后为 RawDocData。
+	doc := New(emlContent, RawDocData)
 	if doc == nil {
-		t.Fatal("New should not return nil for EML")
+		t.Fatal("New 不应返回 nil（EML 场景）")
 	}
-	if doc.GetMimeType() != "message/rfc822" {
-		t.Errorf("Expected MIME 'message/rfc822', got: %q", doc.GetMimeType())
+	if doc.Type() != RawDocData {
+		t.Errorf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
 	}
 }

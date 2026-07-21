@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/DotNetAge/gorag"
+	gorag "github.com/DotNetAge/gorag/v2"
 	"github.com/spf13/cobra"
 )
 

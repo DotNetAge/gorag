@@ -15,33 +15,33 @@ func TestDecodeUTF16LE(t *testing.T) {
 		want string
 	}{
 		{
-			name: "simple ascii",
+			name: "简单 ASCII",
 			data: []byte{0x48, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0x6F, 0x00, 0x00, 0x00},
 			want: "Hello",
 		},
 		{
-			name: "with null terminator",
+			name: "带空终止符",
 			data: []byte{0x41, 0x00, 0x42, 0x00, 0x00, 0x00, 0x43, 0x00},
 			want: "AB",
 		},
 		{
-			name: "empty",
+			name: "空字符串",
 			data: []byte{0x00, 0x00},
 			want: "",
 		},
 		{
-			name: "chinese characters",
+			name: "中文字符",
 			// "测试" in UTF-16LE: 测=U+6D4B, 试=U+8BD5
 			data: []byte{0x4B, 0x6D, 0xD5, 0x8B, 0x00, 0x00},
 			want: "测试",
 		},
 		{
-			name: "odd length bytes",
+			name: "奇数字节长度",
 			data: []byte{0x48, 0x00, 0x65},
 			want: "",
 		},
 		{
-			name: "empty data",
+			name: "空数据",
 			data: []byte{},
 			want: "",
 		},
@@ -51,7 +51,7 @@ func TestDecodeUTF16LE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := decodeUTF16LE(tt.data)
 			if got != tt.want {
-				t.Errorf("decodeUTF16LE = %q, want %q", got, tt.want)
+				t.Errorf("decodeUTF16LE = %q, 期望 %q", got, tt.want)
 			}
 		})
 	}
@@ -61,26 +61,23 @@ func TestDecodeFILETIME(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
-		want string // RFC3339 string or empty for zero
+		want string // RFC3339 字符串；空字符串表示零值
 	}{
 		{
-			name: "zero",
+			name: "零值",
 			data: []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			want: "",
 		},
 		{
-			name: "too short",
+			name: "字节数过短",
 			data: []byte{1, 2, 3},
 			want: "",
 		},
 		{
-			name: "jan 1 2024",
-			// FILETIME for 2024-01-01 00:00:00 UTC
-			// Ticks since 1601-01-01: (2024-1601)*365.2425*86400*10000000 ≈ 133456608000000000
-			// Let me just use a known value
+			name: "2024-01-15 14:30 UTC",
 			data: func() []byte {
 				t := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
-				// Convert to FILETIME ticks (100-ns intervals since 1601-01-01)
+				// 转换为 FILETIME ticks（自 1601-01-01 起的 100ns 计数）
 				const unixEpochDiff = 11644473600
 				ticks := uint64(t.Unix()+unixEpochDiff) * 10_000_000
 				buf := make([]byte, 8)
@@ -103,11 +100,11 @@ func TestDecodeFILETIME(t *testing.T) {
 			got := decodeFILETIME(tt.data)
 			if tt.want == "" {
 				if !got.IsZero() {
-					t.Errorf("decodeFILETIME = %v, want zero time", got)
+					t.Errorf("decodeFILETIME = %v, 期望零值时间", got)
 				}
 			} else {
 				if got.Format(time.RFC3339) != tt.want {
-					t.Errorf("decodeFILETIME = %s, want %s", got.Format(time.RFC3339), tt.want)
+					t.Errorf("decodeFILETIME = %s, 期望 %s", got.Format(time.RFC3339), tt.want)
 				}
 			}
 		})
@@ -118,7 +115,7 @@ func TestStreamKey(t *testing.T) {
 	key := streamKey(0x0037, 0x001F)
 	expected := "__substg1.0_0037001F"
 	if key != expected {
-		t.Errorf("streamKey = %q, want %q", key, expected)
+		t.Errorf("streamKey = %q, 期望 %q", key, expected)
 	}
 }
 
@@ -127,10 +124,10 @@ func TestExtractMSGRecipients(t *testing.T) {
 	streams := make(map[string][]byte)
 	to, cc := extractMSGRecipients(streams)
 	if len(to) != 0 {
-		t.Errorf("Expected empty to list, got %d items", len(to))
+		t.Errorf("期望空 to 列表, 实际 %d 项", len(to))
 	}
 	if len(cc) != 0 {
-		t.Errorf("Expected empty cc list, got %d items", len(cc))
+		t.Errorf("期望空 cc 列表, 实际 %d 项", len(cc))
 	}
 }
 
@@ -138,7 +135,7 @@ func TestParseMSG_InvalidFile(t *testing.T) {
 	// 非 OLE2 数据应返回错误
 	_, err := ParseMSG(strings.NewReader("not an ole2 file"))
 	if err == nil {
-		t.Fatal("Expected error for invalid MSG data")
+		t.Fatal("无效 MSG 数据应返回错误")
 	}
 }
 
@@ -149,21 +146,27 @@ func TestParseMSG_WithTestFile(t *testing.T) {
 
 	doc, err := ParseMSG(f)
 	if err != nil {
-		t.Fatalf("ParseMSG failed: %v", err)
+		t.Fatalf("ParseMSG 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseMSG returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseMSG 返回空内容")
 	}
 
 	// 验证元数据
-	if doc.Meta["email"] != true {
-		t.Error("Expected email flag to be true")
+	meta := doc.Meta()
+	if meta["email"] != true {
+		t.Error("期望 email 标记为 true")
 	}
-	t.Logf("MSG from: %v", doc.Meta["from"])
-	t.Logf("MSG subject: %v", doc.Meta["subject"])
-	t.Logf("MSG to: %v", doc.Meta["to"])
-	t.Logf("MSG output length: %d", len(doc.Text))
+	t.Logf("MSG from: %v", meta["from"])
+	t.Logf("MSG subject: %v", meta["subject"])
+	t.Logf("MSG to: %v", meta["to"])
+	t.Logf("MSG 输出长度: %d", len(doc.Content()))
+
+	// V2：MSG 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Errorf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
+	}
 }
 
 func skipIfMsgFileMissing(t *testing.T, name string) {
@@ -171,9 +174,9 @@ func skipIfMsgFileMissing(t *testing.T, name string) {
 	path := filepath.Join(testDataDir, name)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		t.Skipf("Skipping: test file %s not found", name)
+		t.Skipf("跳过：测试文件 %s 不存在", name)
 	}
 	if err == nil && info.Size() < 1024 {
-		t.Skipf("Skipping: test file %s is only %d bytes (possible LFS placeholder)", name, info.Size())
+		t.Skipf("跳过：测试文件 %s 仅 %d 字节（疑似 LFS 占位符）", name, info.Size())
 	}
 }

@@ -426,23 +426,6 @@ func (s *gographStore) DeleteEdge(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetAllEdgeTypes returns all distinct edge types in the graph.
-func (s *gographStore) GetAllEdgeTypes(ctx context.Context) ([]string, error) {
-	query := `MATCH ()-[r]->() RETURN DISTINCT r.type AS type ORDER BY type`
-	results, err := s.Query(ctx, query, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query edge types: %w", err)
-	}
-
-	types := make([]string, 0, len(results))
-	for _, row := range results {
-		if t, ok := row["type"].(string); ok && t != "" {
-			types = append(types, t)
-		}
-	}
-	return types, nil
-}
-
 // Clear removes all nodes and edges from the graph store.
 func (s *gographStore) Clear(ctx context.Context) error {
 	_, err := s.db.Exec(ctx, "MATCH (n) DETACH DELETE n", nil)
@@ -452,74 +435,19 @@ func (s *gographStore) Clear(ctx context.Context) error {
 	return nil
 }
 
-// GetMultiHopPaths performs multi-hop traversal from starting nodes.
-// If edgeTypes is non-empty, only edges matching those types are traversed.
-func (s *gographStore) GetMultiHopPaths(ctx context.Context, nodeIDs []string, edgeTypes []string, depth int, limit int) ([]*core.Node, []*core.Edge, error) {
-	if len(nodeIDs) == 0 {
-		return nil, nil, nil
-	}
-	if depth < 1 {
-		depth = 1
-	}
-	if limit < 1 {
-		limit = 10
-	}
-
-	nodeMap := make(map[string]*core.Node)
-	edgeMap := make(map[string]*core.Edge)
-	var lastErr error
-
-	for _, nodeID := range nodeIDs {
-		results, err := s.gs.GetNeighborsByTypes(nodeID, depth, 0, edgeTypes)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		for _, result := range results {
-			if result.Node != nil {
-				node := convertNode(result.Node)
-				nodeMap[node.ID] = node
-			}
-			if result.Edge != nil {
-				edge := convertEdge(*result.Edge)
-				edgeMap[edge.ID] = edge
-			}
-		}
-
-		if len(nodeMap) >= limit {
-			break
-		}
-	}
-
-	nodes := make([]*core.Node, 0, len(nodeMap))
-	for _, n := range nodeMap {
-		nodes = append(nodes, n)
-	}
-	edges := make([]*core.Edge, 0, len(edgeMap))
-	for _, e := range edgeMap {
-		edges = append(edges, e)
-	}
-
-	if lastErr != nil {
-		return nodes, edges, fmt.Errorf("get multi-hop paths: %w", lastErr)
-	}
-
-	return nodes, edges, nil
-}
-
 // Close closes the graph store.
 func (s *gographStore) Close(ctx context.Context) error {
 	return s.db.Close()
 }
 
-// GetNodesByChunkIDs retrieves all nodes associated with the given chunk IDs.
-func (s *gographStore) GetNodesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*core.Node, error) {
+// GetByChunkIDs 通过 ChunkID 反查引用该 Chunk 的实体 Node 及其关联 Edge。
+// 一次调用同时返回 Nodes 与 Edges，用于语义检索命中 Chunk 后扩展到关系网络（双线结构双向关联）。
+func (s *gographStore) GetByChunkIDs(ctx context.Context, chunkIDs []string) ([]*core.Node, []*core.Edge, error) {
 	if len(chunkIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	// Build OR clauses for each chunk ID to match against the list property
+	// 构建 chunkID 的 OR 查询参数（Nodes 与 Edges 共用）
 	whereParts := make([]string, len(chunkIDs))
 	params := make(map[string]any, len(chunkIDs))
 	for i, cid := range chunkIDs {
@@ -529,9 +457,72 @@ func (s *gographStore) GetNodesByChunkIDs(ctx context.Context, chunkIDs []string
 	}
 	where := fmt.Sprintf("WHERE %s", strings.Join(whereParts, " OR "))
 
-	results, err := s.Query(ctx, fmt.Sprintf("MATCH (n) %s RETURN n", where), params)
+	// 1. 查询 Nodes
+	nodeResults, err := s.Query(ctx, fmt.Sprintf("MATCH (n) %s RETURN n", where), params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query nodes by chunk IDs: %w", err)
+		return nil, nil, fmt.Errorf("failed to query nodes by chunk IDs: %w", err)
+	}
+
+	nodes := make([]*core.Node, 0, len(nodeResults))
+	for _, result := range nodeResults {
+		nodeData, ok := result["n"].(map[string]any)
+		if !ok {
+			continue
+		}
+		nodes = append(nodes, queryResultToNode(nodeData))
+	}
+
+	// 2. 查询 Edges（使用相同的 chunkIDs，但匹配 r.source_chunk_ids）
+	edgeWhereParts := make([]string, len(chunkIDs))
+	edgeParams := make(map[string]any, len(chunkIDs))
+	for i, cid := range chunkIDs {
+		paramName := fmt.Sprintf("cid%d", i)
+		edgeWhereParts[i] = fmt.Sprintf("$%s IN r.source_chunk_ids", paramName)
+		edgeParams[paramName] = cid
+	}
+	edgeWhere := fmt.Sprintf("WHERE %s", strings.Join(edgeWhereParts, " OR "))
+
+	edgeResults, err := s.Query(ctx, fmt.Sprintf("MATCH ()-[r]->() %s RETURN r", edgeWhere), edgeParams)
+	if err != nil {
+		return nodes, nil, fmt.Errorf("failed to query edges by chunk IDs: %w", err)
+	}
+
+	edges := make([]*core.Edge, 0, len(edgeResults))
+	for _, result := range edgeResults {
+		edgeData, ok := result["r"].(map[string]any)
+		if !ok {
+			continue
+		}
+		edges = append(edges, queryResultToEdge(edgeData))
+	}
+
+	return nodes, edges, nil
+}
+
+// GetByLabels 按 Label 查询节点（如查询所有 Label="Region" 的节点）。
+// 用于 Indexer.Tree() 基于 Region 节点组装知识树。
+func (s *gographStore) GetByLabels(ctx context.Context, labels []string, limit int) ([]*core.Node, error) {
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	if limit < 1 {
+		limit = 100
+	}
+
+	// 构建 Label 的 OR 查询
+	whereParts := make([]string, len(labels))
+	params := make(map[string]any, len(labels))
+	for i, label := range labels {
+		paramName := fmt.Sprintf("lbl%d", i)
+		whereParts[i] = fmt.Sprintf("$%s IN n.labels", paramName)
+		params[paramName] = label
+	}
+	where := fmt.Sprintf("WHERE %s", strings.Join(whereParts, " OR "))
+
+	query := fmt.Sprintf("MATCH (n) %s RETURN n LIMIT %d", where, limit)
+	results, err := s.Query(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query nodes by labels: %w", err)
 	}
 
 	nodes := make([]*core.Node, 0, len(results))
@@ -544,38 +535,6 @@ func (s *gographStore) GetNodesByChunkIDs(ctx context.Context, chunkIDs []string
 	}
 
 	return nodes, nil
-}
-
-// GetEdgesByChunkIDs retrieves all edges associated with the given chunk IDs.
-func (s *gographStore) GetEdgesByChunkIDs(ctx context.Context, chunkIDs []string) ([]*core.Edge, error) {
-	if len(chunkIDs) == 0 {
-		return nil, nil
-	}
-
-	whereParts := make([]string, len(chunkIDs))
-	params := make(map[string]any, len(chunkIDs))
-	for i, cid := range chunkIDs {
-		paramName := fmt.Sprintf("cid%d", i)
-		whereParts[i] = fmt.Sprintf("$%s IN r.source_chunk_ids", paramName)
-		params[paramName] = cid
-	}
-	where := fmt.Sprintf("WHERE %s", strings.Join(whereParts, " OR "))
-
-	results, err := s.Query(ctx, fmt.Sprintf("MATCH ()-[r]->() %s RETURN r", where), params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query edges by chunk IDs: %w", err)
-	}
-
-	edges := make([]*core.Edge, 0, len(results))
-	for _, result := range results {
-		edgeData, ok := result["r"].(map[string]any)
-		if !ok {
-			continue
-		}
-		edges = append(edges, queryResultToEdge(edgeData))
-	}
-
-	return edges, nil
 }
 
 

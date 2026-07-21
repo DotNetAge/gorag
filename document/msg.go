@@ -3,13 +3,13 @@ package document
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 	"unicode/utf16"
 
-	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/richardlehane/mscfb"
 )
 
@@ -32,16 +32,16 @@ const (
 )
 
 // ParseMSG 解析 Outlook MSG 文件（OLE2 复合文档格式）。
-// 提取发件人、主题、日期、收件人等元信息，将正文转为 Markdown。
-func ParseMSG(r io.Reader) (*RawDocument, error) {
+// 提取发件人、主题、日期、收件人等元信息，将正文转为 dataDoc（JSON 字符串）。
+func ParseMSG(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("read msg: %w", err)
+		return nil, fmt.Errorf("读取 MSG 失败: %w", err)
 	}
 
 	oleDoc, err := mscfb.New(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("invalid msg (ole2): %w", err)
+		return nil, fmt.Errorf("无效的 MSG (OLE2) 文件: %w", err)
 	}
 
 	// 遍历所有流，按名称收集
@@ -106,48 +106,51 @@ func ParseMSG(r io.Reader) (*RawDocument, error) {
 		isHTML = body != ""
 	}
 
+	// HTML 正文剥离为纯文本
 	if isHTML {
-		converter := md.NewConverter("", true, &md.Options{HeadingStyle: "atx"})
-		if mdBody, err := converter.ConvertString(body); err == nil {
-			body = mdBody
-		}
+		body = stripHTMLTags(body)
 	}
 
-	// 构建 Markdown 文档
-	var mdBuilder strings.Builder
-	mdBuilder.WriteString(fmt.Sprintf("**From:** %s\n", from))
-	mdBuilder.WriteString(fmt.Sprintf("**Subject:** %s\n", subject))
+	// 构建 JSON 对象
+	emailObj := map[string]any{
+		"from":    from,
+		"subject": subject,
+		"body":    body,
+	}
 	if len(toList) > 0 {
-		mdBuilder.WriteString(fmt.Sprintf("**To:** %s\n", strings.Join(toList, ", ")))
+		emailObj["to"] = strings.Join(toList, ", ")
 	}
 	if len(ccList) > 0 {
-		mdBuilder.WriteString(fmt.Sprintf("**Cc:** %s\n", strings.Join(ccList, ", ")))
+		emailObj["cc"] = strings.Join(ccList, ", ")
 	}
 	if dateStr != "" {
-		mdBuilder.WriteString(fmt.Sprintf("**Date:** %s\n", dateStr))
+		emailObj["date"] = dateStr
 	}
-	mdBuilder.WriteString("\n---\n\n")
-	mdBuilder.WriteString(body)
 
-	rawDoc := NewRawDoc(strings.TrimSpace(mdBuilder.String()))
+	jsonBytes, err := json.Marshal(emailObj)
+	if err != nil {
+		return nil, fmt.Errorf("MSG 转 JSON 失败: %w", err)
+	}
+
+	meta := map[string]any{}
 	if from != "" {
-		rawDoc.SetValue("from", from)
+		meta["from"] = from
 	}
 	if subject != "" {
-		rawDoc.SetValue("subject", subject)
+		meta["subject"] = subject
 	}
 	if len(toList) > 0 {
-		rawDoc.SetValue("to", strings.Join(toList, "; "))
+		meta["to"] = strings.Join(toList, "; ")
 	}
 	if len(ccList) > 0 {
-		rawDoc.SetValue("cc", strings.Join(ccList, "; "))
+		meta["cc"] = strings.Join(ccList, "; ")
 	}
 	if dateStr != "" {
-		rawDoc.SetValue("date", dateStr)
+		meta["date"] = dateStr
 	}
-	rawDoc.SetValue("email", true)
+	meta["email"] = true
 
-	return rawDoc, nil
+	return newParsedDoc(string(jsonBytes), meta, RawDocData), nil
 }
 
 // streamKey 构建 MSG 流名称：__substg1.0_XXXXYYYY

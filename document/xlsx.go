@@ -1,15 +1,21 @@
 package document
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/tealeg/xlsx"
 )
 
-// ParseXlsx reads an .xlsx file and converts it to Markdown tables.
-func ParseXlsx(r io.Reader) (*RawDocument, error) {
+// ParseXlsx 读取 .xlsx 文件并归一化为 dataDoc（内容为 JSON 字符串）。
+//
+// 归一化策略：
+//   - 每个 sheet 转为一个对象，包含 name 和 rows
+//   - 每个 sheet 的第一行作为表头，后续每行转为对象
+//   - 输出 JSON 数组字符串：[{"sheet":"Sheet1","rows":[...]},...]
+//   - 元数据包含 sheet_count
+func ParseXlsx(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -20,72 +26,82 @@ func ParseXlsx(r io.Reader) (*RawDocument, error) {
 		return nil, err
 	}
 
-	var mdBuilder strings.Builder
+	sheets := make([]map[string]any, 0, len(xlFile.Sheets))
 	sheetNames := []string{}
 
-	for i, sheet := range xlFile.Sheets {
+	for _, sheet := range xlFile.Sheets {
 		sheetNames = append(sheetNames, sheet.Name)
-		if i > 0 {
-			mdBuilder.WriteString("\n---\n\n")
-		}
-		mdBuilder.WriteString(fmt.Sprintf("## Sheet %d: %s\n\n", i+1, sheet.Name))
 
-		if len(sheet.Rows) == 0 {
+		// 收集所有行
+		allRows := sheet.Rows
+		if len(allRows) == 0 {
+			sheets = append(sheets, map[string]any{
+				"sheet": sheet.Name,
+				"rows":  []map[string]string{},
+			})
 			continue
 		}
 
-		// Normalize column count
+		// 计算 maxCol
 		maxCol := 0
-		for _, row := range sheet.Rows {
+		for _, row := range allRows {
 			if len(row.Cells) > maxCol {
 				maxCol = len(row.Cells)
 			}
 		}
 		if maxCol == 0 {
+			sheets = append(sheets, map[string]any{
+				"sheet": sheet.Name,
+				"rows":  []map[string]string{},
+			})
 			continue
 		}
 
-		for ri, row := range sheet.Rows {
-			rowData := make([]string, maxCol)
+		// 第一行作为表头
+		headers := make([]string, maxCol)
+		for i := 0; i < maxCol; i++ {
+			if i < len(allRows[0].Cells) {
+				headers[i] = allRows[0].Cells[i].String()
+			} else {
+				headers[i] = fmt.Sprintf("col_%d", i+1)
+			}
+		}
+
+		// 数据行转为对象数组
+		rows := make([]map[string]string, 0, len(allRows)-1)
+		for i := 1; i < len(allRows); i++ {
+			row := allRows[i]
+			obj := make(map[string]string, maxCol)
 			hasContent := false
 			for ci := 0; ci < maxCol; ci++ {
 				if ci < len(row.Cells) {
-					val := strings.TrimSpace(row.Cells[ci].Value)
-					rowData[ci] = val
+					val := row.Cells[ci].String()
+					obj[headers[ci]] = val
 					if val != "" {
 						hasContent = true
 					}
+				} else {
+					obj[headers[ci]] = ""
 				}
 			}
-			if !hasContent {
-				continue
-			}
-
-			escaped := make([]string, maxCol)
-			for ci, cell := range rowData {
-				escaped[ci] = escapeMarkdown(cell)
-			}
-			mdBuilder.WriteString("| " + strings.Join(escaped, " | ") + " |\n")
-
-			if ri == 0 {
-				seps := make([]string, maxCol)
-				for k := range seps {
-					seps[k] = "---"
-				}
-				mdBuilder.WriteString("| " + strings.Join(seps, " | ") + " |\n")
+			if hasContent {
+				rows = append(rows, obj)
 			}
 		}
-		mdBuilder.WriteString("\n")
+
+		sheets = append(sheets, map[string]any{
+			"sheet": sheet.Name,
+			"rows":  rows,
+		})
 	}
 
-	return NewRawDoc(mdBuilder.String()).
-		SetValue("sheet_count", len(sheetNames)), nil
-}
+	jsonBytes, err := json.Marshal(sheets)
+	if err != nil {
+		return nil, fmt.Errorf("XLSX 转 JSON 失败: %w", err)
+	}
 
-// escapeMarkdown escapes pipe and newline in markdown table cells.
-func escapeMarkdown(text string) string {
-	text = strings.ReplaceAll(text, "|", "\\|")
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, "\r", "")
-	return text
+	meta := map[string]any{
+		"sheet_count": len(sheetNames),
+	}
+	return newParsedDoc(string(jsonBytes), meta, RawDocData), nil
 }

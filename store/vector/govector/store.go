@@ -396,26 +396,10 @@ func extractChunkIndex(v *core.Vector) int {
 	return int(index)
 }
 
-// List returns paginated vectors from the store.
-// Uses an empty filter to retrieve all points, then applies offset/limit.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - offset: Number of vectors to skip (0-based)
-//   - limit: Maximum number of vectors to return
-//
-// Returns:
-//   - []*core.Vector: The paginated vectors
-//   - error: Any error that occurred during retrieval
-func (s *Store) List(ctx context.Context, offset, limit int) ([]*core.Vector, error) {
-	vectors, _, err := s.ListFiltered(ctx, offset, limit, nil)
-	return vectors, err
-}
-
-// ListFiltered returns paginated vectors filtered by metadata conditions.
-// Each FilterCondition is ANDed together (all must match).
-// Returns the filtered vectors, total count before pagination, and any error.
-func (s *Store) ListFiltered(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]*core.Vector, int, error) {
+// List 分页获取向量，支持可选的元数据过滤条件。
+// filters 为 nil 时返回全部，非 nil 时按条件过滤；多个 FilterCondition 之间为 AND 语义。
+// 返回分页结果与过滤前总数。
+func (s *Store) List(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]*core.Vector, int, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -426,15 +410,14 @@ func (s *Store) ListFiltered(ctx context.Context, offset, limit int, filters []c
 		offset = 0
 	}
 
-	// Build govector filter from generic filter conditions
+	// 构建 govector 过滤器（filters 为 nil 或空时 GetPointsByFilter 返回全部）
 	gvFilter := &gvcore.Filter{}
 	for _, fc := range filters {
 		cond := gvcore.Condition{
 			Key:  fc.Key,
 			Type: gvcore.ConditionType(fc.Type),
 		}
-		// Normalize filter value: JSON numbers come as float64, but protobuf
-		// stores int metadata as int64. Direct comparison fails in Go.
+		// JSON 数字以 float64 传入，但 protobuf 将 int 元数据存为 int64，直接比较会失败
 		val := fc.Value
 		if f64, ok := val.(float64); ok && f64 == float64(int64(f64)) {
 			val = int64(f64)
@@ -452,12 +435,12 @@ func (s *Store) ListFiltered(ctx context.Context, offset, limit int, filters []c
 
 	points, err := s.collection.GetPointsByFilter(gvFilter)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list filtered vectors: %w", err)
+		return nil, 0, fmt.Errorf("failed to list vectors: %w", err)
 	}
 
 	total := len(points)
 
-	// Apply pagination
+	// 分页
 	end := offset + limit
 	if end > len(points) {
 		end = len(points)

@@ -6,9 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/DotNetAge/gorag"
+	gorag "github.com/DotNetAge/gorag/v2"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/formatter"
+	"github.com/DotNetAge/gorag/v2/indexer"
 	"github.com/DotNetAge/gorag/v2/utils"
 	"github.com/spf13/cobra"
 )
@@ -175,26 +176,52 @@ func runInit(cmd *cobra.Command, args []string) {
 	spinner := ui.NewSpinner("正在初始化...")
 	spinner.Start()
 
-	// 构建 RAGOption 列表
-	var opts []gorag.RAGOption
-	if initName != "" {
-		opts = append(opts, gorag.WithName(initName))
+	// gorag.Init 创建 .rag 目录结构，gorag.Open 打开并实例化索引器
+	// 临时兼容：dataDir 必须以 .rag 结尾
+	ragDir := dataDir
+	if filepath.Ext(ragDir) != ".rag" {
+		ragDir = ragDir + ".rag"
 	}
-	opts = append(opts, gorag.WithIndexType(initType))
-	opts = append(opts, gorag.WithEmbeddingModelFile(modelPath))
 
-	idx, err := gorag.New(dataDir, opts...)
-	if err != nil {
+	// 1. 创建 .rag 目录结构
+	if err := gorag.Init(ragDir); err != nil {
 		spinner.Stop()
 		ui.Error("初始化失败: %v", err)
 		os.Exit(1)
+	}
+
+	// 2. 写入 LLM 配置（如果有的话）和 embedder 配置到 config.yml
+	cfg, err := gorag.LoadConfig(ragDir)
+	if err != nil {
+		spinner.Stop()
+		ui.Error("加载配置失败: %v", err)
+		os.Exit(1)
+	}
+	cfg.Indexer.Type = initType
+	if modelPath != "" {
+		cfg.Embedding.ModelFile = modelPath
+	}
+	if err := gorag.SaveConfig(ragDir, cfg); err != nil {
+		spinner.Stop()
+		ui.Error("保存配置失败: %v", err)
+		os.Exit(1)
+	}
+
+	// 3. 打开 RAG 库（仅在配置完整时才打开）
+	var idx indexer.Indexer
+	if cfg.Embedding.ModelFile != "" {
+		idx, err = gorag.Open(ragDir)
+		if err != nil {
+			spinner.Stop()
+			ui.Warning("索引器未就绪（配置可能不完整）: %v", err)
+		}
 	}
 
 	spinner.Stop()
 
 	ui.Success("RAG 库初始化成功")
 	ui.Section("配置信息")
-	ui.KeyValue("目录", dataDir)
+	ui.KeyValue("目录", ragDir)
 	ui.KeyValue("类型", initType)
 	if modelPath != "" {
 		ui.KeyValue("模型", modelPath)
@@ -202,10 +229,11 @@ func runInit(cmd *cobra.Command, args []string) {
 	if initName != "" {
 		ui.KeyValue("名称", initName)
 	}
-	ui.KeyValue("索引器", idx.Name())
-
-	if closer, ok := idx.(interface{ Close() error }); ok {
-		closer.Close()
+	if idx != nil {
+		ui.KeyValue("索引器", idx.Name())
+		if closer, ok := idx.(indexer.IndexerCloser); ok {
+			closer.Close(context.Background())
+		}
 	}
 }
 
@@ -237,7 +265,7 @@ func runSearch(cmd *cobra.Command, args []string) {
 	spinner = ui.NewSpinner("正在搜索...")
 	spinner.Start()
 
-	hits, err := idx.Search(context.Background(), idx.NewQuery(searchText))
+	hit, err := idx.Search(context.Background(), idx.NewQuery(searchText))
 	if err != nil {
 		spinner.Stop()
 		ui.Error("搜索失败: %v", err)
@@ -246,14 +274,18 @@ func runSearch(cmd *cobra.Command, args []string) {
 
 	spinner.Stop()
 
-	if len(hits) > topK {
-		hits = hits[:topK]
+	if hit != nil && len(hit.Chunks) > topK {
+		hit.Chunks = hit.Chunks[:topK]
 	}
 
-	ui.Success("找到 %d 个结果", len(hits))
+	resultCount := 0
+	if hit != nil {
+		resultCount = len(hit.Chunks)
+	}
+	ui.Success("找到 %d 个结果", resultCount)
 
 	// 格式化输出
-	fmt.Println(formatOutput(hits))
+	fmt.Println(formatOutput(hit))
 }
 
 // needsModel 检查索引器类型是否需要模型
@@ -275,20 +307,20 @@ func getModelDir() string {
 }
 
 // formatOutput 格式化输出
-func formatOutput(hits []core.Hit) string {
+func formatOutput(hit *core.Hit) string {
 	switch outputFormat {
 	case "json":
-		return formatter.NewJSONFormatter().FormatAll(hits)
+		return formatter.NewJSONFormatter().FormatAll(hit)
 	case "prompt":
 		return formatter.NewPromptFormatter(
 			formatter.WithContentMaxPrompt(contentMax),
 			formatter.WithIncludeScore(showScore),
-		).FormatForRAG(hits, searchText)
+		).FormatForRAG(hit, searchText)
 	default:
 		return formatter.NewTerminalFormatter(
 			formatter.WithShowScore(showScore),
 			formatter.WithShowDocID(showDocID),
 			formatter.WithContentMax(contentMax),
-		).FormatAll(hits)
+		).FormatAll(hit)
 	}
 }

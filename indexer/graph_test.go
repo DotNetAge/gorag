@@ -40,10 +40,6 @@ type mockEmbedder struct {
 	dim int
 }
 
-func (m *mockEmbedder) Calc(chunk *core.Chunk) (*core.Vector, error) {
-	return m.CalcText(chunk.Content)
-}
-
 func (m *mockEmbedder) CalcText(text string) (*core.Vector, error) {
 	vec := make([]float32, m.dim)
 	// 基于文本哈希生成确定性向量，避免全零向量导致搜索退化
@@ -61,18 +57,6 @@ func (m *mockEmbedder) CalcImage(data []byte) (*core.Vector, error) {
 		vec[i] = rand.Float32()
 	}
 	return &core.Vector{Values: vec}, nil
-}
-
-func (m *mockEmbedder) Bulk(chunks []*core.Chunk) ([]*core.Vector, error) {
-	vecs := make([]*core.Vector, 0, len(chunks))
-	for _, c := range chunks {
-		v, err := m.Calc(c)
-		if err != nil {
-			return nil, err
-		}
-		vecs = append(vecs, v)
-	}
-	return vecs, nil
 }
 
 func (m *mockEmbedder) Dim() int          { return m.dim }

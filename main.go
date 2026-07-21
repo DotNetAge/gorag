@@ -2,37 +2,29 @@ package gorag
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/embedder"
 	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/llm"
 	"github.com/DotNetAge/gorag/v2/logging"
-	"github.com/DotNetAge/gorag/v2/store/doc/bleve"
 	"github.com/DotNetAge/gorag/v2/store/graph/gograph"
 	"github.com/DotNetAge/gorag/v2/store/vector/govector"
 	"github.com/DotNetAge/gorag/v2/utils"
 	"gopkg.in/yaml.v3"
 )
 
-type Config struct {
-	Name     string `yaml:"name"`      // RAG 名称
-	Type     string `yaml:"type"`      // 索引器类型：hybrid, semantic, graph
-	EmbeddingModelFile string `yaml:"embedding_model_file"` // 向量化模型（onnx 文件路径）
+// ragSuffix .rag 库文件的后缀（目录实现，文件认知）。
+const ragSuffix = ".rag"
 
-	// LLM 模型配置（用于 GraphIndexer）
-	APIKey          string `yaml:"api_key,omitempty"`
-	BaseURL         string `yaml:"base_url,omitempty"`
-	Model           string `yaml:"model,omitempty"`
-	Language        string `yaml:"language,omitempty"`
-	MaxTokens       int    `yaml:"max_tokens,omitempty"`
-	ThinkingBudget  int    `yaml:"thinking_budget,omitempty"`
-}
+// configFileName 配置文件名。
+const configFileName = "config.yml"
 
+// 环境变量常量
 const (
-	configFileName   = "config.yml"
 	GORAG_MODEL_PATH = "GORAG_MODEL_PATH"
 	GORAG_BASE_URL   = "GORAG_BASE_URL"
 	GORAG_API_KEY    = "GORAG_API_KEY"
@@ -40,178 +32,431 @@ const (
 	GORAG_MODEL      = "GORAG_MODEL"
 )
 
+// Config .rag 库的配置文件结构（config.yml）。
+// 分层结构 = storage + embedding + llm + indexer + query。
+// api_key 不写入 config.yml，独立存于 .rag/.api_key（权限 600）。
+type Config struct {
+	Version  int           `yaml:"version"`           // 配置版本号
+	Storage  StorageConfig `yaml:"storage"`           // 存储路径配置
+	Embedding EmbeddingConfig `yaml:"embedding"`       // 向量模型配置
+	LLM      LLMConfig     `yaml:"llm"`               // LLM 配置（不含 APIKey）
+	Indexer  IndexerConfig `yaml:"indexer"`           // 索引器配置
+	Query    QueryConfig   `yaml:"query"`             // 查询配置
+}
+
+// StorageConfig 存储路径配置
+type StorageConfig struct {
+	VectorsDir string `yaml:"vectors_dir"` // 向量库目录
+	GraphsDir  string `yaml:"graphs_dir"`  // 图库目录
+	CachesDir  string `yaml:"caches_dir"`  // 缓存目录
+	LogsDir    string `yaml:"logs_dir"`    // 日志目录
+	MetaDB     string `yaml:"meta_db"`     // 元数据 SQLite 文件名
+}
+
+// EmbeddingConfig 向量模型配置
+type EmbeddingConfig struct {
+	ModelFile  string `yaml:"model_file"`  // ONNX 模型文件路径
+	Dimension  int    `yaml:"dimension"`   // 向量维度
+}
+
+// LLMConfig LLM 配置（APIKey 不在此处，存于 .rag/.api_key）
+type LLMConfig struct {
+	BaseURL        string `yaml:"base_url"`
+	Model          string `yaml:"model"`
+	Language       string `yaml:"language"`         // 内容语言（如 Chinese）
+	MaxTokens      int    `yaml:"max_tokens"`       // 模型最大输出 token
+	ContextLength  int    `yaml:"context_length"`   // 模型上下文长度
+	ThinkingBudget int    `yaml:"thinking_budget"`  // 思考模式 token 预算（0=默认）
+	APIKeyFile     string `yaml:"api_key_file,omitempty"` // 外部 API Key 文件路径（可选）
+}
+
+// IndexerConfig 索引器配置
+type IndexerConfig struct {
+	Type string `yaml:"type"` // semantic | graph | hyper
+}
+
+// QueryConfig 查询配置
+type QueryConfig struct {
+	SemanticWeight float32 `yaml:"semantic_weight"` // 语义检索权重
+	GraphWeight    float32 `yaml:"graph_weight"`    // 图检索权重
+}
+
+// RAGOption Open 函数的配置选项
 type RAGOption func(*Config)
 
+// WithLLM 注入 gochat 客户端对应的 LLM 配置。
+// 注：实际的 chat.Client 通过此函数从配置实例化并返回，供 indexer 使用。
+// LLM 在应用层实例化，indexer 包不再创建 LLM 客户端。
+func WithLLM(llmCfg LLMConfig) RAGOption {
+	return func(cfg *Config) {
+		cfg.LLM = llmCfg
+	}
+}
+
+// WithEmbeddingModelFile 设置向量模型文件路径
 func WithEmbeddingModelFile(modelFile string) RAGOption {
 	return func(cfg *Config) {
-		cfg.EmbeddingModelFile = modelFile
+		cfg.Embedding.ModelFile = modelFile
 	}
 }
 
+// WithIndexType 设置索引器类型
 func WithIndexType(indexType string) RAGOption {
 	return func(cfg *Config) {
-		cfg.Type = indexType
+		cfg.Indexer.Type = indexType
 	}
 }
 
+// WithName 设置 RAG 库命名（兼容旧 API，仅写入 Storage 命名，无实际作用）
 func WithName(name string) RAGOption {
-	return func(cfg *Config) {
-		cfg.Name = name
+	// 库名即目录名，此选项仅为兼容旧调用方
+	return func(cfg *Config) {}
+}
+
+// defaultConfig 生成默认配置
+func defaultConfig() *Config {
+	return &Config{
+		Version: 1,
+		Storage: StorageConfig{
+			VectorsDir: "vectors",
+			GraphsDir:  "graphs",
+			CachesDir:  "caches",
+			LogsDir:    "logs",
+			MetaDB:     "meta.db",
+		},
+		Embedding: EmbeddingConfig{
+			Dimension: 512,
+		},
+		LLM: LLMConfig{
+			Language:      "Chinese",
+			MaxTokens:     128000,
+			ContextLength: 128000,
+		},
+		Indexer: IndexerConfig{
+			Type: "semantic",
+		},
+		Query: QueryConfig{
+			SemanticWeight: 0.8,
+			GraphWeight:    0.2,
+		},
 	}
 }
 
-// WithLLMModel 设置 LLM 模型配置（用于 GraphIndexer）。
-// 配置内容会持久化到 config.yml 中，Open 时自动恢复。
-func WithLLMModel(modelCfg indexer.ModelConfig) RAGOption {
-	return func(cfg *Config) {
-		cfg.APIKey = modelCfg.APIKey
-		cfg.BaseURL = modelCfg.BaseURL
-		cfg.Model = modelCfg.Model
-		cfg.Language = modelCfg.Language
-		cfg.MaxTokens = modelCfg.MaxTokens
-		cfg.ThinkingBudget = modelCfg.ThinkingBudget
-	}
-}
-
-// ToLLMConfig 将 Config 中的 LLM 字段转换为 indexer.ModelConfig。
-// 如果 model 为空，返回 nil。
-func (c *Config) ToLLMConfig() *indexer.ModelConfig {
-	if c.Model == "" {
-		return nil
-	}
-	lang := c.Language
-	if lang == "" {
-		lang = "Chinese"
-	}
-	maxTokens := c.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 128000
-	}
-	return &indexer.ModelConfig{
-		APIKey:         c.APIKey,
-		BaseURL:        c.BaseURL,
-		Model:          c.Model,
-		Language:       lang,
-		MaxTokens:      maxTokens,
-		ThinkingBudget: c.ThinkingBudget,
-	}
-}
-
-// New 创建新的 RAG 索引实例。
+// Init 在指定路径创建 .rag 库目录结构。
+// 物理结构 = config.yml + .api_key + .ragignore + .lock +
+// meta.db + vectors/ + graphs/ + caches/ + logs/。
 //
-// 按代际自动选择索引器：
-//   - 有 LLM 模型配置（WithLLMModel）→ GraphIndexer（第三代，最强）
-//   - 无 LLM 模型配置 → HybridIndexer（第二代，semantic + fulltext）
-//
-// 如果数据目录不存在则创建，生成配置文件和子目录结构。
-func New(dataDir string, opts ...RAGOption) (core.Indexer, error) {
-	cfg := &Config{
-		Name: "gorag",
-		Type: "hybrid",
+// ragDir 必须以 .rag 结尾，否则返回错误。
+// 已存在的 .rag 目录会被复用（不报错），但缺失的子目录和文件会被补齐。
+func Init(ragDir string) error {
+	if !strings.HasSuffix(ragDir, ragSuffix) {
+		return fmt.Errorf("路径必须以 .rag 结尾（RAG 库文件）: %s", ragDir)
 	}
 
+	// 1. 创建根目录
+	if err := os.MkdirAll(ragDir, 0755); err != nil {
+		return fmt.Errorf("创建 .rag 目录失败: %w", err)
+	}
+
+	// 2. 创建子目录
+	subDirs := []string{"vectors", "graphs", "caches", "logs"}
+	for _, sub := range subDirs {
+		if err := os.MkdirAll(filepath.Join(ragDir, sub), 0755); err != nil {
+			return fmt.Errorf("创建 %s 子目录失败: %w", sub, err)
+		}
+	}
+
+	// 3. 写入默认 config.yml（已存在则跳过）
+	configPath := filepath.Join(ragDir, configFileName)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		cfg := defaultConfig()
+		if err := saveConfig(ragDir, cfg); err != nil {
+			return fmt.Errorf("写入 config.yml 失败: %w", err)
+		}
+	}
+
+	// 4. 生成 .ragignore（已存在则跳过）
+	ragignorePath := filepath.Join(ragDir, ".ragignore")
+	if _, err := os.Stat(ragignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(ragignorePath, []byte(defaultRagignoreContent), 0644); err != nil {
+			return fmt.Errorf("写入 .ragignore 失败: %w", err)
+		}
+	}
+
+	// 5. 创建空 .lock 文件（运行时通过 flock 加锁）
+	lockPath := filepath.Join(ragDir, ".lock")
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
+			return fmt.Errorf("写入 .lock 失败: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// defaultRagignoreContent .ragignore 默认内容
+const defaultRagignoreContent = `# 敏感信息
+.api_key
+
+# 运行时锁文件
+.lock
+
+# 数据库（体积大，不入版本控制）
+vectors/
+graphs/
+caches/
+meta.db
+meta.db-wal
+meta.db-shm
+
+# 日志
+logs/
+`
+
+// Open 打开已存在的 .rag 库。
+// 强制 .rag 后缀校验，不兼容旧 dataDir。
+// opts 可注入 WithLLM、WithEmbeddingModelFile 等。
+//
+// 行为：
+//   - 校验路径以 .rag 结尾
+//   - 加载 config.yml
+//   - 根据 cfg.Indexer.Type 创建索引器
+//   - 若有 LLM 配置，则创建 gochat 客户端并注入 GraphIndexer/HyperIndexer
+func Open(ragDir string, opts ...RAGOption) (indexer.Indexer, error) {
+	if !strings.HasSuffix(ragDir, ragSuffix) {
+		return nil, fmt.Errorf("路径必须以 .rag 结尾（RAG 库文件）: %s", ragDir)
+	}
+
+	// 1. 检查目录存在
+	info, err := os.Stat(ragDir)
+	if err != nil {
+		return nil, fmt.Errorf(".rag 库不存在: %w（提示：请先运行 grag init）", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s 不是目录（.rag 库必须是目录）", ragDir)
+	}
+
+	// 2. 加载配置文件
+	cfg, err := loadConfig(ragDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. 应用传入的选项（覆盖配置文件中的字段）
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	// 1. 创建数据目录
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create data directory: %w", err)
+	// 4. 校验 embedder 配置（必须有 model_file）
+	if cfg.Embedding.ModelFile == "" {
+		return nil, fmt.Errorf("未配置 embedder，请运行: grag config embedder <model-path>")
+	}
+	if _, err := os.Stat(cfg.Embedding.ModelFile); os.IsNotExist(err) {
+		return nil, fmt.Errorf("embedder 模型文件不存在: %s", cfg.Embedding.ModelFile)
 	}
 
-	// 2. 检查模型文件是否存在
-	if cfg.EmbeddingModelFile != "" {
-		if _, err := os.Stat(cfg.EmbeddingModelFile); os.IsNotExist(err) {
-			return nil, fmt.Errorf("model file not found: %s", cfg.EmbeddingModelFile)
-		}
-	} else {
-		return nil, fmt.Errorf("model file is empty")
-	}
-
-	// 3. 检测 LLM 配置 → 选择代际
-	hasLLM := cfg.Model != ""
-	if hasLLM {
-		cfg.Type = "graph"
-	} else {
-		cfg.Type = "hybrid"
-	}
-
-	// 4. 保存配置文件
-	if err := saveConfig(dataDir, cfg); err != nil {
-		return nil, err
-	}
-
-	// 5. 创建子目录
-	subDirs := []string{"vectors", "graphs", "fulltexts", "caches"}
-	for _, subDir := range subDirs {
-		dirPath := filepath.Join(dataDir, subDir)
-		if err := os.MkdirAll(dirPath, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create %s directory: %w", subDir, err)
-		}
-	}
-
-	// 6. 实例化索引器
-	return createIndexerByName(cfg.Type, dataDir, cfg.EmbeddingModelFile)
+	// 5. 实例化索引器
+	return createIndexer(ragDir, cfg)
 }
 
-// Open 打开已存在的 RAG 索引实例
-// 从数据目录读取配置文件并恢复索引器
-func Open(dataDir string) (core.Indexer, error) {
-	// 1. 检查数据目录是否存在
-	info, err := os.Stat(dataDir)
+// createIndexer 根据 cfg.Indexer.Type 实例化索引器
+//
+// 策略：
+//   - type=semantic → SemanticIndexer（仅向量库 + embedder）
+//   - type=graph    → GraphIndexer（纯图谱模式，不需要 LLM/extractor，独立使用一般不推荐）
+//   - type=hyper    → HyperIndexer（语义线 + 关系线，生产推荐模式）
+//   - 未显式配置 type 时：有 LLM 默认 hyper，无 LLM 默认 semantic
+func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
+	// 创建 embedder
+	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(cfg.Embedding.ModelFile))
 	if err != nil {
-		return nil, fmt.Errorf("data directory not found: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", dataDir)
+		return nil, fmt.Errorf("创建 embedder 失败: %w", err)
 	}
 
-	// 2. 加载配置文件
-	cfg, err := loadConfig(dataDir)
+	// 创建向量库
+	vectorStore, err := createVectorDB(ragDir, clip)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("创建向量库失败: %w", err)
 	}
 
-	// 3. 检查模型文件是否存在
-	if cfg.EmbeddingModelFile != "" {
-		if _, err := os.Stat(cfg.EmbeddingModelFile); os.IsNotExist(err) {
-			return nil, fmt.Errorf("model file not found: %s", cfg.EmbeddingModelFile)
+	// 判断是否有 LLM 配置
+	hasLLM := cfg.LLM.Model != "" && cfg.LLM.BaseURL != ""
+
+	// 自动选择索引器类型：有 LLM 默认 hyper（生产推荐），无 LLM 默认 semantic
+	idxType := cfg.Indexer.Type
+	if idxType == "" {
+		if hasLLM {
+			idxType = "hyper"
+		} else {
+			idxType = "semantic"
 		}
 	}
 
-	// 4. 实例化索引器
-	return createIndexerByName(cfg.Type, dataDir, cfg.EmbeddingModelFile)
+	switch idxType {
+	case "semantic":
+		// 纯语义模式：仅向量库 + embedder
+		return indexer.NewSemanticIndexer(vectorStore, clip)
+
+	case "graph":
+		// 纯图谱模式（独立使用，一般不推荐）
+		// GraphIndexer 不需要 LLM/extractor，只需要 GraphStore
+		graphStore, gErr := createGraphDB(ragDir)
+		if gErr != nil {
+			return nil, fmt.Errorf("创建图库失败: %w", gErr)
+		}
+		return indexer.New(graphStore)
+
+	case "hyper":
+		// 生产推荐模式：语义线 + 关系线
+		// 1. 可选创建 Summarizer（hasLLM 时尝试创建，失败降级为 nil，不阻塞主流程）
+		var summarizer llm.Summarizer
+		if hasLLM {
+			apiKey, keyErr := ResolveAPIKey(ragDir)
+			if keyErr != nil {
+				return nil, fmt.Errorf("解析 APIKey 失败: %w", keyErr)
+			}
+			summarizerCfg := llm.Config{
+				APIKey:        apiKey,
+				BaseURL:       cfg.LLM.BaseURL,
+				Model:         cfg.LLM.Model,
+				Language:      cfg.LLM.Language,
+				MaxTokens:     cfg.LLM.MaxTokens,
+				ContextLength: cfg.LLM.ContextLength,
+			}
+			if sm, smErr := llm.NewSummarizer(summarizerCfg, logging.DefaultNoopLogger()); smErr == nil {
+				summarizer = sm
+			}
+			// Summarizer 创建失败不阻塞，summarizer 保持为 nil，降级为不带摘要增强的 SemanticIndexer
+		}
+
+		// 2. 创建 SemanticIndexer（summarizer 为 nil 时不注入）
+		var semantic indexer.Indexer
+		if summarizer != nil {
+			semantic, err = indexer.NewSemanticIndexer(
+				vectorStore, clip,
+				indexer.WithSemanticSummarizer(summarizer),
+			)
+		} else {
+			semantic, err = indexer.NewSemanticIndexer(vectorStore, clip)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("创建 SemanticIndexer 失败: %w", err)
+		}
+
+		// 3. 创建 GraphIndexer（不需要 LLM/extractor，只持有 GraphStore）
+		graphStore, gErr := createGraphDB(ragDir)
+		if gErr != nil {
+			return nil, fmt.Errorf("创建图库失败: %w", gErr)
+		}
+		graph, gErr := indexer.New(graphStore)
+		if gErr != nil {
+			return nil, fmt.Errorf("创建 GraphIndexer 失败: %w", gErr)
+		}
+
+		// 4. 组合为 HyperIndexer（semantic 必传，graph 可为 nil 但此处不为 nil）
+		return indexer.NewHyperIndexer(semantic, graph)
+
+	default:
+		return nil, fmt.Errorf("不支持的索引器类型: %s（仅支持 semantic/graph/hyper）", idxType)
+	}
 }
 
-// loadConfig 从数据目录加载配置文件
-func loadConfig(dataDir string) (*Config, error) {
-	configPath := filepath.Join(dataDir, configFileName)
-	configData, err := os.ReadFile(configPath)
+// loadConfig 从 .rag 目录加载配置文件
+func loadConfig(ragDir string) (*Config, error) {
+	configPath := filepath.Join(ragDir, configFileName)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("读取 config.yml 失败: %w", err)
 	}
-
 	var cfg Config
-	if err := yaml.Unmarshal(configData, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("解析 config.yml 失败: %w", err)
+	}
+	// 兼容默认值
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	if cfg.Storage.VectorsDir == "" {
+		cfg.Storage.VectorsDir = "vectors"
+	}
+	if cfg.Storage.GraphsDir == "" {
+		cfg.Storage.GraphsDir = "graphs"
+	}
+	if cfg.Storage.CachesDir == "" {
+		cfg.Storage.CachesDir = "caches"
+	}
+	if cfg.Storage.LogsDir == "" {
+		cfg.Storage.LogsDir = "logs"
+	}
+	if cfg.Storage.MetaDB == "" {
+		cfg.Storage.MetaDB = "meta.db"
+	}
+	if cfg.LLM.Language == "" {
+		cfg.LLM.Language = "Chinese"
+	}
+	if cfg.LLM.MaxTokens <= 0 {
+		cfg.LLM.MaxTokens = 128000
+	}
+	if cfg.LLM.ContextLength <= 0 {
+		cfg.LLM.ContextLength = 128000
+	}
+	if cfg.Query.SemanticWeight == 0 && cfg.Query.GraphWeight == 0 {
+		cfg.Query.SemanticWeight = 0.8
+		cfg.Query.GraphWeight = 0.2
 	}
 	return &cfg, nil
 }
 
-// saveConfig 保存配置文件到数据目录
-func saveConfig(dataDir string, cfg *Config) error {
-	configPath := filepath.Join(dataDir, configFileName)
-	configData, err := yaml.Marshal(cfg)
+// saveConfig 保存配置到 .rag 目录
+func saveConfig(ragDir string, cfg *Config) error {
+	configPath := filepath.Join(ragDir, configFileName)
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
+		return fmt.Errorf("序列化 config.yml 失败: %w", err)
 	}
-	return os.WriteFile(configPath, configData, 0644)
+	return os.WriteFile(configPath, data, 0644)
 }
 
-// CheckModel 检查模型文件是否存在，如果不存在则从 HuggingFace 下载
-// modelId: HuggingFace 模型 ID，如 "Xenova/chinese-clip-vit-base-patch16"
-// modelFile: 模型文件路径，如 "onnx/model.onnx"
-// 返回模型文件的完整路径
+// SaveConfig 更新 .rag 目录的 config.yml（公开 API，供 grag config 调用）
+func SaveConfig(ragDir string, cfg *Config) error {
+	return saveConfig(ragDir, cfg)
+}
+
+// LoadConfig 从 .rag 目录加载 config.yml（公开 API）
+func LoadConfig(ragDir string) (*Config, error) {
+	return loadConfig(ragDir)
+}
+
+// createVectorDB 创建向量库
+func createVectorDB(ragDir string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {
+	name := filepath.Base(ragDir)
+	cfg, _ := loadConfig(ragDir)
+	vectorsDir := cfg.Storage.VectorsDir
+	if vectorsDir == "" {
+		vectorsDir = "vectors"
+	}
+	vectorDbFile := filepath.Join(ragDir, vectorsDir, name+".db")
+	return govector.NewStore(
+		govector.WithCollection(name),
+		govector.WithDimension(clip.Dim()),
+		govector.WithDBPath(vectorDbFile),
+		govector.WithHNSW(true),
+	)
+}
+
+// createGraphDB 创建图库
+func createGraphDB(ragDir string) (core.GraphStore, error) {
+	name := filepath.Base(ragDir)
+	cfg, _ := loadConfig(ragDir)
+	graphsDir := cfg.Storage.GraphsDir
+	if graphsDir == "" {
+		graphsDir = "graphs"
+	}
+	graphDbFile := filepath.Join(ragDir, graphsDir, name+".db")
+	return gograph.NewGraphStore(graphDbFile)
+}
+
+// CheckModel 检查模型文件是否存在，不存在则从 HuggingFace 下载
 func CheckModel(modelId, modelFile string) (string, error) {
 	baseDir := os.Getenv(GORAG_MODEL_PATH)
 	if baseDir == "" {
@@ -224,17 +469,15 @@ func CheckModel(modelId, modelFile string) (string, error) {
 	}
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create model directory: %w", err)
+		return "", fmt.Errorf("创建模型目录失败: %w", err)
 	}
 
 	onnxFile := filepath.Join(baseDir, modelId, modelFile)
 
 	if _, err := os.Stat(onnxFile); os.IsNotExist(err) {
-		slog.Info("Model file not found, downloading from HuggingFace", "model", modelId, "file", modelFile)
-
 		downloader, err := utils.NewModelDownloader(baseDir)
 		if err != nil {
-			return "", fmt.Errorf("failed to create model downloader: %w", err)
+			return "", fmt.Errorf("创建模型下载器失败: %w", err)
 		}
 
 		files := []string{modelFile}
@@ -243,135 +486,12 @@ func CheckModel(modelId, modelFile string) (string, error) {
 		}
 
 		if _, err := downloader.Download(modelId, files); err != nil {
-			slog.Error("Failed to download model", "error", err)
-			return "", fmt.Errorf("failed to download model: %w", err)
+			return "", fmt.Errorf("下载模型失败: %w", err)
 		}
-
-		slog.Info("Model downloaded successfully", "path", onnxFile)
 	}
 
 	return onnxFile, nil
 }
 
-func createIndexerByName(name, dataDir, modelFile string) (core.Indexer, error) {
-	switch name {
-	case "graph":
-		return createGraphIndexer(dataDir)
-	case "hybrid":
-		return createHybridIndexer(dataDir, modelFile)
-	case "semantic":
-		return createSemanticIndexer(dataDir, modelFile)
-	case "fulltext":
-		return createFulltextIndexer(dataDir)
-	default:
-		return nil, fmt.Errorf("unknown indexer type: %s", name)
-	}
-}
-
-func createSemanticIndexer(dataDir, modelFile string) (core.Indexer, error) {
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
-	}
-
-	vectorStore, err := createVectorDB(dataDir, modelFile, clip)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create vector store: %w", err)
-	}
-
-	return indexer.NewSemanticIndexer(vectorStore, clip), nil
-}
-
-// createGraphIndexer 创建独立 GraphIndexer（第三代）。
-// 从 dataDir/config.yml 加载 LLM 配置和 embedding 模型路径。
-func createGraphIndexer(dataDir string) (core.Indexer, error) {
-	cfg, err := loadConfig(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	llmCfg := cfg.ToLLMConfig()
-	if llmCfg == nil {
-		return nil, fmt.Errorf("graph indexer requires LLM model configuration (set model in config)")
-	}
-
-	if cfg.EmbeddingModelFile == "" {
-		return nil, fmt.Errorf("embedding model file is required")
-	}
-
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(cfg.EmbeddingModelFile))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
-	}
-
-	vectorStore, err := createVectorDB(dataDir, cfg.EmbeddingModelFile, clip)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create vector store: %w", err)
-	}
-
-	graphStore, err := createGraphDB(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create graph store: %w", err)
-	}
-
-	slog.Info("GraphIndexer created (standalone mode)",
-		"model", llmCfg.Model, "base_url", llmCfg.BaseURL)
-	return indexer.New(*llmCfg, clip, vectorStore, graphStore), nil
-}
-
-func createFulltextIndexer(dataDir string) (core.Indexer, error) {
-	fullTextStore, err := createFullTextDB(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create fulltext store: %w", err)
-	}
-	return indexer.NewFulltextIndexer(fullTextStore)
-}
-
-// createHybridIndexer 创建第二代混合索引器（semantic + fulltext），无 LLM 依赖。
-func createHybridIndexer(dataDir string, modelFile string) (*HybridIndexer, error) {
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(modelFile))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
-	}
-
-	vectorStore, err := createVectorDB(dataDir, modelFile, clip)
-	if err != nil {
-		slog.Error("Failed to init vector store", "error", err)
-		return nil, fmt.Errorf("failed to init vector store: %w", err)
-	}
-
-	fullTextStore, err := createFullTextDB(dataDir)
-	if err != nil {
-		slog.Error("Failed to init fulltext store", "error", err)
-		return nil, err
-	}
-
-	return NewHybridIndexer(logging.DefaultConsoleLogger(), vectorStore, fullTextStore, clip)
-}
-
-func getName(dataDir string) string {
-	return filepath.Base(dataDir)
-}
-
-func createVectorDB(dataDir string, modelFile string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {
-	name := getName(dataDir)
-	vectorDbFile := filepath.Join(dataDir, "vectors", name+".db")
-	return govector.NewStore(
-		govector.WithCollection(name),
-		govector.WithDimension(clip.Dim()),
-		govector.WithDBPath(vectorDbFile),
-		govector.WithHNSW(true),
-	)
-}
-
-func createFullTextDB(dataDir string) (core.FullTextStore, error) {
-	name := getName(dataDir)
-	bleveDBFile := filepath.Join(dataDir, "fulltexts", name+".bleve")
-	return bleve.NewBleveStore(bleveDBFile)
-}
-
-func createGraphDB(dataDir string) (core.GraphStore, error) {
-	name := getName(dataDir)
-	graphDbFile := filepath.Join(dataDir, "graphs", name+".db")
-	return gograph.NewGraphStore(graphDbFile)
-}
+// 兼容旧代码：DefaultConsoleLogger 等日志便捷函数仍可用
+var _ = logging.DefaultConsoleLogger

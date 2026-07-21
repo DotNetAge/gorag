@@ -12,9 +12,10 @@ import (
 
 var slidePattern = regexp.MustCompile(`ppt/slides/slide\d+\.xml$`)
 
-// ParsePPTX reads a .pptx file and converts it to Markdown.
-// Uses only standard library (archive/zip + encoding/xml).
-func ParsePPTX(r io.Reader) (*RawDocument, error) {
+// ParsePPTX 读取 .pptx 文件并转换为 docDoc（内容为 Markdown）。
+// 仅使用标准库（archive/zip + encoding/xml）。
+// 元数据包含 title 和 slide_count。
+func ParsePPTX(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -25,7 +26,7 @@ func ParsePPTX(r io.Reader) (*RawDocument, error) {
 		return nil, err
 	}
 
-	// Find all slide XML files, sorted by slide number
+	// 查找所有 slide XML 文件，按 slide 序号排序
 	var slideFiles []*zip.File
 	for _, f := range zr.File {
 		if slidePattern.MatchString(f.Name) {
@@ -33,7 +34,7 @@ func ParsePPTX(r io.Reader) (*RawDocument, error) {
 		}
 	}
 
-	// Sort by slide number extracted from filename
+	// 按文件名中提取的序号排序
 	sortSlides(slideFiles)
 
 	title := extractPptxTitle(zr)
@@ -56,12 +57,16 @@ func ParsePPTX(r io.Reader) (*RawDocument, error) {
 		mdBuilder.WriteString(slideMd)
 	}
 
-	return NewRawDoc(mdBuilder.String()).
-		SetValue("title", title).
-		SetValue("slide_count", len(slideFiles)), nil
+	meta := map[string]any{
+		"slide_count": len(slideFiles),
+	}
+	if title != "" {
+		meta["title"] = title
+	}
+	return newParsedDoc(mdBuilder.String(), meta, RawDocDoc), nil
 }
 
-// parsePptxSlide extracts text from a single slide XML file.
+// parsePptxSlide 从单个 slide XML 文件中提取文本
 func parsePptxSlide(sf *zip.File) (string, error) {
 	rc, err := sf.Open()
 	if err != nil {
@@ -81,7 +86,7 @@ func parsePptxSlide(sf *zip.File) (string, error) {
 
 	var builder strings.Builder
 	for _, sp := range spSlide.Shapes {
-		// Determine if this shape is a title
+		// 判断该 shape 是否为标题
 		isTitle := false
 		if sp.NvSpPr != nil && sp.NvSpPr.NvPr != nil && sp.NvSpPr.NvPr.Ph != nil {
 			phType := sp.NvSpPr.NvPr.Ph.Type
@@ -90,7 +95,7 @@ func parsePptxSlide(sf *zip.File) (string, error) {
 			}
 		}
 
-		// Extract text from text runs
+		// 从文本 run 中提取内容
 		var textParts []string
 		for _, txBody := range sp.TxBody {
 			for _, p := range txBody.P {
@@ -98,7 +103,7 @@ func parsePptxSlide(sf *zip.File) (string, error) {
 				for _, r := range p.R {
 					runText.WriteString(r.T)
 				}
-				// Fallback: also check <a:t> directly in paragraphs
+				// 兜底：直接检查段落内的 <a:t>
 				if runText.Len() == 0 && p.T != "" {
 					runText.WriteString(p.T)
 				}
@@ -122,7 +127,7 @@ func parsePptxSlide(sf *zip.File) (string, error) {
 		if isTitle {
 			builder.WriteString(fmt.Sprintf("### %s\n\n", joined))
 		} else {
-			// Check if it looks like a bullet point
+			// 判断是否为项目符号
 			for _, part := range textParts {
 				part = strings.TrimSpace(part)
 				if part == "" {
@@ -140,11 +145,11 @@ func parsePptxSlide(sf *zip.File) (string, error) {
 	return builder.String(), nil
 }
 
-// --- PPTX XML types ---
+// --- PPTX XML 类型定义 ---
 
 type pptxSlide struct {
 	Shapes []pptxShape `xml:"p:sp"`
-	// Also handle group shapes
+	// 同时处理 group shapes
 	GspShapes []struct {
 		Shapes []pptxShape `xml:"p:sp"`
 	} `xml:"p:grpSp"`
@@ -163,12 +168,12 @@ type pptxShape struct {
 			R []struct {
 				T string `xml:"t"`
 			} `xml:"a:r"`
-			T string `xml:"a:t"` // direct text in paragraph (fallback)
+			T string `xml:"a:t"` // 段落内直接文本（兜底）
 		} `xml:"a:p"`
 	} `xml:"txBody"`
 }
 
-// extractPptxTitle tries to read the title from docProps/core.xml
+// extractPptxTitle 尝试从 docProps/core.xml 中读取文档标题
 func extractPptxTitle(zr *zip.Reader) string {
 	for _, f := range zr.File {
 		if f.Name == "docProps/core.xml" {
@@ -206,9 +211,9 @@ func extractPptxTitle(zr *zip.Reader) string {
 }
 
 func sortSlides(files []*zip.File) {
-	// Extract slide number from filename like "ppt/slides/slide1.xml"
+	// 从文件名（如 "ppt/slides/slide1.xml"）中提取 slide 序号
 	extractNum := func(name string) int {
-		// Find the last number in the path
+		// 查找路径中最后一段数字
 		n := 0
 		for i := len(name) - 1; i >= 0; i-- {
 			c := name[i]

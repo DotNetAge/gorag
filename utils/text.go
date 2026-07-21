@@ -477,3 +477,50 @@ func RemoveStopWords(s string) string {
 	result = reMultiSpace.ReplaceAllString(result, " ")
 	return strings.TrimSpace(result)
 }
+
+// CleanText 应用完整的文本清洗流水线，依次执行以下步骤：
+//  1. 全角/半角字符转换（先处理字符编码问题）
+//  2. 去除噪音字符（控制字符、多余空白等）
+//  3. 去除链接（Markdown 链接、HTML 链接、裸露 URL）
+//  4. 去除代码行号
+//  5. 去除水印
+//  6. 繁简转换（统一为简体中文）
+//  7. 隐私脱敏（身份证、手机号、银行卡、API 密钥、邮箱）
+//  8. 段落规范化（合并多余换行、去除行首行尾空格）
+//  9. 基础清洗（去特殊字符、合并空格）
+//
+// 调用方应使用 utils.CleanText。
+func CleanText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	// 1. 全角半角转换（先处理字符编码问题）
+	text = ToHalfWidth(text)
+
+	// 2. 去除噪音字符（控制字符、多余空白等）
+	text = CleanNoise(text)
+
+	// 3. 去除链接（Markdown链接、HTML链接、裸露URL）
+	text = RemoveLinks(text)
+
+	// 4. 去除代码行号
+	text = RemoveLineNumbers(text)
+
+	// 5. 去除水印
+	text = RemoveWatermarks(text)
+
+	// 6. 繁简转换（统一为简体中文）
+	text = NormalizeChinese(text)
+
+	// 7. 隐私脱敏（身份证、手机号、银行卡、API密钥、邮箱）
+	text = DesensitizePII(text)
+
+	// 8. 段落规范化（合并多余换行、去除行首行尾空格）
+	text = NormalizeParagraphs(text)
+
+	// 9. 基础清洗（去特殊字符、合并空格）
+	text = Clean(text)
+
+	return text
+}

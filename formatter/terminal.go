@@ -109,22 +109,34 @@ func WithColors(score, content, meta, title string) func(*TerminalConfig) {
 	}
 }
 
-// Format 格式化单个 Hit
-func (f *TerminalFormatter) Format(hit *core.Hit) string {
+// formatChunk 格式化单个 ChunkHit，直接使用其 Score/DocID/ID/Content。
+// hit.Chunks 为空时由 FormatAll 处理，此处不处理空场景。
+func (f *TerminalFormatter) formatChunk(idx int, ch core.ChunkHit) string {
+	if ch.Chunk == nil {
+		return ""
+	}
+
 	var sb strings.Builder
+
+	// 序号
+	if f.config.ShowIndex {
+		sb.WriteString(f.config.TitleColor)
+		fmt.Fprintf(&sb, "%d. ", idx+1)
+		sb.WriteString(Reset)
+	}
 
 	// 分数
 	if f.config.ShowScore {
 		sb.WriteString(f.config.ScoreColor)
-		fmt.Fprintf(&sb, "[%.4f]", hit.Score)
+		fmt.Fprintf(&sb, "[%.4f]", ch.Score)
 		sb.WriteString(Reset)
 		sb.WriteString(" ")
 	}
 
 	// 元数据
 	var meta []string
-	if f.config.ShowDocID && hit.DocID != "" {
-		meta = append(meta, fmt.Sprintf("doc:%s", hit.ID))
+	if f.config.ShowDocID && ch.DocID != "" {
+		meta = append(meta, fmt.Sprintf("doc:%s", ch.ID))
 	}
 	if len(meta) > 0 {
 		sb.WriteString(f.config.MetaColor)
@@ -137,7 +149,7 @@ func (f *TerminalFormatter) Format(hit *core.Hit) string {
 
 	// 内容
 	sb.WriteString(f.config.ContentColor)
-	content := hit.Content
+	content := ch.Content
 	if f.config.ContentMax > 0 && len(content) > f.config.ContentMax {
 		content = content[:f.config.ContentMax] + "..."
 	}
@@ -147,42 +159,53 @@ func (f *TerminalFormatter) Format(hit *core.Hit) string {
 	return sb.String()
 }
 
-// FormatAll 格式化多个 Hit
-func (f *TerminalFormatter) FormatAll(hits []core.Hit) string {
+// Format 格式化 Hit 容器为终端输出。
+// 遍历 hit.Chunks 输出每个 Chunk。
+// hit 为 nil 或 Chunks 为空时返回空字符串。
+func (f *TerminalFormatter) Format(hit *core.Hit) string {
+	if hit == nil || len(hit.Chunks) == 0 {
+		return ""
+	}
 	var sb strings.Builder
+	for i, ch := range hit.Chunks {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(f.formatChunk(i, ch))
+	}
+	return sb.String()
+}
 
+// FormatAll 格式化 Hit 容器，含标题和全部 Chunks。
+// 标题显示 Chunks 数量。
+func (f *TerminalFormatter) FormatAll(hit *core.Hit) string {
+	if hit == nil || len(hit.Chunks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
 	sb.WriteString(f.config.TitleColor)
-	fmt.Fprintf(&sb, "Found %d results:", len(hits))
+	fmt.Fprintf(&sb, "Found %d results:", len(hit.Chunks))
 	sb.WriteString(Reset)
 	sb.WriteString("\n\n")
 
-	for i, hit := range hits {
-		if f.config.ShowIndex {
-			sb.WriteString(f.config.TitleColor)
-			fmt.Fprintf(&sb, "%d. ", i+1)
-			sb.WriteString(Reset)
-		}
-		sb.WriteString(f.Format(&hit))
-		if i < len(hits)-1 {
-			sb.WriteString("\n\n")
-		}
-	}
+	sb.WriteString(f.Format(hit))
 
 	return sb.String()
 }
 
 // Write 格式化并写入输出流
-func (f *TerminalFormatter) Write(w io.Writer, hits []core.Hit) error {
-	_, err := fmt.Fprint(w, f.FormatAll(hits))
+func (f *TerminalFormatter) Write(w io.Writer, hit *core.Hit) error {
+	_, err := fmt.Fprint(w, f.FormatAll(hit))
 	return err
 }
 
 // Print 便捷方法：直接打印到标准输出
-func (f *TerminalFormatter) Print(hits []core.Hit) {
-	fmt.Print(f.FormatAll(hits))
+func (f *TerminalFormatter) Print(hit *core.Hit) {
+	fmt.Print(f.FormatAll(hit))
 }
 
 // Println 便捷方法：打印并换行
-func (f *TerminalFormatter) Println(hits []core.Hit) {
-	fmt.Println(f.FormatAll(hits))
+func (f *TerminalFormatter) Println(hit *core.Hit) {
+	fmt.Println(f.FormatAll(hit))
 }

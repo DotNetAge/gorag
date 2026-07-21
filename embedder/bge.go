@@ -165,21 +165,6 @@ func validateTextEncoderConfig(modelPath string, inputNames, outputNames []strin
 	return true
 }
 
-// Calc 计算单个 chunk 的向量
-func (e *BGEEmbedder) Calc(chunk *core.Chunk) (*core.Vector, error) {
-	if chunk == nil || chunk.Content == "" {
-		return nil, nil
-	}
-	vectors, err := e.Bulk([]*core.Chunk{chunk})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) == 0 {
-		return nil, nil
-	}
-	return vectors[0], nil
-}
-
 // CalcText 计算文本的向量
 func (e *BGEEmbedder) CalcText(text string) (*core.Vector, error) {
 	if text == "" {
@@ -196,44 +181,6 @@ func (e *BGEEmbedder) CalcText(text string) (*core.Vector, error) {
 		ID:     uuid.NewString(),
 		Values: embeddings[0],
 	}, nil
-}
-
-// Bulk 批量计算 chunks 的向量（只处理非图片 chunk）
-// 图片 chunk 会被忽略（由多模态 embedder 如 ChineseClip 处理）
-func (e *BGEEmbedder) Bulk(chunks []*core.Chunk) ([]*core.Vector, error) {
-	if len(chunks) == 0 {
-		return []*core.Vector{}, nil
-	}
-
-	// 过滤掉图片 chunks（只处理文本）
-	var textChunks []*core.Chunk
-	for _, chunk := range chunks {
-		if isImageMimeType(chunk.MIMEType) {
-			continue // 跳过图片 chunk
-		}
-		textChunks = append(textChunks, chunk)
-	}
-
-	if len(textChunks) == 0 {
-		return []*core.Vector{}, nil
-	}
-
-	texts := make([]string, len(textChunks))
-	for i, chunk := range textChunks {
-		texts[i] = chunk.Content
-	}
-
-	embeddings, err := e.encoder.Embed(texts)
-	if err != nil {
-		return nil, err
-	}
-
-	vectors := make([]*core.Vector, len(textChunks))
-	for i, chunk := range textChunks {
-		vectors[i] = newVector(chunk, embeddings[i])
-	}
-
-	return vectors, nil
 }
 
 // CalcImage BGE 不支持图像向量化
@@ -263,36 +210,4 @@ func (e *BGEEmbedder) Close() error {
 
 func (e *BGEEmbedder) Dim() int {
 	return e.dimension
-}
-
-// newVector 从 chunk 和 embedding 创建 Vector
-func newVector(chunk *core.Chunk, embedding []float32) *core.Vector {
-	meta := make(map[string]any)
-	if chunk.Metadata != nil {
-		for k, v := range chunk.Metadata {
-			meta[k] = v
-		}
-	}
-	meta["doc_id"] = chunk.DocID
-	meta["parent_id"] = chunk.ParentID
-	meta["content"] = chunk.Content
-	meta["mime_type"] = chunk.MIMEType
-
-	// 将 ChunkMeta 信息存入 metadata，以便搜索时恢复
-	chunkMetaMap := map[string]any{
-		"index":         chunk.ChunkMeta.Index,
-		"start_pos":     chunk.ChunkMeta.StartPos,
-		"end_pos":       chunk.ChunkMeta.EndPos,
-		"heading_level": chunk.ChunkMeta.HeadingLevel,
-		"heading_path":  chunk.ChunkMeta.HeadingPath,
-	}
-	meta["chunk_meta"] = chunkMetaMap
-	meta["chunk_id"] = chunk.ID
-
-	return &core.Vector{
-		ID:       uuid.NewString(),
-		Values:   embedding,
-		ChunkID:  chunk.ID,
-		Metadata: meta,
-	}
 }

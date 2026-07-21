@@ -2,7 +2,6 @@ package document
 
 import (
 	"encoding/base64"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,7 @@ func openTestFile(t *testing.T, name string) *os.File {
 	t.Helper()
 	f, err := os.Open(filepath.Join(testDataDir, name))
 	if err != nil {
-		t.Fatalf("failed to open test file %s: %v", name, err)
+		t.Fatalf("打开测试文件 %s 失败: %v", name, err)
 	}
 	return f
 }
@@ -25,10 +24,10 @@ func skipIfFileMissing(t *testing.T, name string) {
 	path := filepath.Join(testDataDir, name)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		t.Skipf("Skipping: test file %s not found", name)
+		t.Skipf("跳过：测试文件 %s 不存在", name)
 	}
 	if info.Size() < 1024 {
-		t.Skipf("Skipping: test file %s is only %d bytes (possible LFS placeholder)", name, info.Size())
+		t.Skipf("跳过：测试文件 %s 仅 %d 字节（疑似 LFS 占位符）", name, info.Size())
 	}
 }
 
@@ -40,48 +39,51 @@ func TestParseCSV_SimpleFile(t *testing.T) {
 
 	doc, err := ParseCSV(f)
 	if err != nil {
-		t.Fatalf("ParseCSV failed: %v", err)
+		t.Fatalf("ParseCSV 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseCSV returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseCSV 返回空内容")
 	}
 
-	// 验证输出是 Markdown 表格格式
-	if !strings.Contains(doc.Text, "|") {
-		t.Fatal("ParseCSV output should contain table markers '|'")
-	}
-	if !strings.Contains(doc.Text, "---") {
-		t.Fatal("ParseCSV output should contain table separator '---'")
+	// 输出应为 JSON 数组字符串
+	if !strings.HasPrefix(doc.Content(), "[") {
+		t.Fatalf("ParseCSV 输出应为 JSON 数组, 实际前缀: %q", doc.Content()[:min(10, len(doc.Content()))])
 	}
 
 	// 验证 meta 中的 rows 和 columns
-	rows, ok := doc.Meta["rows"]
+	meta := doc.Meta()
+	rows, ok := meta["rows"]
 	if !ok {
-		t.Fatal("Meta should contain 'rows'")
+		t.Fatal("元数据应包含 'rows'")
 	}
 	if rows.(int) <= 0 {
-		t.Fatalf("Expected rows > 0, got %d", rows)
+		t.Fatalf("期望 rows > 0, 实际 %d", rows)
 	}
 
-	cols, ok := doc.Meta["columns"]
+	cols, ok := meta["columns"]
 	if !ok {
-		t.Fatal("Meta should contain 'columns'")
+		t.Fatal("元数据应包含 'columns'")
 	}
 	if cols.(int) <= 0 {
-		t.Fatalf("Expected columns > 0, got %d", cols)
+		t.Fatalf("期望 columns > 0, 实际 %d", cols)
 	}
 
-	t.Logf("CSV: %d rows, %d columns, text length: %d", rows, cols, len(doc.Text))
+	//CSV 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
+	}
+
+	t.Logf("CSV: %d 行, %d 列, JSON 长度: %d", rows, cols, len(doc.Content()))
 }
 
 func TestParseCSV_EmptyInput(t *testing.T) {
 	doc, err := ParseCSV(strings.NewReader(""))
 	if err == nil {
-		t.Fatal("Expected error for empty CSV input")
+		t.Fatal("空 CSV 输入应返回错误")
 	}
 	if doc != nil {
-		t.Fatal("Expected nil doc for empty CSV input")
+		t.Fatal("空 CSV 输入应返回 nil doc")
 	}
 }
 
@@ -93,29 +95,28 @@ Charlie,35,Guangzhou`
 
 	doc, err := ParseCSV(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseCSV failed: %v", err)
+		t.Fatalf("ParseCSV 失败: %v", err)
 	}
 
-	// 第一行应该是表头
-	lines := strings.Split(strings.TrimSpace(doc.Text), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("Expected at least 2 lines (header + separator), got %d", len(lines))
+	// 输出应为 JSON 数组字符串，包含 3 个数据行对象
+	content := doc.Content()
+	if !strings.HasPrefix(content, "[") {
+		t.Fatalf("期望 JSON 数组, 实际: %q", content[:min(20, len(content))])
 	}
 
-	header := lines[0]
-	if !strings.Contains(header, "Name") || !strings.Contains(header, "Age") || !strings.Contains(header, "City") {
-		t.Fatalf("Header row should contain 'Name', 'Age', 'City', got: %s", header)
-	}
+	// 验证 JSON 包含表头作为 key 和数据值
+	checkContains(t, content, "Name", "JSON key")
+	checkContains(t, content, "Age", "JSON key")
+	checkContains(t, content, "City", "JSON key")
+	checkContains(t, content, "Alice", "数据值")
+	checkContains(t, content, "Beijing", "数据值")
 
-	if !strings.Contains(doc.Text, "Alice") || !strings.Contains(doc.Text, "Beijing") {
-		t.Fatal("CSV data rows should contain 'Alice' and 'Beijing'")
+	meta := doc.Meta()
+	if meta["rows"].(int) != 4 {
+		t.Fatalf("期望 4 行（1 表头 + 3 数据）, 实际 %d", meta["rows"])
 	}
-
-	if doc.Meta["rows"].(int) != 4 {
-		t.Fatalf("Expected 4 rows (1 header + 3 data), got %d", doc.Meta["rows"])
-	}
-	if doc.Meta["columns"].(int) != 3 {
-		t.Fatalf("Expected 3 columns, got %d", doc.Meta["columns"])
+	if meta["columns"].(int) != 3 {
+		t.Fatalf("期望 3 列, 实际 %d", meta["columns"])
 	}
 }
 
@@ -125,13 +126,21 @@ a|b,c|d`
 
 	doc, err := ParseCSV(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseCSV failed: %v", err)
+		t.Fatalf("ParseCSV 失败: %v", err)
 	}
 
-	// 管道符应该被转义
-	if !strings.Contains(doc.Text, `a\|b`) {
-		t.Fatal("Pipe characters in CSV fields should be escaped with backslash")
+	// JSON 输出中管道符不需转义，应原样保留
+	if !strings.Contains(doc.Content(), "a|b") {
+		t.Fatal("CSV 字段中的管道符应在 JSON 输出中保留")
 	}
+}
+
+// min 返回两个整数中的较小值（Go 1.21 之前不自带）。
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // ========================= ParseText =========================
@@ -140,20 +149,24 @@ func TestParseText_SimpleInput(t *testing.T) {
 	input := "Hello, World!\nThis is a test."
 	doc, err := ParseText(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseText failed: %v", err)
+		t.Fatalf("ParseText 失败: %v", err)
 	}
-	if doc.Text != input {
-		t.Fatalf("ParseText should return input verbatim, got: %q", doc.Text)
+	if doc.Content() != input {
+		t.Fatalf("ParseText 应原样返回输入, 实际: %q", doc.Content())
+	}
+	//纯文本归一化为 RawDocText
+	if doc.Type() != RawDocText {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocText, doc.Type())
 	}
 }
 
 func TestParseText_EmptyInput(t *testing.T) {
 	doc, err := ParseText(strings.NewReader(""))
 	if err != nil {
-		t.Fatalf("ParseText failed for empty input: %v", err)
+		t.Fatalf("ParseText 处理空输入失败: %v", err)
 	}
-	if doc.Text != "" {
-		t.Fatalf("Expected empty text, got: %q", doc.Text)
+	if doc.Content() != "" {
+		t.Fatalf("期望空内容, 实际: %q", doc.Content())
 	}
 }
 
@@ -161,10 +174,10 @@ func TestParseText_UTF8(t *testing.T) {
 	input := "你好，世界！\n这是一段中文测试内容。"
 	doc, err := ParseText(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseText failed: %v", err)
+		t.Fatalf("ParseText 失败: %v", err)
 	}
-	if doc.Text != input {
-		t.Fatal("ParseText should preserve UTF-8 content verbatim")
+	if doc.Content() != input {
+		t.Fatal("ParseText 应原样保留 UTF-8 内容")
 	}
 }
 
@@ -177,38 +190,44 @@ func TestParseHTML_SimpleFile(t *testing.T) {
 
 	doc, err := ParseHTML(f)
 	if err != nil {
-		t.Fatalf("ParseHTML failed: %v", err)
+		t.Fatalf("ParseHTML 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseHTML returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseHTML 返回空内容")
 	}
 
 	// 验证 title 被正确提取
-	title, ok := doc.Meta["title"]
+	meta := doc.Meta()
+	title, ok := meta["title"]
 	if !ok {
-		t.Fatal("Meta should contain 'title'")
+		t.Fatal("元数据应包含 'title'")
 	}
 	titleStr := title.(string)
 	if titleStr == "" {
-		t.Fatal("Title should not be empty for simple.html")
+		t.Fatal("simple.html 的 title 不应为空")
 	}
 	if !strings.Contains(titleStr, "AI Search") && !strings.Contains(titleStr, "RAG") {
-		t.Fatalf("Title should contain relevant keywords, got: %q", titleStr)
+		t.Fatalf("title 应包含相关关键词, 实际: %q", titleStr)
 	}
 
 	// HTML 标签不应该出现在输出中
-	if strings.Contains(doc.Text, "<html") || strings.Contains(doc.Text, "</div>") {
-		t.Fatal("Output should not contain raw HTML tags")
+	if strings.Contains(doc.Content(), "<html") || strings.Contains(doc.Content(), "</div>") {
+		t.Fatal("输出不应包含原始 HTML 标签")
 	}
 
 	// 标题应该被转换为 Markdown ATX 格式
-	if !strings.Contains(doc.Text, "# ") {
-		t.Fatal("Output should contain Markdown headings (# )")
+	if !strings.Contains(doc.Content(), "# ") {
+		t.Fatal("输出应包含 Markdown 标题 (# )")
+	}
+
+	// HTML 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
 
 	t.Logf("HTML title: %q", titleStr)
-	t.Logf("HTML output length: %d", len(doc.Text))
+	t.Logf("HTML 输出长度: %d", len(doc.Content()))
 }
 
 func TestParseHTML_DataIntegrity(t *testing.T) {
@@ -224,36 +243,36 @@ func TestParseHTML_DataIntegrity(t *testing.T) {
 
 	doc, err := ParseHTML(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseHTML failed: %v", err)
+		t.Fatalf("ParseHTML 失败: %v", err)
 	}
 
 	// 验证 title
-	if doc.Meta["title"].(string) != "Test Title" {
-		t.Fatalf("Expected title 'Test Title', got: %q", doc.Meta["title"])
+	if doc.Meta()["title"].(string) != "Test Title" {
+		t.Fatalf("期望 title 'Test Title', 实际: %q", doc.Meta()["title"])
 	}
 
 	// 验证内容元素
-	content := doc.Text
-	checkContains(t, content, "Main Heading", "heading text")
-	checkContains(t, content, "bold", "bold text")
-	checkContains(t, content, "italic", "italic text")
-	checkContains(t, content, "Item 1", "list item")
-	checkContains(t, content, "Name", "table header")
-	checkContains(t, content, "https://example.com", "link URL")
+	content := doc.Content()
+	checkContains(t, content, "Main Heading", "标题文本")
+	checkContains(t, content, "bold", "粗体文本")
+	checkContains(t, content, "italic", "斜体文本")
+	checkContains(t, content, "Item 1", "列表项")
+	checkContains(t, content, "Name", "表头")
+	checkContains(t, content, "https://example.com", "链接 URL")
 
 	// 不应包含 HTML 标签
 	if strings.Contains(content, "<h1>") || strings.Contains(content, "</p>") {
-		t.Fatal("Output should not contain raw HTML tags")
+		t.Fatal("输出不应包含原始 HTML 标签")
 	}
 }
 
 func TestParseHTML_EmptyInput(t *testing.T) {
 	doc, err := ParseHTML(strings.NewReader(""))
 	if err != nil {
-		t.Fatalf("ParseHTML failed for empty input: %v", err)
+		t.Fatalf("ParseHTML 处理空输入失败: %v", err)
 	}
 	if doc == nil {
-		t.Fatal("ParseHTML should not return nil for empty input")
+		t.Fatal("ParseHTML 处理空输入不应返回 nil")
 	}
 }
 
@@ -261,13 +280,13 @@ func TestParseHTML_NoTitle(t *testing.T) {
 	input := `<html><body><p>Hello</p></body></html>`
 	doc, err := ParseHTML(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseHTML failed: %v", err)
+		t.Fatalf("ParseHTML 失败: %v", err)
 	}
-	if _, ok := doc.Meta["title"]; ok {
-		t.Fatal("Meta should not contain 'title' when HTML has no <title> tag")
+	if _, ok := doc.Meta()["title"]; ok {
+		t.Fatal("HTML 无 <title> 标签时元数据不应包含 'title'")
 	}
-	if !strings.Contains(doc.Text, "Hello") {
-		t.Fatal("Output should contain 'Hello'")
+	if !strings.Contains(doc.Content(), "Hello") {
+		t.Fatal("输出应包含 'Hello'")
 	}
 }
 
@@ -275,11 +294,11 @@ func TestParseHTML_TitleEntityDecoding(t *testing.T) {
 	input := `<html><head><title>Test &amp; Title &lt;3&gt;</title></head><body><p>body</p></body></html>`
 	doc, err := ParseHTML(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseHTML failed: %v", err)
+		t.Fatalf("ParseHTML 失败: %v", err)
 	}
-	title := doc.Meta["title"].(string)
+	title := doc.Meta()["title"].(string)
 	if !strings.Contains(title, "&") || !strings.Contains(title, "<") || !strings.Contains(title, ">") {
-		t.Fatalf("HTML entities should be decoded in title, got: %q", title)
+		t.Fatalf("title 中的 HTML 实体应被解码, 实际: %q", title)
 	}
 }
 
@@ -292,37 +311,43 @@ func TestParseImage_JPEG(t *testing.T) {
 
 	doc, err := ParseImage(f)
 	if err != nil {
-		t.Fatalf("ParseImage failed for JPEG: %v", err)
+		t.Fatalf("ParseImage 处理 JPEG 失败: %v", err)
 	}
 
 	// 输出应该是 base64 编码的缩略图
-	if doc.Text == "" {
-		t.Fatal("ParseImage returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseImage 返回空内容")
 	}
 
-	_, err = base64.StdEncoding.DecodeString(doc.Text)
+	_, err = base64.StdEncoding.DecodeString(doc.Content())
 	if err != nil {
-		t.Fatalf("ParseImage output should be valid base64, decode error: %v", err)
+		t.Fatalf("ParseImage 输出应为合法 base64, 解码错误: %v", err)
 	}
 
-	// MIME 类型应该是 image/jpeg
-	mime, ok := doc.Meta["mime_type"]
+	// 图片归一化为 RawDocImage
+	if doc.Type() != RawDocImage {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocImage, doc.Type())
+	}
+
+	// 图片元数据中保留 mime_type（原始 MIME）
+	meta := doc.Meta()
+	mime, ok := meta["mime_type"]
 	if !ok {
-		t.Fatal("Meta should contain 'mime_type'")
+		t.Fatal("元数据应包含 'mime_type'")
 	}
 	if mime != "image/jpeg" {
-		t.Fatalf("Expected mime_type 'image/jpeg', got: %q", mime)
+		t.Fatalf("期望 mime_type 'image/jpeg', 实际: %q", mime)
 	}
 
-	size, ok := doc.Meta["thumbnail_size"]
+	size, ok := meta["thumbnail_size"]
 	if !ok {
-		t.Fatal("Meta should contain 'thumbnail_size'")
+		t.Fatal("元数据应包含 'thumbnail_size'")
 	}
 	if size != thumbnailSize {
-		t.Fatalf("Expected thumbnail_size %d, got %d", thumbnailSize, size)
+		t.Fatalf("期望 thumbnail_size %d, 实际 %d", thumbnailSize, size)
 	}
 
-	t.Logf("JPEG: mime=%s, thumbnail_size=%d, base64_len=%d", mime, size, len(doc.Text))
+	t.Logf("JPEG: mime=%s, thumbnail_size=%d, base64 长度=%d", mime, size, len(doc.Content()))
 }
 
 func TestParseImage_PNG(t *testing.T) {
@@ -332,35 +357,35 @@ func TestParseImage_PNG(t *testing.T) {
 
 	doc, err := ParseImage(f)
 	if err != nil {
-		t.Fatalf("ParseImage failed for PNG: %v", err)
+		t.Fatalf("ParseImage 处理 PNG 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseImage returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseImage 返回空内容")
 	}
 
-	_, err = base64.StdEncoding.DecodeString(doc.Text)
+	_, err = base64.StdEncoding.DecodeString(doc.Content())
 	if err != nil {
-		t.Fatalf("ParseImage output should be valid base64, decode error: %v", err)
+		t.Fatalf("ParseImage 输出应为合法 base64, 解码错误: %v", err)
 	}
 
-	mime := doc.Meta["mime_type"]
+	mime := doc.Meta()["mime_type"]
 	if mime != "image/png" {
-		t.Fatalf("Expected mime_type 'image/png', got: %q", mime)
+		t.Fatalf("期望 mime_type 'image/png', 实际: %q", mime)
 	}
 }
 
 func TestParseImage_InvalidInput(t *testing.T) {
 	_, err := ParseImage(strings.NewReader("not an image"))
 	if err == nil {
-		t.Fatal("Expected error for non-image input")
+		t.Fatal("非图片输入应返回错误")
 	}
 }
 
 func TestParseImage_EmptyInput(t *testing.T) {
 	_, err := ParseImage(strings.NewReader(""))
 	if err == nil {
-		t.Fatal("Expected error for empty input")
+		t.Fatal("空输入应返回错误")
 	}
 }
 
@@ -373,34 +398,40 @@ func TestParsePDF_SimpleFile(t *testing.T) {
 
 	doc, err := ParsePDF(f)
 	if err != nil {
-		t.Fatalf("ParsePDF failed: %v", err)
+		t.Fatalf("ParsePDF 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParsePDF returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParsePDF 返回空内容")
 	}
 
 	// 验证 meta 信息
-	pages, ok := doc.Meta["pages"]
+	meta := doc.Meta()
+	pages, ok := meta["pages"]
 	if !ok {
-		t.Fatal("Meta should contain 'pages'")
+		t.Fatal("元数据应包含 'pages'")
 	}
 	if pages.(int) <= 0 {
-		t.Fatalf("Expected pages > 0, got %d", pages)
+		t.Fatalf("期望 pages > 0, 实际 %d", pages)
 	}
 
 	// 输出应包含页面标记
-	if !strings.Contains(doc.Text, "Page") {
-		t.Fatal("PDF output should contain 'Page' markers")
+	if !strings.Contains(doc.Content(), "Page") {
+		t.Fatal("PDF 输出应包含 'Page' 标记")
 	}
 
-	t.Logf("PDF: %d pages, text length: %d", pages, len(doc.Text))
+	// PDF 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
+	}
+
+	t.Logf("PDF: %d 页, 文本长度: %d", pages, len(doc.Content()))
 }
 
 func TestParsePDF_InvalidInput(t *testing.T) {
 	_, err := ParsePDF(strings.NewReader("not a pdf"))
 	if err == nil {
-		t.Fatal("Expected error for non-PDF input")
+		t.Fatal("非 PDF 输入应返回错误")
 	}
 }
 
@@ -411,17 +442,17 @@ func TestParsePDF_DataIntegrity(t *testing.T) {
 
 	doc, err := ParsePDF(f)
 	if err != nil {
-		t.Fatalf("ParsePDF failed: %v", err)
+		t.Fatalf("ParsePDF 失败: %v", err)
 	}
 
 	// 验证页面分隔符格式
-	if !strings.Contains(doc.Text, "---") {
-		t.Fatal("PDF output should contain page separators '---'")
+	if !strings.Contains(doc.Content(), "---") {
+		t.Fatal("PDF 输出应包含页面分隔符 '---'")
 	}
 
 	// 验证 Markdown 标题格式（## Page N）
-	if !strings.Contains(doc.Text, "## Page") {
-		t.Fatal("PDF output should contain '## Page N' headings")
+	if !strings.Contains(doc.Content(), "## Page") {
+		t.Fatal("PDF 输出应包含 '## Page N' 标题")
 	}
 }
 
@@ -434,24 +465,29 @@ func TestParseDocx_SimpleFile(t *testing.T) {
 
 	doc, err := ParseDocx(f)
 	if err != nil {
-		t.Fatalf("ParseDocx failed: %v", err)
+		t.Fatalf("ParseDocx 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseDocx returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseDocx 返回空内容")
 	}
 
-	if len(doc.Text) < 10 {
-		t.Fatalf("ParseDocx output seems too short: %q", doc.Text)
+	if len(doc.Content()) < 10 {
+		t.Fatalf("ParseDocx 输出过短: %q", doc.Content())
 	}
 
-	t.Logf("DOCX: text length: %d", len(doc.Text))
+	// DOCX 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
+	}
+
+	t.Logf("DOCX: 文本长度: %d", len(doc.Content()))
 }
 
 func TestParseDocx_InvalidInput(t *testing.T) {
 	_, err := ParseDocx(strings.NewReader("not a docx"))
 	if err == nil {
-		t.Fatal("Expected error for non-DOCX input")
+		t.Fatal("非 DOCX 输入应返回错误")
 	}
 }
 
@@ -462,17 +498,17 @@ func TestParseDocx_DataIntegrity(t *testing.T) {
 
 	doc, err := ParseDocx(f)
 	if err != nil {
-		t.Fatalf("ParseDocx failed: %v", err)
+		t.Fatalf("ParseDocx 失败: %v", err)
 	}
 
 	// 输出不应包含原始 XML 标签
-	if strings.Contains(doc.Text, "<w:t>") || strings.Contains(doc.Text, "<w:p>") {
-		t.Fatal("DOCX output should not contain raw XML tags")
+	if strings.Contains(doc.Content(), "<w:t>") || strings.Contains(doc.Content(), "<w:p>") {
+		t.Fatal("DOCX 输出不应包含原始 XML 标签")
 	}
 
 	// 验证文档结构 - 段落之间应有换行
-	if strings.Count(doc.Text, "\n\n") == 0 && strings.Count(doc.Text, "\n") == 0 {
-		t.Fatal("DOCX output should contain newlines between paragraphs")
+	if strings.Count(doc.Content(), "\n\n") == 0 && strings.Count(doc.Content(), "\n") == 0 {
+		t.Fatal("DOCX 输出应在段落之间包含换行")
 	}
 }
 
@@ -485,29 +521,35 @@ func TestParsePPTX_SimpleFile(t *testing.T) {
 
 	doc, err := ParsePPTX(f)
 	if err != nil {
-		t.Fatalf("ParsePPTX failed: %v", err)
+		t.Fatalf("ParsePPTX 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParsePPTX returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParsePPTX 返回空内容")
 	}
 
 	// 验证 slide_count
-	slideCount, ok := doc.Meta["slide_count"]
+	meta := doc.Meta()
+	slideCount, ok := meta["slide_count"]
 	if !ok {
-		t.Fatal("Meta should contain 'slide_count'")
+		t.Fatal("元数据应包含 'slide_count'")
 	}
 	if slideCount.(int) <= 0 {
-		t.Fatalf("Expected slide_count > 0, got %d", slideCount)
+		t.Fatalf("期望 slide_count > 0, 实际 %d", slideCount)
 	}
 
-	t.Logf("PPTX: %d slides, text length: %d", slideCount, len(doc.Text))
+	// PPTX 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
+	}
+
+	t.Logf("PPTX: %d 张幻灯片, 文本长度: %d", slideCount, len(doc.Content()))
 }
 
 func TestParsePPTX_InvalidInput(t *testing.T) {
 	_, err := ParsePPTX(strings.NewReader("not a pptx"))
 	if err == nil {
-		t.Fatal("Expected error for non-PPTX input")
+		t.Fatal("非 PPTX 输入应返回错误")
 	}
 }
 
@@ -518,22 +560,22 @@ func TestParsePPTX_DataIntegrity(t *testing.T) {
 
 	doc, err := ParsePPTX(f)
 	if err != nil {
-		t.Fatalf("ParsePPTX failed: %v", err)
+		t.Fatalf("ParsePPTX 失败: %v", err)
 	}
 
 	// 输出应包含 Slide 标记
-	if !strings.Contains(doc.Text, "Slide") {
-		t.Fatal("PPTX output should contain 'Slide' markers")
+	if !strings.Contains(doc.Content(), "Slide") {
+		t.Fatal("PPTX 输出应包含 'Slide' 标记")
 	}
 
 	// 幻灯片之间应有分隔符
-	if !strings.Contains(doc.Text, "---") {
-		t.Fatal("PPTX output should contain slide separators '---'")
+	if !strings.Contains(doc.Content(), "---") {
+		t.Fatal("PPTX 输出应包含幻灯片分隔符 '---'")
 	}
 
 	// 不应包含 XML 标签
-	if strings.Contains(doc.Text, "<p:") || strings.Contains(doc.Text, "<a:p>") {
-		t.Fatal("PPTX output should not contain raw XML tags")
+	if strings.Contains(doc.Content(), "<p:") || strings.Contains(doc.Content(), "<a:p>") {
+		t.Fatal("PPTX 输出不应包含原始 XML 标签")
 	}
 }
 
@@ -546,39 +588,53 @@ func TestParseXlsx_SimpleFile(t *testing.T) {
 
 	doc, err := ParseXlsx(f)
 	if err != nil {
-		t.Fatalf("ParseXlsx failed: %v", err)
+		t.Fatalf("ParseXlsx 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseXlsx returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseXlsx 返回空内容")
 	}
 
 	// 验证 sheet_count
-	sheetCount, ok := doc.Meta["sheet_count"]
+	meta := doc.Meta()
+	sheetCount, ok := meta["sheet_count"]
 	if !ok {
-		t.Fatal("Meta should contain 'sheet_count'")
+		t.Fatal("元数据应包含 'sheet_count'")
 	}
 	if sheetCount.(int) <= 0 {
-		t.Fatalf("Expected sheet_count > 0, got %d", sheetCount)
+		t.Fatalf("期望 sheet_count > 0, 实际 %d", sheetCount)
 	}
 
-	// 验证输出是 Markdown 表格
-	if !strings.Contains(doc.Text, "|") {
-		t.Fatal("XLSX output should contain table markers '|'")
+	// 输出应为 JSON 数组字符串
+	if !strings.HasPrefix(doc.Content(), "[") {
+		t.Fatalf("XLSX 输出应为 JSON 数组, 实际前缀: %q", doc.Content()[:min(10, len(doc.Content()))])
 	}
 
-	// 验证 Sheet 标记
-	if !strings.Contains(doc.Text, "Sheet") {
-		t.Fatal("XLSX output should contain 'Sheet' markers")
+	// 验证 JSON 包含 sheet 字段
+	checkContains(t, doc.Content(), "sheet", "JSON sheet 字段")
+
+	// XLSX 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
 	}
 
-	t.Logf("XLSX: %d sheets, text length: %d", sheetCount, len(doc.Text))
+	t.Logf("XLSX: %d 个 sheet, JSON 长度: %d", sheetCount, len(doc.Content()))
 }
 
 func TestParseXlsx_InvalidInput(t *testing.T) {
 	_, err := ParseXlsx(strings.NewReader("not a xlsx"))
 	if err == nil {
-		t.Fatal("Expected error for non-XLSX input")
+		t.Fatal("非 XLSX 输入应返回错误")
+	}
+}
+
+func TestParseXlsx_EmptyInput(t *testing.T) {
+	doc, err := ParseXlsx(strings.NewReader(""))
+	if err == nil {
+		t.Fatal("空 XLSX 输入应返回错误")
+	}
+	if doc != nil {
+		t.Fatal("空 XLSX 输入应返回 nil doc")
 	}
 }
 
@@ -589,17 +645,12 @@ func TestParseXlsx_DataIntegrity(t *testing.T) {
 
 	doc, err := ParseXlsx(f)
 	if err != nil {
-		t.Fatalf("ParseXlsx failed: %v", err)
+		t.Fatalf("ParseXlsx 失败: %v", err)
 	}
 
-	// 表格应有分隔符
-	if !strings.Contains(doc.Text, "---") {
-		t.Fatal("XLSX output should contain table separator '---'")
-	}
-
-	// 不应包含 XML
-	if strings.Contains(doc.Text, "<sheet") || strings.Contains(doc.Text, "<row>") {
-		t.Fatal("XLSX output should not contain raw XML tags")
+	// JSON 输出不应包含 XML 标签
+	if strings.Contains(doc.Content(), "<sheet") || strings.Contains(doc.Content(), "<row>") {
+		t.Fatal("XLSX 输出不应包含原始 XML 标签")
 	}
 }
 
@@ -610,144 +661,209 @@ func TestGetParserByExt(t *testing.T) {
 		ext         string
 		description string
 	}{
-		{".pdf", "PDF extension"},
-		{".docx", "DOCX extension"},
-		{".pptx", "PPTX extension"},
-		{".xlsx", "XLSX extension"},
-		{".csv", "CSV extension"},
-		{".html", "HTML extension"},
-		{".htm", "HTM extension"},
-		{".jpg", "JPG extension"},
-		{".jpeg", "JPEG extension"},
-		{".png", "PNG extension"},
-		{".txt", "TXT fallback"},
-		{".unknown", "Unknown extension"},
+		{".pdf", "PDF 扩展名"},
+		{".docx", "DOCX 扩展名"},
+		{".pptx", "PPTX 扩展名"},
+		{".xlsx", "XLSX 扩展名"},
+		{".csv", "CSV 扩展名"},
+		{".html", "HTML 扩展名"},
+		{".htm", "HTM 扩展名"},
+		{".jpg", "JPG 扩展名"},
+		{".jpeg", "JPEG 扩展名"},
+		{".png", "PNG 扩展名"},
+		// 图片类
+		{".gif", "GIF 扩展名"},
+		{".webp", "WebP 扩展名"},
+		{".bmp", "BMP 扩展名"},
+		{".tiff", "TIFF 扩展名"},
+		{".tif", "TIF 扩展名"},
+		// 数据类
+		{".json", "JSON 扩展名"},
+		{".yml", "YML 扩展名"},
+		{".yaml", "YAML 扩展名"},
+		{".xml", "XML 扩展名"},
+		{".eml", "EML 扩展名"},
+		{".msg", "MSG 扩展名"},
+		{".toml", "TOML 扩展名"},
+		{".log", "LOG 扩展名"},
+		// 兜底
+		{".txt", "TXT 兜底"},
+		{".unknown", "未知扩展名"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.ext, func(t *testing.T) {
 			pf := getParserByExt(tt.ext)
 			if pf == nil {
-				t.Fatalf("getParserByExt(%q) should not return nil for %s", tt.ext, tt.description)
+				t.Fatalf("getParserByExt(%q) 不应为 nil（%s）", tt.ext, tt.description)
 			}
 		})
 	}
 }
 
-func TestGetParserByMIME(t *testing.T) {
-	tests := []struct {
-		mime        string
-		description string
-	}{
-		{"application/pdf", "PDF MIME"},
-		{"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "DOCX MIME"},
-		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "PPTX MIME"},
-		{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "XLSX MIME"},
-		{"text/csv", "CSV MIME"},
-		{"text/html", "HTML MIME"},
-		{"image/jpeg", "JPEG MIME"},
-		{"image/png", "PNG MIME"},
-		{"text/plain", "Plain text MIME"},
-		{"application/json", "JSON MIME (text/* fallback)"},
-		{"application/octet-stream", "Binary MIME (ParseText fallback)"},
+func TestGetParserByExt_FallbackIsParseText(t *testing.T) {
+	pf := getParserByExt(".unknown-ext")
+	if pf == nil {
+		t.Fatal("未知扩展名应返回兜底 parser")
 	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("mime_%s", strings.ReplaceAll(tt.mime, "/", "_")), func(t *testing.T) {
-			pf := getParserByMIME(tt.mime)
-			if pf == nil {
-				t.Fatalf("getParserByMIME(%q) returned nil for %s", tt.mime, tt.description)
-			}
-		})
+	// 兜底 parser 应能处理任意文本输入
+	doc, err := pf(strings.NewReader("hello"))
+	if err != nil {
+		t.Fatalf("兜底 parser 处理失败: %v", err)
+	}
+	if doc.Type() != RawDocText {
+		t.Fatalf("兜底 parser 应返回 RawDocText, 实际 %q", doc.Type())
 	}
 }
 
 // ========================= Open / New Integration =========================
 
+func TestOpen_RejectsEmptyPath(t *testing.T) {
+	_, err := Open("")
+	if err == nil {
+		t.Fatal("Open 应拒绝空路径")
+	}
+}
+
+func TestOpen_RejectsRelativePath(t *testing.T) {
+	_, err := Open("relative/path/file.txt")
+	if err == nil {
+		t.Fatal("Open 应拒绝相对路径")
+	}
+}
+
+func TestOpen_RejectsDirectory(t *testing.T) {
+	absDir, _ := filepath.Abs(testDataDir)
+	_, err := Open(absDir)
+	if err == nil {
+		t.Fatal("Open 应拒绝目录")
+	}
+}
+
+func TestOpen_RejectsNonExistentFile(t *testing.T) {
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "nonexistent.txt"))
+	_, err := Open(absPath)
+	if err == nil {
+		t.Fatal("Open 应拒绝不存在的文件")
+	}
+}
+
+func TestOpen_JSON(t *testing.T) {
+	skipIfFileMissing(t, "simple.json")
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "simple.json"))
+	doc, err := Open(absPath)
+	if err != nil {
+		t.Fatalf("Open JSON 失败: %v", err)
+	}
+	if doc.Content() == "" {
+		t.Fatal("JSON 文档内容不应为空")
+	}
+	// JSON 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
+	}
+	// 验证 FileName 回填为绝对路径
+	if !filepath.IsAbs(doc.FileName()) {
+		t.Fatalf("FileName 应为绝对路径, 实际: %q", doc.FileName())
+	}
+}
+
 func TestOpen_CSV(t *testing.T) {
 	skipIfFileMissing(t, "simple.csv")
-	doc, err := Open(filepath.Join(testDataDir, "simple.csv"))
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "simple.csv"))
+	doc, err := Open(absPath)
 	if err != nil {
-		t.Fatalf("Open CSV failed: %v", err)
+		t.Fatalf("Open CSV 失败: %v", err)
 	}
-	if doc.GetContent() == "" {
-		t.Fatal("CSV document content should not be empty")
+	if doc.Content() == "" {
+		t.Fatal("CSV 文档内容不应为空")
 	}
-	if doc.GetMimeType() != "text/csv" {
-		t.Fatalf("Expected MIME 'text/csv', got: %q", doc.GetMimeType())
+	//CSV 归一化为 RawDocData
+	if doc.Type() != RawDocData {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
 	}
-	if doc.GetSource() == "" {
-		t.Fatal("Source should not be empty")
+	if doc.FileName() == "" {
+		t.Fatal("FileName 不应为空")
 	}
 }
 
 func TestOpen_HTML(t *testing.T) {
 	skipIfFileMissing(t, "simple.html")
-	doc, err := Open(filepath.Join(testDataDir, "simple.html"))
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "simple.html"))
+	doc, err := Open(absPath)
 	if err != nil {
-		t.Fatalf("Open HTML failed: %v", err)
+		t.Fatalf("Open HTML 失败: %v", err)
 	}
-	if doc.GetContent() == "" {
-		t.Fatal("HTML document content should not be empty")
+	if doc.Content() == "" {
+		t.Fatal("HTML 文档内容不应为空")
 	}
-	if doc.GetMimeType() != "text/html" {
-		t.Fatalf("Expected MIME 'text/html', got: %q", doc.GetMimeType())
+	// HTML 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
 }
 
 func TestOpen_PDF(t *testing.T) {
 	skipIfFileMissing(t, "simple.pdf")
-	doc, err := Open(filepath.Join(testDataDir, "simple.pdf"))
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "simple.pdf"))
+	doc, err := Open(absPath)
 	if err != nil {
-		t.Fatalf("Open PDF failed: %v", err)
+		t.Fatalf("Open PDF 失败: %v", err)
 	}
-	if doc.GetContent() == "" {
-		t.Fatal("PDF document content should not be empty")
+	if doc.Content() == "" {
+		t.Fatal("PDF 文档内容不应为空")
 	}
-	if doc.GetMimeType() != "application/pdf" {
-		t.Fatalf("Expected MIME 'application/pdf', got: %q", doc.GetMimeType())
+	// PDF 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
 }
 
 func TestOpen_Image(t *testing.T) {
 	skipIfFileMissing(t, "simple.jpg")
-	doc, err := Open(filepath.Join(testDataDir, "simple.jpg"))
+	absPath, _ := filepath.Abs(filepath.Join(testDataDir, "simple.jpg"))
+	doc, err := Open(absPath)
 	if err != nil {
-		t.Fatalf("Open JPEG failed: %v", err)
+		t.Fatalf("Open JPEG 失败: %v", err)
 	}
-	if doc.GetContent() == "" {
-		t.Fatal("Image document content should not be empty")
+	if doc.Content() == "" {
+		t.Fatal("图片文档内容不应为空")
 	}
-	if doc.GetMimeType() != "image/jpeg" {
-		t.Fatalf("Expected MIME 'image/jpeg', got: %q", doc.GetMimeType())
+	// 图片归一化为 RawDocImage
+	if doc.Type() != RawDocImage {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocImage, doc.Type())
 	}
 }
 
 func TestNew_HTML(t *testing.T) {
 	htmlContent := `<html><head><title>Test</title></head><body><p>Hello</p></body></html>`
-	doc := New(htmlContent, "text/html")
+	// New 不会解析内容，调用方需保证 content 已归一化。
+	// 这里测试 HTML 内容存储，docType 选 RawDocDoc（HTML 归一化后为 document）。
+	doc := New(htmlContent, RawDocDoc)
 	if doc == nil {
-		t.Fatal("New should not return nil")
+		t.Fatal("New 不应返回 nil")
 	}
-	if doc.GetMimeType() != "text/html" {
-		t.Fatalf("Expected MIME 'text/html', got: %q", doc.GetMimeType())
+	if doc.Type() != RawDocDoc {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
-	if doc.GetContent() == "" {
-		t.Fatal("HTML document content should not be empty")
+	if doc.Content() == "" {
+		t.Fatal("HTML 文档内容不应为空")
 	}
-	if !strings.Contains(doc.GetContent(), "Hello") {
-		t.Fatal("HTML document content should contain 'Hello'")
+	if !strings.Contains(doc.Content(), "Hello") {
+		t.Fatal("HTML 文档内容应包含 'Hello'")
 	}
 }
 
 func TestNew_CSV(t *testing.T) {
 	csvContent := "a,b,c\n1,2,3"
-	doc := New(csvContent, "text/csv")
+	// New 不会解析内容，调用方需保证 content 已归一化。
+	// 这里测试 CSV 内容存储，docType 选 RawDocData（CSV 归一化后为 data）。
+	doc := New(csvContent, RawDocData)
 	if doc == nil {
-		t.Fatal("New should not return nil")
+		t.Fatal("New 不应返回 nil")
 	}
-	if doc.GetMimeType() != "text/csv" {
-		t.Fatalf("Expected MIME 'text/csv', got: %q", doc.GetMimeType())
+	if doc.Type() != RawDocData {
+		t.Fatalf("期望 docType %q, 实际 %q", RawDocData, doc.Type())
 	}
 }
 
@@ -756,6 +872,6 @@ func TestNew_CSV(t *testing.T) {
 func checkContains(t *testing.T, s, substr, label string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
-		t.Errorf("Output should contain %s %q", label, substr)
+		t.Errorf("输出应包含 %s %q", label, substr)
 	}
 }

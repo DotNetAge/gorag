@@ -1,6 +1,7 @@
 package document
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -8,16 +9,19 @@ import (
 	"net/mail"
 	"strings"
 	"time"
-
-	md "github.com/JohannesKaufmann/html-to-markdown"
 )
 
-// ParseEML 解析 EML 邮件文件（RFC 822/MIME 格式）。
-// 提取发件人、收件人、主题、日期等元信息，将正文转为 Markdown。
-func ParseEML(r io.Reader) (*RawDocument, error) {
+// ParseEML 解析 EML 邮件文件（RFC 822/MIME 格式），归一化为 dataDoc（内容为 JSON 字符串）。
+//
+// 归一化策略：
+//   - 提取发件人、收件人、主题、日期、正文等结构化字段
+//   - HTML 正文转为纯文本（去除标签），优先保留 text/plain
+//   - 输出 JSON 对象字符串：{"from":"...","to":"...","subject":"...","body":"..."}
+//   - 元数据包含 email 标记和邮件头字段
+func ParseEML(r io.Reader) (RawDoc, error) {
 	msg, err := mail.ReadMessage(r)
 	if err != nil {
-		return nil, fmt.Errorf("parse EML: %w", err)
+		return nil, fmt.Errorf("解析 EML 失败: %w", err)
 	}
 
 	// 提取元数据
@@ -27,24 +31,15 @@ func ParseEML(r io.Reader) (*RawDocument, error) {
 	cc := decodeMIMEHeader(msg.Header.Get("Cc"))
 	dateStr := msg.Header.Get("Date")
 
-	// 构建文档内容：头部 + 正文
-	var mdBuilder strings.Builder
-
-	// 邮件头作为 Markdown 元信息写入
-	mdBuilder.WriteString(fmt.Sprintf("**From:** %s\n", from))
-	mdBuilder.WriteString(fmt.Sprintf("**To:** %s\n", to))
-	if cc != "" {
-		mdBuilder.WriteString(fmt.Sprintf("**Cc:** %s\n", cc))
-	}
-	mdBuilder.WriteString(fmt.Sprintf("**Subject:** %s\n", subject))
+	// 解析日期为 RFC3339 格式
+	dateRFC3339 := ""
 	if dateStr != "" {
 		if parsedDate, err := mail.ParseDate(dateStr); err == nil {
-			mdBuilder.WriteString(fmt.Sprintf("**Date:** %s\n", parsedDate.Format(time.RFC3339)))
+			dateRFC3339 = parsedDate.Format(time.RFC3339)
 		} else {
-			mdBuilder.WriteString(fmt.Sprintf("**Date:** %s\n", dateStr))
+			dateRFC3339 = dateStr
 		}
 	}
-	mdBuilder.WriteString("\n---\n\n")
 
 	// 解析正文
 	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
@@ -54,30 +49,43 @@ func ParseEML(r io.Reader) (*RawDocument, error) {
 
 	body, err := decodeBody(msg.Body, mediaType, params)
 	if err != nil {
-		return nil, fmt.Errorf("decode EML body: %w", err)
+		return nil, fmt.Errorf("解码 EML 正文失败: %w", err)
 	}
 
-	mdBuilder.WriteString(body)
-
-	doc := NewRawDoc(strings.TrimSpace(mdBuilder.String()))
-	if subject != "" {
-		doc.SetValue("subject", subject)
-	}
-	if from != "" {
-		doc.SetValue("from", from)
-	}
-	if to != "" {
-		doc.SetValue("to", to)
+	// 构建 JSON 对象
+	emailObj := map[string]any{
+		"from":    from,
+		"to":      to,
+		"subject": subject,
+		"date":    dateRFC3339,
+		"body":    body,
 	}
 	if cc != "" {
-		doc.SetValue("cc", cc)
+		emailObj["cc"] = cc
+	}
+
+	jsonBytes, err := json.Marshal(emailObj)
+	if err != nil {
+		return nil, fmt.Errorf("EML 转 JSON 失败: %w", err)
+	}
+
+	meta := map[string]any{"email": true}
+	if subject != "" {
+		meta["subject"] = subject
+	}
+	if from != "" {
+		meta["from"] = from
+	}
+	if to != "" {
+		meta["to"] = to
+	}
+	if cc != "" {
+		meta["cc"] = cc
 	}
 	if dateStr != "" {
-		doc.SetValue("date", dateStr)
+		meta["date"] = dateStr
 	}
-	doc.SetValue("email", true)
-
-	return doc, nil
+	return newParsedDoc(string(jsonBytes), meta, RawDocData), nil
 }
 
 // decodeMIMEHeader 解码 MIME 编码的邮件头（支持 =?charset?encoding?text?= 格式）
@@ -92,7 +100,7 @@ func decodeMIMEHeader(s string) string {
 	return decoded
 }
 
-// decodeBody 递归解析邮件正文，优先 text/plain，HTML 转为 Markdown
+// decodeBody 递归解析邮件正文，优先 text/plain，HTML 转为纯文本
 func decodeBody(body io.Reader, mediaType string, params map[string]string) (string, error) {
 	switch {
 	case strings.HasPrefix(mediaType, "multipart/"):
@@ -135,11 +143,7 @@ func decodeMultipart(body io.Reader, boundary string) (string, error) {
 
 		switch {
 		case strings.HasPrefix(partMediaType, "multipart/"):
-			// 递归处理嵌套 multipart
 			plainText = decoded
-			if strings.HasPrefix(partMediaType, "multipart/alternative") {
-				plainText = decoded
-			}
 		case partMediaType == "text/plain":
 			plainText = decoded
 		case partMediaType == "text/html" && plainText == "":
@@ -165,18 +169,32 @@ func decodeTextBody(body io.Reader) (string, error) {
 	return string(data), nil
 }
 
-// decodeHTMLBody 将 HTML 正文转换为 Markdown
+// decodeHTMLBody 将 HTML 正文剥离为纯文本
 func decodeHTMLBody(body io.Reader) (string, error) {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return "", err
 	}
+	return stripHTMLTags(string(data)), nil
+}
 
-	converter := md.NewConverter("", true, &md.Options{HeadingStyle: "atx"})
-	markdown, err := converter.ConvertString(string(data))
-	if err != nil {
-		// 转换失败时返回纯文本
-		return string(data), nil
+// stripHTMLTags 简易 HTML 标签剥离，保留纯文本内容。
+func stripHTMLTags(s string) string {
+	var buf strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch r {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+			buf.WriteRune(' ')
+		default:
+			if !inTag {
+				buf.WriteRune(r)
+			}
+		}
 	}
-	return markdown, nil
+	// 折叠多余空白
+	return strings.TrimSpace(strings.Join(strings.Fields(buf.String()), " "))
 }

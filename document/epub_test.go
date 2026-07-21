@@ -69,42 +69,48 @@ func TestParseEPUB_Basic(t *testing.T) {
 	epubData := createMinimalEPUB()
 	doc, err := ParseEPUB(epubData)
 	if err != nil {
-		t.Fatalf("ParseEPUB failed: %v", err)
+		t.Fatalf("ParseEPUB 失败: %v", err)
 	}
 
-	if doc.Text == "" {
-		t.Fatal("ParseEPUB returned empty text")
+	if doc.Content() == "" {
+		t.Fatal("ParseEPUB 返回空内容")
 	}
 
 	// 验证内容被提取并转换为 Markdown
 	checks := []string{"Chapter 1", "Chapter 2", "First paragraph", "bold", "Item A", "Item B"}
 	for _, c := range checks {
-		if !strings.Contains(doc.Text, c) {
-			t.Errorf("Output should contain %q", c)
+		if !strings.Contains(doc.Content(), c) {
+			t.Errorf("输出应包含 %q", c)
 		}
 	}
 
 	// 验证不在输出中
-	if strings.Contains(doc.Text, "<html") || strings.Contains(doc.Text, "<h1>") {
-		t.Error("Output should not contain raw HTML tags")
+	if strings.Contains(doc.Content(), "<html") || strings.Contains(doc.Content(), "<h1>") {
+		t.Error("输出不应包含原始 HTML 标签")
 	}
 
 	// 验证元数据
-	if doc.Meta["title"] != "Test EPUB Book" {
-		t.Errorf("Expected title 'Test EPUB Book', got: %v", doc.Meta["title"])
+	meta := doc.Meta()
+	if meta["title"] != "Test EPUB Book" {
+		t.Errorf("期望 title 'Test EPUB Book', 实际: %v", meta["title"])
 	}
-	if doc.Meta["author"] != "Test Author" {
-		t.Errorf("Expected author 'Test Author', got: %v", doc.Meta["author"])
+	if meta["author"] != "Test Author" {
+		t.Errorf("期望 author 'Test Author', 实际: %v", meta["author"])
 	}
-	if doc.Meta["language"] != "en" {
-		t.Errorf("Expected language 'en', got: %v", doc.Meta["language"])
+	if meta["language"] != "en" {
+		t.Errorf("期望 language 'en', 实际: %v", meta["language"])
+	}
+
+	// V2：EPUB 归一化为 RawDocDoc
+	if doc.Type() != RawDocDoc {
+		t.Errorf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
 }
 
 func TestParseEPUB_InvalidZIP(t *testing.T) {
 	_, err := ParseEPUB(strings.NewReader("not a zip file"))
 	if err == nil {
-		t.Fatal("Expected error for invalid ZIP")
+		t.Fatal("无效 ZIP 应返回错误")
 	}
 }
 
@@ -115,7 +121,7 @@ func TestParseEPUB_EmptyZIP(t *testing.T) {
 
 	_, err := ParseEPUB(&buf)
 	if err == nil {
-		t.Fatal("Expected error for ZIP without container.xml")
+		t.Fatal("无 container.xml 的 ZIP 应返回错误")
 	}
 }
 
@@ -128,7 +134,7 @@ func TestParseEPUB_NoContainer(t *testing.T) {
 
 	_, err := ParseEPUB(&buf)
 	if err == nil {
-		t.Fatal("Expected error for EPUB without container.xml")
+		t.Fatal("无 container.xml 的 EPUB 应返回错误")
 	}
 }
 
@@ -137,7 +143,7 @@ func TestParseEPUB_NestedTitle(t *testing.T) {
 	epubData := createMinimalEPUB()
 	doc, err := ParseEPUB(epubData)
 	if err != nil {
-		t.Fatalf("ParseEPUB failed: %v", err)
+		t.Fatalf("ParseEPUB 失败: %v", err)
 	}
 	_ = doc
 }
@@ -146,11 +152,13 @@ func TestParseEPUB_ViaNew(t *testing.T) {
 	epubData := createMinimalEPUB()
 	content := epubData.String()
 
-	doc := New(content, "application/epub+zip")
+	// V2：New 不会解析内容，调用方需保证 content 已归一化。
+	// EPUB 归一化后为 RawDocDoc。
+	doc := New(content, RawDocDoc)
 	if doc == nil {
-		t.Fatal("New should not return nil for EPUB")
+		t.Fatal("New 不应返回 nil（EPUB 场景）")
 	}
-	if doc.GetMimeType() != "application/epub+zip" {
-		t.Errorf("Expected MIME 'application/epub+zip', got: %q", doc.GetMimeType())
+	if doc.Type() != RawDocDoc {
+		t.Errorf("期望 docType %q, 实际 %q", RawDocDoc, doc.Type())
 	}
 }

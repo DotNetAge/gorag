@@ -156,14 +156,21 @@ type promptData struct {
 	Query     string
 }
 
-// Format 格式化单个 Hit
+// Format 格式化 Hit 容器为 Prompt，取第 1 个 Chunk 作为代表。
+// hit.Chunks 为空时返回空字符串。
 func (f *PromptFormatter) Format(hit *core.Hit) string {
-	return f.formatDocument(1, hit)
+	if hit == nil || len(hit.Chunks) == 0 {
+		return ""
+	}
+	return f.formatChunk(1, hit.Chunks[0])
 }
 
-// formatDocument 格式化单个文档
-func (f *PromptFormatter) formatDocument(index int, hit *core.Hit) string {
-	content := hit.Content
+// formatChunk 格式化单个 ChunkHit 为文档片段，直接使用 ch.Content / ch.DocID / ch.Score。
+func (f *PromptFormatter) formatChunk(index int, ch core.ChunkHit) string {
+	if ch.Chunk == nil {
+		return ""
+	}
+	content := ch.Content
 	if f.config.ContentMax > 0 && len(content) > f.config.ContentMax {
 		content = content[:f.config.ContentMax] + "..."
 	}
@@ -171,12 +178,12 @@ func (f *PromptFormatter) formatDocument(index int, hit *core.Hit) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "[Document %d]", index)
 
-	if f.config.IncludeScore && hit.Score > 0 {
-		fmt.Fprintf(&sb, " (relevance: %.4f)", hit.Score)
+	if f.config.IncludeScore && ch.Score > 0 {
+		fmt.Fprintf(&sb, " (relevance: %.4f)", ch.Score)
 	}
 
-	if f.config.IncludeSource && hit.DocID != "" {
-		fmt.Fprintf(&sb, " [source: %s]", hit.DocID)
+	if f.config.IncludeSource && ch.DocID != "" {
+		fmt.Fprintf(&sb, " [source: %s]", ch.DocID)
 	}
 
 	sb.WriteString("\n")
@@ -185,13 +192,19 @@ func (f *PromptFormatter) formatDocument(index int, hit *core.Hit) string {
 	return sb.String()
 }
 
-// FormatAll 格式化多个 Hit（不包含查询）
-func (f *PromptFormatter) FormatAll(hits []core.Hit) string {
-	return f.FormatWithContext(hits, "")
+// FormatAll 格式化 Hit 容器中的全部 Chunks，不包含查询。
+// 遍历 hit.Chunks 输出每个 Chunk 为独立 Document。
+func (f *PromptFormatter) FormatAll(hit *core.Hit) string {
+	return f.FormatWithContext(hit, "")
 }
 
-// FormatWithContext 格式化为完整 Prompt
-func (f *PromptFormatter) FormatWithContext(hits []core.Hit, query string) string {
+// FormatWithContext 格式化为完整 Prompt。
+// 遍历 hit.Chunks 输出每个 Chunk 为独立 Document，MaxDocuments 限制输出 Document 数量。
+func (f *PromptFormatter) FormatWithContext(hit *core.Hit, query string) string {
+	if hit == nil || len(hit.Chunks) == 0 {
+		return ""
+	}
+
 	var sb strings.Builder
 
 	// System prompt
@@ -204,13 +217,13 @@ func (f *PromptFormatter) FormatWithContext(hits []core.Hit, query string) strin
 	// Reference documents
 	sb.WriteString("## Reference Documents\n\n")
 
-	maxDocs := len(hits)
+	maxDocs := len(hit.Chunks)
 	if f.config.MaxDocuments > 0 && maxDocs > f.config.MaxDocuments {
 		maxDocs = f.config.MaxDocuments
 	}
 
 	for i := 0; i < maxDocs; i++ {
-		sb.WriteString(f.formatDocument(i+1, &hits[i]))
+		sb.WriteString(f.formatChunk(i+1, hit.Chunks[i]))
 		if i < maxDocs-1 {
 			sb.WriteString(f.config.Separator)
 		}
@@ -225,16 +238,20 @@ func (f *PromptFormatter) FormatWithContext(hits []core.Hit, query string) strin
 	return sb.String()
 }
 
-// FormatWithTemplate 使用自定义模板格式化
-func (f *PromptFormatter) FormatWithTemplate(hits []core.Hit, query string) (string, error) {
-	maxDocs := len(hits)
+// FormatWithTemplate 使用自定义模板格式化。
+func (f *PromptFormatter) FormatWithTemplate(hit *core.Hit, query string) (string, error) {
+	if hit == nil || len(hit.Chunks) == 0 {
+		return "", nil
+	}
+
+	maxDocs := len(hit.Chunks)
 	if f.config.MaxDocuments > 0 && maxDocs > f.config.MaxDocuments {
 		maxDocs = f.config.MaxDocuments
 	}
 
 	docs := make([]string, maxDocs)
 	for i := 0; i < maxDocs; i++ {
-		docs[i] = f.formatDocument(i+1, &hits[i])
+		docs[i] = f.formatChunk(i+1, hit.Chunks[i])
 	}
 
 	data := promptData{
@@ -244,41 +261,41 @@ func (f *PromptFormatter) FormatWithTemplate(hits []core.Hit, query string) (str
 
 	tmpl, err := template.New("context").Parse(f.config.ContextTemplate)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse context template: %w", err)
+		return "", fmt.Errorf("解析上下文模板失败: %w", err)
 	}
 
 	var sb strings.Builder
 	if err := tmpl.Execute(&sb, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
+		return "", fmt.Errorf("执行模板失败: %w", err)
 	}
 
 	return sb.String(), nil
 }
 
 // Write 格式化并写入输出流
-func (f *PromptFormatter) Write(w io.Writer, hits []core.Hit) error {
-	_, err := w.Write([]byte(f.FormatAll(hits)))
+func (f *PromptFormatter) Write(w io.Writer, hit *core.Hit) error {
+	_, err := w.Write([]byte(f.FormatAll(hit)))
 	return err
 }
 
 // WriteWithContext 格式化完整 Prompt 并写入输出流
-func (f *PromptFormatter) WriteWithContext(w io.Writer, hits []core.Hit, query string) error {
-	_, err := w.Write([]byte(f.FormatWithContext(hits, query)))
+func (f *PromptFormatter) WriteWithContext(w io.Writer, hit *core.Hit, query string) error {
+	_, err := w.Write([]byte(f.FormatWithContext(hit, query)))
 	return err
 }
 
 // FormatForRAG 生成标准的 RAG Prompt
 // 包含系统提示、文档上下文和用户查询
-func (f *PromptFormatter) FormatForRAG(hits []core.Hit, query string) string {
-	return f.FormatWithContext(hits, query)
+func (f *PromptFormatter) FormatForRAG(hit *core.Hit, query string) string {
+	return f.FormatWithContext(hit, query)
 }
 
 // FormatMessages 生成对话格式的消息列表
 // 返回 [system, user] 两条消息
-func (f *PromptFormatter) FormatMessages(hits []core.Hit, query string) []Message {
+func (f *PromptFormatter) FormatMessages(hit *core.Hit, query string) []Message {
 	return []Message{
 		{Role: "system", Content: f.config.SystemPrompt},
-		{Role: "user", Content: f.FormatWithContext(hits, query)},
+		{Role: "user", Content: f.FormatWithContext(hit, query)},
 	}
 }
 
@@ -298,25 +315,33 @@ func NewJSONFormatter() *JSONFormatter {
 	return &JSONFormatter{}
 }
 
-// FormatAll 格式化为 JSON
-func (f *JSONFormatter) FormatAll(hits []core.Hit) string {
+// FormatAll 格式化为 JSON。
+// Hit 是容器（持有 Chunks/Nodes/Edges），不再有 ID/DocID/Content 字段。
+// 遍历 hit.Chunks 输出每个 Chunk 的 ID/DocID/Content。
+// 单个 Hit 可能对应多个 Chunk。
+func (f *JSONFormatter) FormatAll(hit *core.Hit) string {
+	if hit == nil || len(hit.Chunks) == 0 {
+		return "[]"
+	}
 	var sb strings.Builder
 	sb.WriteString("[\n")
-	for i, hit := range hits {
+	for i, ch := range hit.Chunks {
+		if ch.Chunk == nil {
+			continue
+		}
+		if i > 0 {
+			sb.WriteString(",\n")
+		}
 		sb.WriteString("  {\n")
-		fmt.Fprintf(&sb, "    \"id\": \"%s\",\n", hit.ID)
-		fmt.Fprintf(&sb, "    \"score\": %.4f,\n", hit.Score)
-		fmt.Fprintf(&sb, "    \"doc_id\": \"%s\",\n", hit.DocID)
+		fmt.Fprintf(&sb, "    \"id\": \"%s\",\n", ch.ID)
+		fmt.Fprintf(&sb, "    \"score\": %.4f,\n", ch.Score)
+		fmt.Fprintf(&sb, "    \"doc_id\": \"%s\",\n", ch.DocID)
 		// 转义内容中的特殊字符
-		content := strings.ReplaceAll(hit.Content, "\n", "\\n")
+		content := strings.ReplaceAll(ch.Content, "\n", "\\n")
 		content = strings.ReplaceAll(content, "\"", "\\\"")
 		fmt.Fprintf(&sb, "    \"content\": \"%s\"\n", content)
 		sb.WriteString("  }")
-		if i < len(hits)-1 {
-			sb.WriteString(",")
-		}
-		sb.WriteString("\n")
 	}
-	sb.WriteString("]")
+	sb.WriteString("\n]")
 	return sb.String()
 }

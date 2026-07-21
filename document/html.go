@@ -8,10 +8,10 @@ import (
 	"github.com/JohannesKaufmann/html-to-markdown"
 )
 
-// ParseHTML 将 HTML 内容转换为 Markdown 格式的 RawDocument。
+// ParseHTML 将 HTML 内容转换为 docDoc（内容为 Markdown）。
 // 使用 html-to-markdown 库处理标题、列表、链接、表格、图片、代码块等元素。
-// 自动从 <title> 标签提取文档标题。
-func ParseHTML(r io.Reader) (*RawDocument, error) {
+// 自动从 <title> 标签提取文档标题写入元数据。
+func ParseHTML(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -23,7 +23,7 @@ func ParseHTML(r io.Reader) (*RawDocument, error) {
 
 	markdown, err := converter.ConvertString(htmlContent)
 	if err != nil {
-		slog.Error("html to markdown conversion failed", "error", err)
+		slog.Error("HTML 转 Markdown 失败", "error", err)
 		return nil, err
 	}
 
@@ -33,12 +33,11 @@ func ParseHTML(r io.Reader) (*RawDocument, error) {
 	// 提取 <title> 标签内容作为文档标题
 	title := extractTitle(htmlContent)
 
-	rawDoc := NewRawDoc(strings.TrimSpace(markdown))
+	meta := map[string]any{}
 	if title != "" {
-		rawDoc.SetValue("title", title)
+		meta["title"] = title
 	}
-
-	return rawDoc, nil
+	return newParsedDoc(strings.TrimSpace(markdown), meta, RawDocDoc), nil
 }
 
 // extractTitle 从 HTML 中提取 <title> 标签的文本内容

@@ -3,7 +3,6 @@ package document
 import (
 	"bytes"
 	"fmt"
-	"image/png"
 	"io"
 	"strings"
 
@@ -11,12 +10,13 @@ import (
 	"github.com/unidoc/unipdf/v3/model"
 )
 
-func ParsePDF(r io.Reader) (*RawDocument, error) {
+// ParsePDF 解析 PDF 文件并转换为 docDoc（内容为 Markdown）。
+// 元数据包含 title/author/pages（若存在），不提取嵌入图片附件。
+func ParsePDF(r io.Reader) (RawDoc, error) {
 	var mdBuilder strings.Builder
 	pageCount := 0
 	author := ""
 	title := ""
-	imgs := make([][]byte, 0)
 
 	// 读取所有内容
 	data, err := io.ReadAll(r)
@@ -48,7 +48,6 @@ func ParsePDF(r io.Reader) (*RawDocument, error) {
 		mdBuilder.WriteString(fmt.Sprintf("# %s\n\n", title))
 	}
 
-	imageIndex := 0
 	for i := 1; i <= pageCount; i++ {
 		page, err := pdfReader.GetPage(i)
 		if err != nil {
@@ -63,47 +62,20 @@ func ParsePDF(r io.Reader) (*RawDocument, error) {
 			if err == nil && pageText != "" {
 				mdBuilder.WriteString(textToMarkdown(pageText))
 			}
-
-			pageImages, err := ex.ExtractPageImages(&extractor.ImageExtractOptions{})
-			if err == nil && pageImages != nil {
-				for _, imgMark := range pageImages.Images {
-					if imgMark.Image == nil {
-						continue
-					}
-					goImg, err := imgMark.Image.ToGoImage()
-					if err != nil {
-						continue
-					}
-					var buf bytes.Buffer
-					if err := png.Encode(&buf, goImg); err != nil {
-						continue
-					}
-
-					imageIndex++
-					imgs = append(imgs, buf.Bytes())
-					// mediaList = append(mediaList, &BinaryResult{
-					// 	Mime: "image/png",
-					// 	Data: buf.Bytes(),
-					// 	Meta: map[string]any{
-					// 		"page":        i,
-					// 		"width":       imgMark.Width,
-					// 		"height":      imgMark.Height,
-					// 		"x":           imgMark.X,
-					// 		"y":           imgMark.Y,
-					// 		"angle":       imgMark.Angle,
-					// 		"image_index": imageIndex,
-					// 	},
-					// })
-				}
-			}
+			// 不提取嵌入图片附件
 		}
 	}
 
-	return NewRawDoc(mdBuilder.String()).
-		SetValue("title", title).
-		SetValue("author", author).
-		SetValue("pages", pageCount).
-		AddImages(imgs), nil
+	meta := map[string]any{
+		"pages": pageCount,
+	}
+	if title != "" {
+		meta["title"] = title
+	}
+	if author != "" {
+		meta["author"] = author
+	}
+	return newParsedDoc(mdBuilder.String(), meta, RawDocDoc), nil
 }
 
 func textToMarkdown(text string) string {

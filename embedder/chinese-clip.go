@@ -1,10 +1,8 @@
 package embedder
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/DotNetAge/gorag/v2/core"
@@ -86,7 +84,6 @@ func NewChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, er
 		}
 	}
 
-	// TODO: 如果模型文件不存在就返回nil
 	modelFile := cfg.modelFile
 
 	// Chinese-CLIP ONNX 模型的输入输出是固定的
@@ -195,21 +192,6 @@ func validateChineseClipModel(modelPath string, inputNames, outputNames []string
 	return true
 }
 
-// Calc 计算单个 chunk 的向量
-func (e *ChineseClipEmbedder) Calc(chunk *core.Chunk) (*core.Vector, error) {
-	if chunk == nil || chunk.Content == "" {
-		return nil, nil
-	}
-	vectors, err := e.Bulk([]*core.Chunk{chunk})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) == 0 {
-		return nil, nil
-	}
-	return vectors[0], nil
-}
-
 // CalcText 计算文本的向量
 func (e *ChineseClipEmbedder) CalcText(text string) (*core.Vector, error) {
 	if text == "" {
@@ -226,79 +208,6 @@ func (e *ChineseClipEmbedder) CalcText(text string) (*core.Vector, error) {
 		ID:     uuid.NewString(),
 		Values: embeddings[0],
 	}, nil
-}
-
-// Bulk 批量计算 chunks 的向量
-// 根据 MIMEType 判断类型：图片使用 imageEncoder，文本使用 textEncoder
-func (e *ChineseClipEmbedder) Bulk(chunks []*core.Chunk) ([]*core.Vector, error) {
-	if len(chunks) == 0 {
-		return []*core.Vector{}, nil
-	}
-
-	// 分离文本 chunks 和图片 chunks
-	var textChunks []*core.Chunk
-	var imageChunks []*core.Chunk
-	for _, chunk := range chunks {
-		if isImageMimeType(chunk.MIMEType) {
-			imageChunks = append(imageChunks, chunk)
-		} else {
-			textChunks = append(textChunks, chunk)
-		}
-	}
-
-	vectors := make([]*core.Vector, 0, len(chunks))
-
-	// 处理文本 chunks
-	if len(textChunks) > 0 {
-		texts := make([]string, len(textChunks))
-		for i, chunk := range textChunks {
-			texts[i] = chunk.Content
-		}
-		textEmbeddings, err := e.textEncoder.Embed(texts)
-		if err != nil {
-			return nil, fmt.Errorf("failed to embed text chunks: %w", err)
-		}
-		for i, chunk := range textChunks {
-			vectors = append(vectors, newVector(chunk, textEmbeddings[i]))
-		}
-	}
-
-	// 处理图片 chunks（Content 是无头 base64）
-	if len(imageChunks) > 0 {
-		// 预处理图片
-		preprocessedImages := make([][]float32, len(imageChunks))
-		for i, chunk := range imageChunks {
-			// base64 解码（无头 base64）
-			imgData, err := base64.StdEncoding.DecodeString(chunk.Content)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode base64 for chunk %s: %w", chunk.ID, err)
-			}
-			// 预处理图像
-			tensorData, err := e.imageProcessor.Preprocess(imgData)
-			if err != nil {
-				return nil, fmt.Errorf("failed to preprocess image for chunk %s: %w", chunk.ID, err)
-			}
-			preprocessedImages[i] = tensorData
-		}
-
-		imageEmbeddings, err := e.imageEncoder.Embed(preprocessedImages)
-		if err != nil {
-			return nil, fmt.Errorf("failed to embed image chunks: %w", err)
-		}
-		for i, chunk := range imageChunks {
-			vectors = append(vectors, newVector(chunk, imageEmbeddings[i]))
-		}
-	}
-
-	return vectors, nil
-}
-
-// isImageMimeType 判断 MIMEType 是否为图片类型
-func isImageMimeType(mimeType string) bool {
-	if mimeType == "" {
-		return false
-	}
-	return strings.HasPrefix(mimeType, "image")
 }
 
 // CalcImage 计算图片的向量

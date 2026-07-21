@@ -6,6 +6,7 @@ import (
 
 	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // SemanticQuery 语义查询
@@ -154,7 +155,7 @@ func NewSemanticQuery(terms string, embedder core.Embedder) core.Query {
 		BaseQuery: BaseQuery{
 			raw:        terms,
 			embedder:   embedder,
-			normalized: core.CleanText(terms),
+			normalized: utils.CleanText(terms),
 			filters:    make(map[string]any),
 		},
 		Embedder: embedder,

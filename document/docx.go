@@ -11,9 +11,10 @@ import (
 	"strings"
 )
 
-// ParseDocx reads a .docx file and converts it to Markdown.
-// Uses only standard library (archive/zip + encoding/xml).
-func ParseDocx(r io.Reader) (*RawDocument, error) {
+// ParseDocx 读取 .docx 文件并转换为 docDoc（内容为 Markdown）。
+// 仅使用标准库（archive/zip + encoding/xml）。
+// 元数据包含从 core.xml 提取的 title（若存在）。
+func ParseDocx(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -29,18 +30,21 @@ func ParseDocx(r io.Reader) (*RawDocument, error) {
 		return nil, err
 	}
 
-	// Extract title from core.xml if available
+	// 从 core.xml 提取 title（若存在）
 	title := extractDocxTitle(reader)
 
-	return NewRawDoc(mdContent).
-		SetValue("title", title), nil
+	meta := map[string]any{}
+	if title != "" {
+		meta["title"] = title
+	}
+	return newParsedDoc(mdContent, meta, RawDocDoc), nil
 }
 
-// --- internal types for OOXML parsing ---
+// --- OOXML 解析的内部类型 ---
 
 type xmlRelationships struct {
-	XMLName       xml.Name        `xml:"Relationships"`
-	Relationship  []xmlRel        `xml:"Relationship"`
+	XMLName      xml.Name `xml:"Relationships"`
+	Relationship []xmlRel `xml:"Relationship"`
 }
 
 type xmlRel struct {
@@ -79,7 +83,7 @@ func xmlEscape(s, set string) string {
 	return strings.NewReplacer(replacer...).Replace(s)
 }
 
-// --- docx to markdown core logic (forked from mattn/docx2md) ---
+// --- docx 转 Markdown 核心逻辑（参考 mattn/docx2md） ---
 
 type docxFile struct {
 	rels xmlRelationships
@@ -91,8 +95,8 @@ type docxFile struct {
 type xmlNumbering struct {
 	XMLName     xml.Name `xml:"numbering"`
 	AbstractNum []struct {
-		AbstractNumID string       `xml:"abstractNumId,attr"`
-		Lvl          []xmlNumLvl   `xml:"lvl"`
+		AbstractNumID string      `xml:"abstractNumId,attr"`
+		Lvl           []xmlNumLvl `xml:"lvl"`
 	} `xml:"abstractNum"`
 	Num []struct {
 		NumID         string `xml:"numId,attr"`
@@ -103,8 +107,8 @@ type xmlNumbering struct {
 }
 
 type xmlNumLvl struct {
-	Ilvl   string `xml:"ilvl,attr"`
-	Start  struct {
+	Ilvl  string `xml:"ilvl,attr"`
+	Start struct {
 		Val string `xml:"val,attr"`
 	} `xml:"start"`
 	NumFmt struct {
@@ -237,7 +241,7 @@ func (zf *docxFile) walk(node *xmlNode, w io.Writer) error {
 			fmt.Fprint(w, "`")
 		}
 	case "tbl":
-		// table
+		// 表格
 		var rows [][]string
 		for i := range node.Nodes {
 			if node.Nodes[i].XMLName.Local != "tr" {
@@ -352,7 +356,7 @@ func (zf *docxFile) walk(node *xmlNode, w io.Writer) error {
 		}
 		fmt.Fprintln(w)
 	case "blip":
-		// images embedded in docx - skip inline images for text extraction
+		// docx 内嵌图片 - 跳过内联图片以专注文本提取
 	case "Fallback":
 	case "txbxContent":
 		var cbuf bytes.Buffer
@@ -415,7 +419,7 @@ func docxToMarkdown(zr *zip.Reader) (string, error) {
 		}
 	}
 	if docFile == nil {
-		return "", errors.New("invalid docx: word/document.xml not found")
+		return "", errors.New("无效的 DOCX: 未找到 word/document.xml")
 	}
 
 	rc, err := docFile.Open()
@@ -447,7 +451,7 @@ func docxToMarkdown(zr *zip.Reader) (string, error) {
 	return buf.String(), nil
 }
 
-// extractDocxTitle tries to read the title from docProps/core.xml
+// extractDocxTitle 尝试从 docProps/core.xml 中读取文档标题
 func extractDocxTitle(zr *zip.Reader) string {
 	for _, f := range zr.File {
 		if f.Name == "docProps/core.xml" {
@@ -460,7 +464,7 @@ func extractDocxTitle(zr *zip.Reader) string {
 			if err != nil {
 				return ""
 			}
-			// Simple extraction: find <dc:title>...</dc:title>
+			// 简单提取：查找 <dc:title>...</dc:title>
 			start := bytes.Index(b, []byte("<dc:title>"))
 			if start == -1 {
 				start = bytes.Index(b, []byte("<dcterms:title>"))

@@ -1,28 +1,37 @@
 package indexer
 
 import (
+	"os"
 	"strings"
 	"time"
 
-	"github.com/DotNetAge/gorag/v2/chunker"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/logging"
-	"github.com/DotNetAge/gorag/v2/structurizer"
+	"github.com/DotNetAge/gorag/v2/utils"
+)
+
+// 分块策略常量。
+const (
+	StrategyRecursive = "recursive"
+	StrategyParagraph = "paragraph"
+	StrategySentence  = "sentence"
+	StrategyCode      = "code"
+	StrategyParentDoc = "parent_doc"
 )
 
 // 默认分块策略
-var defaultChunkStrategy = chunker.StrategyRecursive
+var defaultChunkStrategy = StrategyRecursive
 
 // ChunkOption 分块选项
 type ChunkOption func(*chunkOption)
 
 type chunkOption struct {
-	strategy core.ChunkStrategy
+	strategy string
 	logger   logging.Logger
 }
 
 // WithChunkStrategy 设置分块策略
-func WithChunkStrategy(strategy core.ChunkStrategy) ChunkOption {
+func WithChunkStrategy(strategy string) ChunkOption {
 	return func(o *chunkOption) {
 		o.strategy = strategy
 	}
@@ -40,25 +49,25 @@ func WithChunkLogger(logger logging.Logger) ChunkOption {
 }
 
 // autoSelectStrategy 根据内容自动选择最佳分块策略
-func autoSelectStrategy(content string, mime string) core.ChunkStrategy {
+func autoSelectStrategy(content string, mime string) string {
 	// 1. 根据 MIME 类型选择
 	switch mime {
 	case core.MimeTypeApplicationJSON, core.MimeTypeTextYAML,
 		core.MimeTypeTextXML, core.MimeTypeApplicationXML,
 		core.MimeTypeTextTOML:
-		return chunker.StrategyRecursive
+		return StrategyRecursive
 	case core.MimeTypeTextHTML, core.MimeTypeTextMarkdown:
-		return chunker.StrategyParagraph
+		return StrategyParagraph
 	}
 
 	// 2. 代码检测 - 包含代码关键字
 	if isCodeContent(content) {
-		return chunker.StrategyCode
+		return StrategyCode
 	}
 
 	// 3. 短文本检测
 	if len(content) < 200 {
-		return chunker.StrategySentence
+		return StrategySentence
 	}
 
 	// 4. 长文本检测 - 适合 ParentDoc 两级分块
@@ -66,26 +75,26 @@ func autoSelectStrategy(content string, mime string) core.ChunkStrategy {
 	if len(content) > 2000 {
 		// 非结构化长文本使用 ParentDoc
 		if !isCodeContent(content) && !isMarkdownContent(content) && !isTableContent(content) {
-			return chunker.StrategyParentDoc
+			return StrategyParentDoc
 		}
 		// Markdown/表格长文本可以用 ParentDoc 增强
 		if isMarkdownContent(content) || isTableContent(content) {
-			return chunker.StrategyParentDoc
+			return StrategyParentDoc
 		}
 	}
 
 	// 5. Markdown 检测
 	if isMarkdownContent(content) {
-		return chunker.StrategyParagraph
+		return StrategyParagraph
 	}
 
 	// 6. 表格检测 - 包含表格结构
 	if isTableContent(content) {
-		return chunker.StrategyRecursive
+		return StrategyRecursive
 	}
 
 	// 7. 默认使用递归分块
-	return chunker.StrategyRecursive
+	return StrategyRecursive
 }
 
 // isCodeContent 检测内容是否为代码
@@ -156,9 +165,8 @@ func isTableContent(content string) bool {
 	return tableScore >= 2
 }
 
-// GetChunks 根据文本内容进行结构化和分块
-// 如果没有指定策略，会根据内容自动选择最佳分块策略
-// 返回完整的分块数组
+// GetChunks 根据文本内容进行结构化和分块。
+// 如果没有指定策略，会根据内容自动选择最佳分块策略，返回完整的分块数组。
 func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	// 应用选项
 	cfg := &chunkOption{strategy: defaultChunkStrategy, logger: logging.DefaultNoopLogger()}
@@ -181,28 +189,31 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		cfg.strategy = autoSelectStrategy(content, mime)
 	}
 
-	// 3. Structurizing 结构化索引内容，获取 StructuredDocument
-	doc, err := structurizer.New(content, mime)
-	if err != nil {
-		return nil, err
+	// 最小占位实现：整个内容作为单个 Chunk
+	chunkID := generateChunkID("text", 0, content)
+	chunks := []*core.Chunk{
+		{
+			ID:       chunkID,
+			DocID:    "text",
+			Title:    extractFirstLine(content),
+			Summary:  "",
+			Content:  content,
+			Index:    0,
+			StartPos: 0,
+			EndPos:   len(content),
+			Metadata: map[string]any{
+				"mime_type": mime,
+				"strategy":  cfg.strategy,
+				"source":    "text",
+			},
+		},
 	}
 
 	chunkStart := time.Now()
-	// 4. Chunking 分块索引内容，获取 Chunk
-	chunkerInstance, err := chunker.CreateChunker(cfg.strategy)
-	if err != nil {
-		return nil, err
-	}
-
-	chunks, err := chunkerInstance.Chunk(doc)
-	if err != nil {
-		return nil, err
-	}
-
 	cfg.logger.Debug("chunker.chunked",
 		"source", "text",
 		"mime", mime,
-		"strategy", string(cfg.strategy),
+		"strategy", cfg.strategy,
 		"chunks", len(chunks),
 		"duration_ms", time.Since(chunkStart).Milliseconds(),
 	)
@@ -210,9 +221,8 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	return chunks, nil
 }
 
-// GetFileChunks 根据文件路径进行结构化和分块
-// 如果没有指定策略，会根据内容自动选择最佳分块策略
-// 返回完整的分块数组
+// GetFileChunks 根据文件路径进行结构化和分块。
+// 如果没有指定策略，会根据内容自动选择最佳分块策略，返回完整的分块数组。
 func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	// 应用选项
 	cfg := &chunkOption{strategy: defaultChunkStrategy, logger: logging.DefaultNoopLogger()}
@@ -221,15 +231,15 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 	}
 
 	parseStart := time.Now()
-	// 1. Structurizing 打开并结构化文件，获取 StructuredDocument
-	doc, err := structurizer.Open(file)
+	// 直接读取文件内容
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
+	content := string(data)
 
-	// 2. 获取 MIME 类型和内容（通过 RawDoc）
-	mime := doc.RawDoc.GetMimeType()
-	content := doc.RawDoc.GetContent()
+	// 1. 推断 MIME 类型
+	mime := core.ParseMimeTypeFromText(content)
 	cfg.logger.Debug("chunker.parse",
 		"source", "file",
 		"file", file,
@@ -238,35 +248,49 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 		"duration_ms", time.Since(parseStart).Milliseconds(),
 	)
 
-	// 3. 如果未指定策略，自动选择
+	// 2. 如果未指定策略，自动选择
 	if cfg.strategy == "" || cfg.strategy == defaultChunkStrategy {
 		cfg.strategy = autoSelectStrategy(content, mime)
 	}
 
+	// 最小占位实现：整个文件内容作为单个 Chunk
+	docID := utils.GenerateID([]byte(content))
+	chunkID := generateChunkID(docID, 0, content)
+	chunks := []*core.Chunk{
+		{
+			ID:       chunkID,
+			DocID:    docID,
+			Title:    extractFirstLine(content),
+			Summary:  "",
+			Content:  content,
+			Index:    0,
+			StartPos: 0,
+			EndPos:   len(content),
+			Metadata: map[string]any{
+				"mime_type":   mime,
+				"strategy":    cfg.strategy,
+				"source_file": file,
+			},
+		},
+	}
+
 	chunkStart := time.Now()
-	// 4. Chunking 分块索引内容，获取 Chunk
-	chunkerInstance, err := chunker.CreateChunker(cfg.strategy)
-	if err != nil {
-		return nil, err
-	}
-
-	chunks, err := chunkerInstance.Chunk(doc)
-	if err != nil {
-		return nil, err
-	}
-
 	cfg.logger.Debug("chunker.chunked",
 		"source", "file",
 		"file", file,
 		"mime", mime,
-		"strategy", string(cfg.strategy),
+		"strategy", cfg.strategy,
 		"chunks", len(chunks),
 		"duration_ms", time.Since(chunkStart).Milliseconds(),
 	)
 
-	// for i := range chunks {
-	// 	chunks[i].Metadata["file"] = strings.ToLower(file)
-	// }
-
 	return chunks, nil
+}
+
+// extractFirstLine 提取内容的第一行作为标题（用于最小占位实现）。
+func extractFirstLine(content string) string {
+	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
+		return strings.TrimSpace(content[:idx])
+	}
+	return strings.TrimSpace(content)
 }

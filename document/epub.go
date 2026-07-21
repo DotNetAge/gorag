@@ -13,18 +13,19 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown"
 )
 
-// ParseEPUB 解析 EPUB 电子书，将内容提取为 Markdown 格式。
+// ParseEPUB 解析 EPUB 电子书，将内容提取为 docDoc（Markdown）。
 // EPUB 是 ZIP 容器，包含 OPF 元数据文件和 XHTML 内容文件。
 // 使用已有的 html-to-markdown 库将 XHTML 转为 Markdown。
-func ParseEPUB(r io.Reader) (*RawDocument, error) {
+// 元数据包含 title/author/language（若存在），不返回嵌入图片。
+func ParseEPUB(r io.Reader) (RawDoc, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("read epub: %w", err)
+		return nil, fmt.Errorf("读取 EPUB 失败: %w", err)
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("invalid epub (zip): %w", err)
+		return nil, fmt.Errorf("无效的 EPUB (ZIP) 文件: %w", err)
 	}
 
 	// 1. 读取 META-INF/container.xml 找到 OPF 文件路径
@@ -41,33 +42,29 @@ func ParseEPUB(r io.Reader) (*RawDocument, error) {
 	}
 
 	// 3. 按 spine 顺序读取内容文件，转换为 Markdown
-	content, images, err := readSpineItems(zr, opf, opfDir)
+	content, err := readSpineItems(zr, opf, opfDir)
 	if err != nil {
 		return nil, err
 	}
 
-	doc := NewRawDoc(strings.TrimSpace(content))
+	meta := map[string]any{}
 	if opf.Title != "" {
-		doc.SetValue("title", opf.Title)
+		meta["title"] = opf.Title
 	}
 	if opf.Creator != "" {
-		doc.SetValue("author", opf.Creator)
+		meta["author"] = opf.Creator
 	}
 	if opf.Language != "" {
-		doc.SetValue("language", opf.Language)
+		meta["language"] = opf.Language
 	}
-	if len(images) > 0 {
-		doc.AddImages(images)
-	}
-
-	return doc, nil
+	return newParsedDoc(strings.TrimSpace(content), meta, RawDocDoc), nil
 }
 
 // findOPFPath 从 container.xml 中读取 OPF 文件的路径
 func findOPFPath(zr *zip.Reader) (string, error) {
 	containerData, err := readZipFile(zr, "META-INF/container.xml")
 	if err != nil {
-		return "", fmt.Errorf("META-INF/container.xml not found: %w", err)
+		return "", fmt.Errorf("未找到 META-INF/container.xml: %w", err)
 	}
 
 	// 剥离 XML 命名空间后解析
@@ -83,10 +80,10 @@ func findOPFPath(zr *zip.Reader) (string, error) {
 		} `xml:"rootfiles"`
 	}
 	if err := xml.Unmarshal(clean, &container); err != nil {
-		return "", fmt.Errorf("parse container.xml: %w", err)
+		return "", fmt.Errorf("解析 container.xml 失败: %w", err)
 	}
 	if len(container.RootFiles.RootFile) == 0 {
-		return "", fmt.Errorf("invalid epub: no rootfile in container.xml")
+		return "", fmt.Errorf("无效的 EPUB: container.xml 中未找到 rootfile")
 	}
 	return container.RootFiles.RootFile[0].FullPath, nil
 }
@@ -96,7 +93,7 @@ type opfMetadata struct {
 	Title    string
 	Creator  string
 	Language string
-	Spine    []string   // spine 顺序的 manifest item ID
+	Spine    []string                // spine 顺序的 manifest item ID
 	Manifest map[string]manifestItem // id → item
 }
 
@@ -109,7 +106,7 @@ type manifestItem struct {
 func parseOPF(zr *zip.Reader, opfPath string) (*opfMetadata, error) {
 	opfData, err := readZipFile(zr, opfPath)
 	if err != nil {
-		return nil, fmt.Errorf("OPF file %s not found: %w", opfPath, err)
+		return nil, fmt.Errorf("未找到 OPF 文件 %s: %w", opfPath, err)
 	}
 
 	// 剥离命名空间后统一解析
@@ -137,7 +134,7 @@ func parseOPF(zr *zip.Reader, opfPath string) (*opfMetadata, error) {
 	}
 
 	if err := xml.Unmarshal(clean, &opf); err != nil {
-		return nil, fmt.Errorf("parse OPF: %w", err)
+		return nil, fmt.Errorf("解析 OPF 失败: %w", err)
 	}
 
 	meta := &opfMetadata{
@@ -162,10 +159,9 @@ func parseOPF(zr *zip.Reader, opfPath string) (*opfMetadata, error) {
 }
 
 // readSpineItems 按 spine 顺序读取 XHTML 内容并转换为 Markdown
-func readSpineItems(zr *zip.Reader, opf *opfMetadata, opfDir string) (string, [][]byte, error) {
+func readSpineItems(zr *zip.Reader, opf *opfMetadata, opfDir string) (string, error) {
 	converter := md.NewConverter("", true, &md.Options{HeadingStyle: "atx"})
 	var mdBuilder strings.Builder
-	var images [][]byte
 
 	for _, id := range opf.Spine {
 		item, ok := opf.Manifest[id]
@@ -194,7 +190,7 @@ func readSpineItems(zr *zip.Reader, opf *opfMetadata, opfDir string) (string, []
 		mdBuilder.WriteString("\n\n")
 	}
 
-	return mdBuilder.String(), images, nil
+	return mdBuilder.String(), nil
 }
 
 // isContentFile 判断是否为需要转换的内容文件
@@ -259,5 +255,5 @@ func readZipFile(zr *zip.Reader, name string) ([]byte, error) {
 			return io.ReadAll(rc)
 		}
 	}
-	return nil, fmt.Errorf("file not found: %s", name)
+	return nil, fmt.Errorf("文件未找到: %s", name)
 }

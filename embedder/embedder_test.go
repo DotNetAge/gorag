@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/DotNetAge/gorag/v2/core"
 )
 
 const (
@@ -205,66 +203,6 @@ func TestONNXEmbedder_Image(t *testing.T) {
 
 			t.Logf("Image: %s -> vector norm: %.4f, first 5 dims: %v", imgFile, norm, vector.Values[:5])
 		})
-	}
-}
-
-func TestONNXEmbedder_Bulk(t *testing.T) {
-	// 跳过如果模型文件不存在
-	if _, err := os.Stat(testModelDir + "/onnx/" + testONNXName); os.IsNotExist(err) {
-		t.Skipf("Skipping test: ONNX model not found at %s", testONNXName)
-	}
-
-	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
-	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
-	if err != nil {
-		t.Fatalf("Failed to create embedder: %v", err)
-	}
-	defer embedder.Close()
-
-	chunks := []*core.Chunk{
-		{
-			ID:      "chunk1",
-			Content: "第一段文本",
-			DocID:   "doc1",
-		},
-		{
-			ID:      "chunk2",
-			Content: "第二段文本",
-			DocID:   "doc1",
-		},
-		{
-			ID:      "chunk3",
-			Content: "第三段文本",
-			DocID:   "doc2",
-		},
-	}
-
-	vectors, err := embedder.Bulk(chunks)
-	if err != nil {
-		t.Fatalf("Bulk failed: %v", err)
-	}
-
-	if len(vectors) != len(chunks) {
-		t.Errorf("Expected %d vectors, got %d", len(chunks), len(vectors))
-	}
-
-	for i, v := range vectors {
-		if v.ChunkID != chunks[i].ID {
-			t.Errorf("Vector %d ChunkID mismatch: expected %s, got %s", i, chunks[i].ID, v.ChunkID)
-		}
-		if len(v.Values) == 0 {
-			t.Errorf("Vector %d has empty values", i)
-			continue
-		}
-		var norm float32
-		for _, val := range v.Values {
-			norm += val * val
-		}
-		norm = sqrtFloat32(norm)
-		if norm < 0.001 {
-			t.Errorf("Vector %d norm is %.4f (near zero), embedding output is likely invalid", i, norm)
-		}
-		t.Logf("Chunk %s -> vector len=%d, norm=%.4f", chunks[i].Content, len(v.Values), norm)
 	}
 }
 

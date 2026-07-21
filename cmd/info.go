@@ -9,9 +9,8 @@ import (
 	"strings"
 
 	api "github.com/DotNetAge/gograph/pkg/api"
-	"github.com/DotNetAge/gorag"
+	gorag "github.com/DotNetAge/gorag/v2"
 	gvcore "github.com/DotNetAge/govector/core"
-	blevedb "github.com/blevesearch/bleve"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -24,7 +23,7 @@ var infoCmd = &cobra.Command{
 显示内容:
   - RAG 类型和名称
   - 完整配置内容
-  - 各索引的条目数量（向量/全文/图）
+  - 各索引的条目数量（向量/图）
   - 目录总大小及各子目录大小
 
 示例:
@@ -59,9 +58,9 @@ func runInfo(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	ui.KeyValue("名称", cfg.Name)
-	ui.KeyValue("类型", cfg.Type)
-	ui.KeyValue("模型文件", cfg.EmbeddingModelFile)
+	ui.KeyValue("版本", fmt.Sprintf("%d", cfg.Version))
+	ui.KeyValue("索引器类型", cfg.Indexer.Type)
+	ui.KeyValue("模型文件", cfg.Embedding.ModelFile)
 	ui.KeyValue("绝对路径", absDir)
 
 	if strings.TrimSpace(cfgRaw) != "" {
@@ -80,7 +79,8 @@ func runInfo(cmd *cobra.Command, args []string) {
 
 	ui.KeyValue("总大小", formatBytes(totalSize))
 
-	subDirs := []string{"vectors", "fulltexts", "graphs", "caches", "history", "logs"}
+	// 子目录：vectors/graphs/caches（不含 fulltexts）
+	subDirs := []string{"vectors", "graphs", "caches", "history", "logs"}
 	for _, sub := range subDirs {
 		if size, ok := sizes[sub]; ok && size > 0 {
 			ui.KeyValue("  "+sub+"/", formatBytes(size))
@@ -106,22 +106,7 @@ func runInfo(cmd *cobra.Command, args []string) {
 		ui.KeyValue("向量索引 (vectors)", "未创建")
 	}
 
-	// 3.2 全文索引
-	fulltextDBPath := filepath.Join(dataDir, "fulltexts", name+".bleve")
-	if _, err := os.Stat(fulltextDBPath); err == nil {
-		count := getFulltextCount(fulltextDBPath)
-		if count >= 0 {
-			ui.KeyValue("全文索引 (fulltexts)", fmt.Sprintf("%d 条", count))
-		} else {
-			ui.KeyValue("全文索引 (fulltexts)", "读取失败")
-		}
-	} else if _, err := os.Stat(filepath.Join(dataDir, "fulltexts")); err == nil {
-		ui.KeyValue("全文索引 (fulltexts)", "目录存在，索引文件缺失")
-	} else {
-		ui.KeyValue("全文索引 (fulltexts)", "未创建")
-	}
-
-	// 3.3 图索引
+	// 3.2 图索引
 	graphDBPath := filepath.Join(dataDir, "graphs", name+".db")
 	if _, err := os.Stat(graphDBPath); err == nil {
 		nodes, edges := getGraphCount(graphDBPath)
@@ -220,20 +205,6 @@ func getVectorCount(dbPath string) int {
 	}
 
 	return col.Count()
-}
-
-// getFulltextCount 获取全文索引条目数
-func getFulltextCount(dbPath string) int64 {
-	index, err := blevedb.Open(dbPath)
-	if err != nil {
-		return -1
-	}
-	defer index.Close()
-	count, err := index.DocCount()
-	if err != nil {
-		return -1
-	}
-	return int64(count)
 }
 
 // getGraphCount 获取图索引的节点和边数量

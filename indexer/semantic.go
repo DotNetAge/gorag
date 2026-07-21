@@ -5,24 +5,42 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/DotNetAge/gorag/v2/chunker"
 	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/document"
+	"github.com/DotNetAge/gorag/v2/llm"
 	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/query"
 )
 
-// 使用向量数据库和向量模型进行索引及检索
+// minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。
+// 短于此长度的分块没有摘要化的必要，直接跳过以节省 LLM 调用。
+const minSummaryContentLength = 100
+
+// semanticIndexer 语义索引器：使用向量数据库和向量模型进行索引及检索。
+//
+// 实现 4 个接口：
+//   - Indexer（核心）：Name / AddFile / Search / NewQuery
+//   - IndexerStore（存储）：Save
+//   - IndexerAdmin（管理）：List / GetChunks / Count / Remove / Clear
+//   - IndexerCloser（资源）：Close
+//
+// 不实现 TreeViewBuilder / GraphSearcher（仅 GraphIndexer 实现）。
 type semanticIndexer struct {
-	name     string
-	db       core.VectorStore
-	embedder core.Embedder
-	logger   logging.Logger
+	name       string
+	db         core.VectorStore
+	embedder   core.Embedder
+	summarizer llm.Summarizer  // 可选注入，nil 表示不使用
+	chunker    chunker.Chunker // 可选注入，nil 时 AddFile 内部用 chunker.New 路由
+	logger     logging.Logger
 }
 
-// SemanticOption configures a semantic indexer.
+// SemanticOption 配置 semanticIndexer 的可选参数。
 type SemanticOption func(*semanticIndexer)
 
-// WithSemanticLogger attaches a logger to the semantic indexer for observation logs.
+// WithSemanticLogger 为语义索引器附加日志记录器。
 func WithSemanticLogger(logger logging.Logger) SemanticOption {
 	return func(s *semanticIndexer) {
 		if logger != nil {
@@ -31,7 +49,40 @@ func WithSemanticLogger(logger logging.Logger) SemanticOption {
 	}
 }
 
-func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder, opts ...SemanticOption) core.Indexer {
+// WithSemanticSummarizer 注入 LLM Summarizer，为 Chunk 生成/增强 title 与 summary。
+// 不传则不调用 Summarizer，title/summary 由 Chunker 默认策略产出。
+func WithSemanticSummarizer(summarizer llm.Summarizer) SemanticOption {
+	return func(s *semanticIndexer) {
+		if summarizer != nil {
+			s.summarizer = summarizer
+		}
+	}
+}
+
+// WithSemanticChunker 注入自定义 Chunker，覆盖默认的 chunker.New 路由。
+// 不传则 AddFile 内部按 RawDoc.Type 调用 chunker.New 选择实现。
+func WithSemanticChunker(c chunker.Chunker) SemanticOption {
+	return func(s *semanticIndexer) {
+		if c != nil {
+			s.chunker = c
+		}
+	}
+}
+
+// NewSemanticIndexer 创建语义索引器，返回 Indexer 接口。
+//
+// 必传参数：
+//   - db：向量存储，nil 返回 error
+//   - embedder：向量计算器，nil 返回 error
+//
+// 可选参数通过 WithSemanticLogger / WithSemanticSummarizer / WithSemanticChunker 注入。
+func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder, opts ...SemanticOption) (Indexer, error) {
+	if db == nil {
+		return nil, fmt.Errorf("NewSemanticIndexer: db 不能为空")
+	}
+	if embedder == nil {
+		return nil, fmt.Errorf("NewSemanticIndexer: embedder 不能为空")
+	}
 	s := &semanticIndexer{
 		name:     "semantic",
 		db:       db,
@@ -41,80 +92,262 @@ func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder, opts ...Sem
 	for _, opt := range opts {
 		opt(s)
 	}
-	return s
+	return s, nil
 }
 
+// Name 实现 Indexer 接口。
 func (s *semanticIndexer) Name() string {
 	return s.name
 }
 
-func (s *semanticIndexer) Type() string {
-	return "semantic"
-}
-
-func (s *semanticIndexer) Add(ctx context.Context, content string) ([]*core.Chunk, error) {
-	if content == "" {
-		return nil, fmt.Errorf("content cannot be empty")
-	}
-	chunks, err := GetChunks(content)
-	if err != nil {
-		return nil, err
-	}
-	if len(chunks) == 0 {
-		return nil, fmt.Errorf("no chunks generated from content")
-	}
-	if err := s.saveChunks(ctx, chunks); err != nil {
-		return nil, err
-	}
-	return chunks, nil
-}
-
+// AddFile 实现 Indexer 接口：从文件读取内容后执行索引全流程。
+//
+// 流程：document.Open → core.NewStructuredDoc → chunker.Chunk → doc.SetChunks → s.Save。
+// 返回本次生成的 []*core.Chunk（从 ChunkResult.Chunks 转换）。
+// filePath 必须为绝对路径。
 func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	if filePath == "" {
-		return nil, fmt.Errorf("file path cannot be empty")
+		return nil, fmt.Errorf("AddFile: filePath 不能为空")
 	}
-	chunks, err := GetFileChunks(filePath)
+	s.logger.Debug("语义索引器: 开始索引文件", "file", filePath)
+	// 1. 读取并归一化文件
+	raw, err := document.Open(filePath)
 	if err != nil {
+		s.logger.Error("语义索引器: 打开文件失败", err, "file", filePath)
+		return nil, fmt.Errorf("AddFile: 打开文件失败: %w", err)
+	}
+	s.logger.Debug("语义索引器: 文件归一化完成",
+		"file", filePath,
+		"doc_type", raw.Type(),
+		"doc_id", raw.ID())
+	// 2. 创建结构化文档容器（Chunks/Nodes/Edges 此时均为空）
+	doc, err := core.Structurize(raw)
+	if err != nil {
+		s.logger.Error("语义索引器: 创建 StructuredDoc 失败", err, "file", filePath)
+		return nil, fmt.Errorf("AddFile: 创建 StructuredDoc 失败: %w", err)
+	}
+	// 3. 选择 Chunker：注入优先，否则按 RawDoc.Type 路由
+	c := s.chunker
+	if c == nil {
+		c, err = chunker.New(raw)
+		if err != nil {
+			s.logger.Error("语义索引器: 选择 Chunker 失败", err,
+				"file", filePath, "doc_type", raw.Type())
+			return nil, fmt.Errorf("AddFile: 选择 Chunker 失败: %w", err)
+		}
+	}
+	// 4. 分块（ChunkResult 含 Chunks/Nodes/Edges，本索引器仅消费 Chunks）
+	result, err := c.Chunk(raw)
+	if err != nil {
+		s.logger.Error("语义索引器: 分块失败", err, "file", filePath)
+		return nil, fmt.Errorf("AddFile: 分块失败: %w", err)
+	}
+	if len(result.Chunks) == 0 {
+		s.logger.Warn("语义索引器: 文件未生成任何分片", "file", filePath)
+		return nil, fmt.Errorf("AddFile: 文件未生成任何分片")
+	}
+	s.logger.Debug("语义索引器: 分块完成",
+		"file", filePath,
+		"chunks", len(result.Chunks),
+		"nodes", len(result.Nodes),
+		"edges", len(result.Edges))
+	// 5. 写入 doc 并调用 Save 走统一的向量化与存储路径
+	doc.SetChunks(result.Chunks)
+	if err := s.Save(ctx, doc); err != nil {
 		return nil, err
 	}
-	if len(chunks) == 0 {
-		return nil, fmt.Errorf("no chunks generated from file")
+	// 6. 转换为 []*core.Chunk 返回（Chunks 为值切片，取地址需先复制到本地变量）
+	chunks := make([]*core.Chunk, 0, len(result.Chunks))
+	for i := range result.Chunks {
+		ch := result.Chunks[i]
+		chunks = append(chunks, &ch)
 	}
-	if err := s.saveChunks(ctx, chunks); err != nil {
-		return nil, err
-	}
+	s.logger.Debug("语义索引器: 索引文件完成", "file", filePath, "chunks", len(chunks))
 	return chunks, nil
 }
 
-// AddChunks 直接将分片插入向量数据库
-func (s *semanticIndexer) AddChunks(ctx context.Context, chunks []*core.Chunk) error {
-	if len(chunks) == 0 {
-		return fmt.Errorf("no chunks to add")
+// Save 实现 IndexerStore 接口：将 StructuredDoc 写入 VectorStore。
+//
+// 流程：
+//  1. 从 doc.Chunks() 读取分片
+//  2. 如注入了 Summarizer，先调用 Summarize 补充 title/summary
+//  3. 对每个 chunk 按 Content / Title / Summary 三个维度生成向量：
+//     - 主向量（Content）：ChunkID = chunk.ID，携带完整 metadata
+//     - 从属向量（Title）：ChunkID = chunk.ID + ":title"，不存 metadata（Title 非空时）
+//     - 从属向量（Summary）：ChunkID = chunk.ID + ":summary"，不存 metadata（Summary 非空时）
+//  4. 主向量 metadata 包含 content/title/summary/doc_id/source_file 等字段，便于 Search 重建 Chunk
+func (s *semanticIndexer) Save(ctx context.Context, doc core.StructuredDoc) error {
+	if doc == nil {
+		return fmt.Errorf("Save: doc 不能为空")
 	}
-	if err := s.saveChunks(ctx, chunks); err != nil {
-		return err
+	chunks := doc.Chunks()
+	if len(chunks) == 0 {
+		s.logger.Debug("语义索引器: 无分片可保存，跳过 Save")
+		return nil // 无分片可保存，不视为错误
+	}
+	s.logger.Debug("语义索引器: 开始保存分片", "chunks", len(chunks))
+	// 注入了 Summarizer 时，仅对文档类且内容足够长的分块运行
+	// （代码/数据/图片块的 content 非语义化内容；过短内容摘要无意义，均跳过）
+	if s.summarizer != nil && doc.Raw() != nil && doc.Raw().Type() == document.RawDocDoc {
+		var toSummarize []core.Chunk
+		for _, c := range chunks {
+			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
+				toSummarize = append(toSummarize, c)
+			}
+		}
+		if len(toSummarize) == 0 {
+			s.logger.Debug("语义索引器: 所有分片内容过短，跳过 Summarizer",
+				"min_length", minSummaryContentLength)
+		} else {
+			s.logger.Debug("语义索引器: 调用 Summarizer",
+				"to_summarize", len(toSummarize),
+				"total", len(chunks))
+			updated, err := s.summarizer.Summarize(ctx, toSummarize)
+			if err != nil {
+				s.logger.Warn("语义索引器: Summarizer 调用失败，使用原始分片继续", "error", err)
+			} else {
+				// 用 Summarizer 返回的结果替换原 chunks 中对应 ID 的分块
+				updatedByID := make(map[string]core.Chunk, len(updated))
+				for _, u := range updated {
+					updatedByID[u.ID] = u
+				}
+				for i := range chunks {
+					if u, ok := updatedByID[chunks[i].ID]; ok {
+						chunks[i] = u
+					}
+				}
+				doc.SetChunks(chunks)
+				s.logger.Debug("语义索引器: Summarizer 完成", "summarized", len(updated))
+			}
+		}
+	} else if s.summarizer != nil {
+		s.logger.Debug("语义索引器: 非文档类内容，跳过 Summarizer",
+			"doc_type", doc.Raw().Type())
+	}
+
+	embedStart := time.Now()
+	embedErrCount := 0
+	for i := range chunks {
+		if err := s.saveOneChunk(ctx, &chunks[i]); err != nil {
+			embedErrCount++
+			s.logger.Error("语义索引器: 向量化失败", err,
+				"chunk_id", chunks[i].ID,
+				"doc_id", chunks[i].DocID)
+			continue
+		}
+	}
+	embedDur := time.Since(embedStart)
+
+	s.logger.Info("语义索引器: 向量化完成",
+		"chunks", len(chunks),
+		"failed", embedErrCount,
+		"duration_ms", embedDur.Milliseconds(),
+	)
+
+	if embedErrCount > 0 {
+		return fmt.Errorf("向量化失败 %d/%d 个分片", embedErrCount, len(chunks))
 	}
 	return nil
 }
 
-// indexAndStore 计算 chunk 向量并存储到数据库
-func (s *semanticIndexer) indexAndStore(ctx context.Context, chunk *core.Chunk) error {
-	vector, err := s.embedder.Calc(chunk)
-	if err != nil {
-		return err
+// saveOneChunk 为单个 chunk 生成 Content / Title / Summary 三个维度的向量并写入 VectorStore。
+//
+// 设计要点（从属维度是概念而非数据维度）：
+//   - 主向量（Content）：ChunkID = chunk.ID，携带完整 metadata，是数据之源
+//   - 从属向量（Title/Summary）：ChunkID = chunk.ID + ":title" / ":summary"
+//     **不存 metadata**——通过 ChunkID 后缀即可识别其所属维度，
+//     命中后通过 stripDimSuffix 反解出主 ChunkID，再回查主向量获取完整 Chunk 数据
+//   - 这样从属向量只占用最小存储空间，维度信息隐含在 ChunkID 编码中
+func (s *semanticIndexer) saveOneChunk(ctx context.Context, chunk *core.Chunk) error {
+	s.logger.Debug("语义索引器: 开始向量化分片",
+		"chunk_id", chunk.ID,
+		"doc_id", chunk.DocID,
+		"has_title", chunk.Title != "",
+		"has_summary", chunk.Summary != "",
+		"content_len", utf8.RuneCountInString(chunk.Content))
+	// 1. 主向量（Content）——携带完整 metadata
+	if chunk.Content != "" {
+		mainVec, err := s.embedder.CalcText(chunk.Content)
+		if err != nil {
+			return fmt.Errorf("编码 Content 失败: %w", err)
+		}
+		if mainVec != nil {
+			mainVec.ChunkID = chunk.ID
+			mainVec.Metadata = buildVectorMetadata(chunk)
+			if err := s.db.Upsert(ctx, []*core.Vector{mainVec}); err != nil {
+				return fmt.Errorf("写入主向量失败: %w", err)
+			}
+		}
 	}
-	return s.db.Upsert(ctx, []*core.Vector{vector})
+
+	// 2. 从属向量（Title）——不存 metadata，通过 ChunkID 后缀标识
+	if chunk.Title != "" {
+		titleVec, err := s.embedder.CalcText(chunk.Title)
+		if err != nil {
+			return fmt.Errorf("编码 Title 失败: %w", err)
+		}
+		if titleVec != nil {
+			titleVec.ChunkID = chunk.ID + ":title"
+			// 从属向量不存 metadata：命中后通过后缀反解回查主向量
+			if err := s.db.Upsert(ctx, []*core.Vector{titleVec}); err != nil {
+				return fmt.Errorf("写入 Title 从属向量失败: %w", err)
+			}
+		}
+	}
+
+	// 3. 从属向量（Summary）——不存 metadata，通过 ChunkID 后缀标识
+	if chunk.Summary != "" {
+		summaryVec, err := s.embedder.CalcText(chunk.Summary)
+		if err != nil {
+			return fmt.Errorf("编码 Summary 失败: %w", err)
+		}
+		if summaryVec != nil {
+			summaryVec.ChunkID = chunk.ID + ":summary"
+			// 从属向量不存 metadata：命中后通过后缀反解回查主向量
+			if err := s.db.Upsert(ctx, []*core.Vector{summaryVec}); err != nil {
+				return fmt.Errorf("写入 Summary 从属向量失败: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
-// ── 多维度从属索引 ──────────────────────────────────────────────
-// 为同一 chunk 增加多个向量维度（主索引 content 不变），解决短文本查询命中长内容向量困难的问题。
-// 从属向量 ChunkID = <chunk_id>:<suffix>，metadata 留空（不重复存储主向量数据），
-// 命中后回查主向量获取完整内容。
+// buildVectorMetadata 从 Chunk 构造 Vector 的 metadata 快照。
+// 包含 content/title/summary/doc_id/source_file/parent_id 等字段，与 vectorToChunk 反向对应。
+func buildVectorMetadata(chunk *core.Chunk) map[string]any {
+	metadata := map[string]any{
+		"content": chunk.Content,
+		"title":   chunk.Title,
+		"summary": chunk.Summary,
+		"doc_id":  chunk.DocID,
+	}
+	if chunk.ParentID != "" {
+		metadata["parent_id"] = chunk.ParentID
+	}
+	// source_file 优先取自 chunk.Metadata["source"]（由 chunker.buildChunk 写入）
+	if source, ok := chunk.Metadata["source"].(string); ok && source != "" {
+		metadata["source_file"] = source
+	}
+	// 复制其他扩展字段（如 start_line/end_line/language/directory 等）
+	for k, v := range chunk.Metadata {
+		if k == "source" {
+			continue // 已映射到 source_file
+		}
+		metadata[k] = v
+	}
+	return metadata
+}
 
-// vectorDimension 描述一个从属索引维度
+// ── 从属向量维度辅助 ──────────────────────────────────────────────
+// 为同一 chunk 增加附属向量（title/summary），解决短文本查询命中长内容向量困难的问题。
+// 从属向量 ChunkID = <chunk_id>:<suffix>，**不存 metadata**，
+// 命中后通过后缀反解出主 ChunkID，回查主向量获取完整 Chunk 数据。
+
+// vectorDimension 描述一个从属向量维度（概念维度，非数据维度）。
+// 维度信息隐含在 ChunkID 的后缀编码中，不需要额外的 Dim 字段。
 type vectorDimension struct {
 	suffix  string                      // ":title" / ":summary"
-	extract func(map[string]any) string // 从 metadata 提取向量化文本
+	extract func(map[string]any) string // 从主向量 metadata 提取向量化文本（供 Refill 使用）
 }
 
 var (
@@ -128,34 +361,8 @@ var (
 	}}
 )
 
-// semanticDimensions 是 semanticIndexer 启用的从属维度（规则分块器无 summary，仅 title）
-var semanticDimensions = []vectorDimension{dimTitle}
-
-// graphDimensions 是 GraphIndexer 启用的从属维度（LLM 生成，含 title + summary）
-var graphDimensions = []vectorDimension{dimTitle, dimSummary}
-
-// indexDimensionVectors 为 chunk 生成所有从属维度的向量并 Upsert。
-// 对应字段为空的维度自然跳过。供 semanticIndexer 和 GraphIndexer 共用。
-func indexDimensionVectors(ctx context.Context, db core.VectorStore, embedder core.Embedder, chunkID string, metadata map[string]any, dims []vectorDimension) error {
-	for _, dim := range dims {
-		text := dim.extract(metadata)
-		if text == "" {
-			continue
-		}
-		vec, err := embedder.CalcText(text)
-		if err != nil {
-			return err
-		}
-		if vec == nil {
-			continue
-		}
-		vec.ChunkID = chunkID + dim.suffix
-		if err := db.Upsert(ctx, []*core.Vector{vec}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// semanticDimensions 是 SemanticIndexer 启用的从属维度（title + summary）。
+var semanticDimensions = []vectorDimension{dimTitle, dimSummary}
 
 // stripDimSuffix 检查 chunkID 是否为某个从属维度（以已知后缀结尾），
 // 是则返回原 chunk_id 和 true，否则返回原值和 false。
@@ -169,9 +376,9 @@ func stripDimSuffix(chunkID string, dims []vectorDimension) (string, bool) {
 }
 
 // getVectorByChunkID 按 chunk_id 精确查询单个向量（用于从属索引回查）。
-// 复用 ListFiltered + chunk_id exact 匹配，无需扩展 VectorStore 接口。
+// 复用 List + chunk_id exact 匹配，无需扩展 VectorStore 接口。
 func getVectorByChunkID(ctx context.Context, db core.VectorStore, chunkID string) (*core.Vector, error) {
-	vecs, _, err := db.ListFiltered(ctx, 0, 1, []core.FilterCondition{
+	vecs, _, err := db.List(ctx, 0, 1, []core.FilterCondition{
 		{Key: "chunk_id", Type: "exact", Value: chunkID},
 	})
 	if err != nil {
@@ -185,7 +392,7 @@ func getVectorByChunkID(ctx context.Context, db core.VectorStore, chunkID string
 
 // resolveDimensions 处理搜索结果中的从属维度向量：
 // 后缀匹配的向量回查主向量获取完整数据，按原 chunk_id 去重保留较高分。
-// 返回处理后的 results 和 scores（保持对齐）。供 semanticIndexer 和 GraphIndexer 共用。
+// 返回处理后的 results 和 scores（保持对齐）。
 func resolveDimensions(ctx context.Context, db core.VectorStore, results []*core.Vector, scores []float32, dims []vectorDimension) ([]*core.Vector, []float32, error) {
 	type entry struct {
 		vec   *core.Vector
@@ -202,7 +409,7 @@ func resolveDimensions(ctx context.Context, db core.VectorStore, results []*core
 		if baseID, ok := stripDimSuffix(chunkID, dims); ok {
 			mainVec, err := getVectorByChunkID(ctx, db, baseID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("resolve dimension for %s: %w", chunkID, err)
+				return nil, nil, fmt.Errorf("回查从属维度 %s 失败: %w", chunkID, err)
 			}
 			if mainVec == nil {
 				continue
@@ -229,35 +436,51 @@ func resolveDimensions(ctx context.Context, db core.VectorStore, results []*core
 	return out, outScores, nil
 }
 
-func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit, error) {
+// Search 实现 Indexer 接口：执行语义检索，返回 *core.Hit 容器。
+//
+// 流程：
+//  1. 从 Query 取/算查询向量
+//  2. VectorStore.Search 取 topK
+//  3. resolveParentChunks 处理父子块替换
+//  4. resolveDimensions 处理从属维度回查与去重
+//  5. 构建 *core.Hit（填充 Chunks）
+func (s *semanticIndexer) Search(ctx context.Context, q core.Query) (*core.Hit, error) {
+	if q == nil {
+		return nil, fmt.Errorf("Search: query 不能为空")
+	}
+	s.logger.Debug("语义索引器: 开始检索", "query", q.Raw(), "type", q.Type())
+
 	// 1. 从查询获取向量 - 优先使用 Query 中的预计算向量，否则实时计算
 	var queryVector []float32
-	query, ok := q.(*query.SemanticQuery)
-	if !ok {
-		return nil, fmt.Errorf("invalid query type: expected *semanticQuery, got %T", q)
-	}
-
-	if query.Vector() != nil {
-		queryVector = query.Vector().Values
+	if emb := q.Embedding(); emb != nil {
+		queryVector = emb
+		s.logger.Debug("语义索引器: 使用预计算查询向量", "dim", len(queryVector))
 	} else {
-		// 实时计算查询向量
-		vec, err := s.embedder.CalcText(query.Raw())
+		vec, err := s.embedder.CalcText(q.Raw())
 		if err != nil {
-			return nil, err
+			s.logger.Error("语义索引器: 计算查询向量失败", err, "query", q.Raw())
+			return nil, fmt.Errorf("Search: 计算查询向量失败: %w", err)
 		}
 		queryVector = vec.Values
+		// 缓存到 Query，避免重复计算
+		q.SetEmbedding(queryVector)
+		s.logger.Debug("语义索引器: 查询向量计算完成", "dim", len(queryVector))
 	}
 
 	// 2. 获取过滤器
-	filters := query.Filters()
+	filters := q.Filters()
 
 	// 3. 向量相似度搜索
-	// TODO: topK 应该从 query 中获取，当前使用默认值
 	topK := 10
 	results, scores, err := s.db.Search(ctx, queryVector, topK, filters)
 	if err != nil {
-		return nil, err
+		s.logger.Error("语义索引器: 向量检索失败", err,
+			"query", q.Raw(), "top_k", topK)
+		return nil, fmt.Errorf("Search: 向量检索失败: %w", err)
 	}
+	s.logger.Debug("语义索引器: 向量检索完成",
+		"results", len(results),
+		"top_k", topK)
 
 	// 4. ParentDoc 处理：如果结果是子块，替换为父块
 	results = s.resolveParentChunks(results)
@@ -265,68 +488,121 @@ func (s *semanticIndexer) Search(ctx context.Context, q core.Query) ([]core.Hit,
 	// 5. 从属维度处理：后缀匹配的向量回查主向量，按原 chunk_id 去重保留较高分
 	results, scores, err = resolveDimensions(ctx, s.db, results, scores, semanticDimensions)
 	if err != nil {
+		s.logger.Error("语义索引器: 从属维度处理失败", err)
 		return nil, err
 	}
 
-	// 6. 构建 Hit 返回
-	// 注意：返回主向量的 ChunkID（chunk ID）而不是 vec.ID（UUID），
-	// 与 fulltextIndexer.Search 返回的 ID 格式一致，确保混合搜索 RRF 融合时能正确匹配。
-	hits := make([]core.Hit, 0, len(results))
+	// 6. 构建 *core.Hit 返回（填充 Chunks）
+	//    resolveDimensions 已将从属向量替换为主向量，此处所有 vec 均为主向量
+	chunkHits := make([]core.ChunkHit, 0, len(results))
 	for i, vec := range results {
-		hit := core.Hit{
-			ID:      vec.ChunkID,
-			Score:   scores[i],
-			Content: s.extractChunkContent(vec),
+		if vec == nil {
+			continue
 		}
-
-		// 从 Vector.Metadata 中提取元信息
-		if vec.Metadata != nil {
-			// 提取 title
-			if t, ok := vec.Metadata["title"].(string); ok {
-				hit.Title = t
-			}
-
-			// 提取 doc_id
-			if d, ok := vec.Metadata["doc_id"].(string); ok {
-				hit.DocID = d
-			}
-
-			// 提取完整 metadata（排除内部使用字段）
-			hit.Metadata = extractMetadata(vec.Metadata)
-
-			// 提取 chunk_meta
-			if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
-				hit.ChunkMeta = mapToChunkMeta(cm)
-			}
-		}
-		hits = append(hits, hit)
+		chunk := vectorToChunk(vec)
+		chunkHits = append(chunkHits, core.ChunkHit{
+			Chunk: chunk,
+			Score: scores[i],
+		})
 	}
 
-	return hits, nil
+	s.logger.Debug("语义索引器: 检索完成",
+		"query", q.Raw(),
+		"raw_results", len(results),
+		"chunk_hits", len(chunkHits),
+		"top_score", topScore(scores))
+
+	return &core.Hit{
+		Query:  q,
+		Score:  topScore(scores),
+		Chunks: chunkHits,
+	}, nil
 }
 
-// GetByDocID retrieves all vectors belonging to the specified document.
-// This is used for document reconstruction (knowledge traceability).
+// topScore 返回分数切片中的最高分（空切片返回 0）。
+func topScore(scores []float32) float32 {
+	if len(scores) == 0 {
+		return 0
+	}
+	max := scores[0]
+	for _, s := range scores[1:] {
+		if s > max {
+			max = s
+		}
+	}
+	return max
+}
+
+// vectorToChunk 从 Vector 的 metadata 重建 Chunk 对象。
+func vectorToChunk(vec *core.Vector) *core.Chunk {
+	chunk := &core.Chunk{
+		ID:       vec.ChunkID,
+		Metadata: map[string]any{},
+	}
+	if vec.Metadata == nil {
+		return chunk
+	}
+	if content, ok := vec.Metadata["content"].(string); ok {
+		chunk.Content = content
+	}
+	if title, ok := vec.Metadata["title"].(string); ok {
+		chunk.Title = title
+	}
+	if summary, ok := vec.Metadata["summary"].(string); ok {
+		chunk.Summary = summary
+	}
+	if did, ok := vec.Metadata["doc_id"].(string); ok {
+		chunk.DocID = did
+	}
+	if pid, ok := vec.Metadata["parent_id"].(string); ok {
+		chunk.ParentID = pid
+	}
+	// 复制非内部字段到 Metadata
+	for k, v := range vec.Metadata {
+		switch k {
+		case "content", "title", "summary", "doc_id", "parent_id", "mime_type", "chunk_meta":
+			// 跳过已映射到顶层字段的内部字段
+		default:
+			chunk.Metadata[k] = v
+		}
+	}
+	return chunk
+}
+
+// GetByDocID 检索指定文档的所有向量（非接口方法，供文档重建使用）。
 func (s *semanticIndexer) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, error) {
 	return s.db.GetByDocID(ctx, docID)
 }
 
-// ReconstructDocument reconstructs the original document from its stored chunks
-// using the knowledge traceability system (doc_id → all chunks → sort by index → concatenate).
-func (s *semanticIndexer) ReconstructDocument(ctx context.Context, docID string) (*core.ReconstructedDocument, error) {
+// ReconstructDocument 从存储的分片重建原文档（非接口方法）。
+// 降级实现：按 chunk_id 顺序拼接 content。
+func (s *semanticIndexer) ReconstructDocument(ctx context.Context, docID string) (string, error) {
 	vectors, err := s.db.GetByDocID(ctx, docID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get vectors by doc_id %s: %w", docID, err)
+		s.logger.Error("语义索引器: 重建文档获取向量失败", err, "doc_id", docID)
+		return "", fmt.Errorf("获取文档 %s 的向量失败: %w", docID, err)
 	}
 	if len(vectors) == 0 {
-		return nil, fmt.Errorf("no chunks found for doc_id %s", docID)
+		s.logger.Warn("语义索引器: 重建文档未找到分片", "doc_id", docID)
+		return "", fmt.Errorf("文档 %s 未找到任何分片", docID)
 	}
-	doc := core.ReconstructDocument(vectors)
-	return doc, nil
+	// 降级实现：按 chunk_id 顺序拼接 content
+	var parts []string
+	for _, v := range vectors {
+		if v == nil || v.Metadata == nil {
+			continue
+		}
+		if c, ok := v.Metadata["content"].(string); ok && c != "" {
+			parts = append(parts, c)
+		}
+	}
+	s.logger.Debug("语义索引器: 文档重建完成",
+		"doc_id", docID, "vectors", len(vectors), "parts", len(parts))
+	return fmt.Sprintf("%s", parts), nil
 }
 
-// resolveParentChunks 处理 ParentDoc 分块结果
-// 如果匹配到子块，用父块替换；父块直接返回
+// resolveParentChunks 处理 ParentDoc 分块结果。
+// 如果匹配到子块，用父块替换；父块直接返回。
 func (s *semanticIndexer) resolveParentChunks(vectors []*core.Vector) []*core.Vector {
 	if len(vectors) == 0 {
 		return vectors
@@ -367,7 +643,7 @@ func (s *semanticIndexer) resolveParentChunks(vectors []*core.Vector) []*core.Ve
 	return vectors
 }
 
-// deduplicateVectors 去除重复的向量（按 ChunkID 去重，保留第一个出现的）
+// deduplicateVectors 去除重复的向量（按 ChunkID 去重，保留第一个出现的）。
 func deduplicateVectors(vectors []*core.Vector) []*core.Vector {
 	seen := make(map[string]bool)
 	result := make([]*core.Vector, 0, len(vectors))
@@ -384,52 +660,43 @@ func deduplicateVectors(vectors []*core.Vector) []*core.Vector {
 	return result
 }
 
-// extractChunkContent 从 Vector 的 metadata 中提取 chunk 内容
-func (s *semanticIndexer) extractChunkContent(vec *core.Vector) string {
-	if vec == nil || vec.Metadata == nil {
-		return ""
-	}
-	if content, ok := vec.Metadata["content"].(string); ok {
-		return content
-	}
-	return ""
-}
-
+// Remove 实现 IndexerAdmin 接口：按 chunkID 移除索引项。
+// 联动删除所有从属维度向量（无对应维度的 chunk 删不到也无副作用）。
 func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
-	// 删除主向量（通过 chunk_id 匹配：govector store 按 Payload["chunk_id"] filter 删除）
+	if chunkID == "" {
+		return fmt.Errorf("Remove: chunkID 不能为空")
+	}
+	s.logger.Debug("语义索引器: 删除分片", "chunk_id", chunkID)
+	// 删除主向量
 	if err := s.db.Delete(ctx, chunkID); err != nil {
+		s.logger.Error("语义索引器: 删除主向量失败", err, "chunk_id", chunkID)
 		return err
 	}
-	// 联动删除所有从属维度向量（无对应维度的 chunk 删不到也无副作用）
+	// 联动删除所有从属维度向量
 	for _, dim := range semanticDimensions {
-		if err := s.db.Delete(ctx, chunkID+dim.suffix); err != nil {
+		dimID := chunkID + dim.suffix
+		if err := s.db.Delete(ctx, dimID); err != nil {
 			// 从属维度向量可能不存在（无对应字段可提取），不视为错误
-			s.logger.Warn("remove dimension vector: %v", err)
+			s.logger.Debug("语义索引器: 从属维度向量不存在或删除失败（可忽略）",
+				"chunk_id", dimID, "error", err.Error())
 		}
 	}
+	s.logger.Debug("语义索引器: 删除分片完成", "chunk_id", chunkID)
 	return nil
 }
 
-// StoreChunk stores a pre-built chunk directly in the index, skipping chunking.
-// The chunk's Metadata is persisted as vector metadata for filter-based retrieval.
-// This is used by the memory system to store MemoryChunk data.
-func (s *semanticIndexer) StoreChunk(ctx context.Context, chunk *core.Chunk) error {
-	if chunk == nil || chunk.Content == "" {
-		return fmt.Errorf("chunk content cannot be empty")
-	}
-	return s.indexAndStore(ctx, chunk)
-}
-
-// Refill 为已有分片补充从属维度的向量（title/summary 等）。
+// Refill 为已有分片补充从属维度的向量（title/summary 等）（非接口方法）。
 // 用于存量数据迁移到多维度索引。幂等：已存在的从属向量会跳过，支持中断重跑。
 func (s *semanticIndexer) Refill(ctx context.Context) error {
 	const pageSize = 100
 	offset := 0
 	refilled := 0
+	s.logger.Debug("语义索引器: 开始 Refill 从属维度向量")
 	for {
-		vecs, err := s.db.List(ctx, offset, pageSize)
+		vecs, _, err := s.db.List(ctx, offset, pageSize, nil)
 		if err != nil {
-			return fmt.Errorf("refill list at offset %d: %w", offset, err)
+			s.logger.Error("语义索引器: Refill 分页查询失败", err, "offset", offset)
+			return fmt.Errorf("Refill 分页查询 offset %d 失败: %w", offset, err)
 		}
 		if len(vecs) == 0 {
 			break
@@ -452,14 +719,15 @@ func (s *semanticIndexer) Refill(ctx context.Context) error {
 				// 幂等检查：已存在则跳过
 				existing, err := getVectorByChunkID(ctx, s.db, dimID)
 				if err != nil {
-					return fmt.Errorf("refill check %s: %w", dimID, err)
+					s.logger.Error("语义索引器: Refill 检查从属维度失败", err, "chunk_id", dimID)
+					return fmt.Errorf("Refill 检查 %s 失败: %w", dimID, err)
 				}
 				if existing != nil {
 					continue
 				}
 				dimVec, err := s.embedder.CalcText(text)
 				if err != nil {
-					s.logger.Error("refill embed dimension failed", err, "chunk_id", dimID)
+					s.logger.Error("语义索引器: Refill 编码从属维度失败", err, "chunk_id", dimID)
 					continue
 				}
 				if dimVec == nil {
@@ -467,7 +735,7 @@ func (s *semanticIndexer) Refill(ctx context.Context) error {
 				}
 				dimVec.ChunkID = dimID
 				if err := s.db.Upsert(ctx, []*core.Vector{dimVec}); err != nil {
-					s.logger.Error("refill upsert dimension failed", err, "chunk_id", dimID)
+					s.logger.Error("语义索引器: Refill 写入从属维度失败", err, "chunk_id", dimID)
 					continue
 				}
 				refilled++
@@ -478,75 +746,50 @@ func (s *semanticIndexer) Refill(ctx context.Context) error {
 			break
 		}
 	}
-	s.logger.Info("indexer.refilled", "refilled", refilled)
+	s.logger.Info("语义索引器: Refill 完成", "refilled", refilled)
 	return nil
 }
 
-// saveChunks indexes multiple pre-generated chunks in batch (implements core.ChunkIndexer interface).
-// Emits a single batch-level INFO log "indexer.embedded" summarizing the embedding
-// and upsert timings so the caller can see one line per batch instead of one per chunk.
-func (s *semanticIndexer) saveChunks(ctx context.Context, chunks []*core.Chunk) error {
-	if len(chunks) == 0 {
-		return nil
-	}
-
-	embedStart := time.Now()
-	embedErrCount := 0
-	for _, chunk := range chunks {
-		if err := s.indexAndStore(ctx, chunk); err != nil {
-			embedErrCount++
-			s.logger.Error("indexer.embed failed", err, "chunk_id", chunk.ID)
-			continue
-		}
-		// 补充从属维度向量（title 等），无对应字段的 chunk 自然跳过
-		if err := indexDimensionVectors(ctx, s.db, s.embedder, chunk.ID, chunk.Metadata, semanticDimensions); err != nil {
-			embedErrCount++
-			s.logger.Error("indexer.embed dimensions failed", err, "chunk_id", chunk.ID)
-		}
-	}
-	embedDur := time.Since(embedStart)
-
-	s.logger.Info("indexer.embedded",
-		"chunks", len(chunks),
-		"failed", embedErrCount,
-		"duration_ms", embedDur.Milliseconds(),
-	)
-
-	if embedErrCount > 0 {
-		return fmt.Errorf("embedding failed for %d/%d chunks", embedErrCount, len(chunks))
-	}
-	return nil
-}
-
+// NewQuery 实现 Indexer 接口：构造查询对象。
+// 使用 query.New(text) 创建默认实现，预设查询类型为 "semantic"。
 func (s *semanticIndexer) NewQuery(terms string) core.Query {
-	return query.NewSemanticQuery(terms, s.embedder)
+	return query.New(terms)
 }
 
-// List returns paginated hits from the vector store.
-// Converts Vector results to Hit format for browsing.
-func (s *semanticIndexer) List(ctx context.Context, offset, limit int) ([]core.Hit, error) {
-	vectors, err := s.db.List(ctx, offset, limit)
+// List 实现 IndexerAdmin 接口：分页浏览已索引的 Chunk。
+func (s *semanticIndexer) List(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]core.Chunk, int, error) {
+	vectors, total, err := s.db.List(ctx, offset, limit, filters)
 	if err != nil {
-		return nil, err
+		s.logger.Error("语义索引器: List 查询失败", err,
+			"offset", offset, "limit", limit)
+		return nil, 0, fmt.Errorf("List: 查询失败: %w", err)
 	}
 	if len(vectors) == 0 {
-		return []core.Hit{}, nil
+		return []core.Chunk{}, total, nil
 	}
 
-	hits := make([]core.Hit, 0, len(vectors))
+	chunks := make([]core.Chunk, 0, len(vectors))
 	for _, vec := range vectors {
-		hit := vectorToHit(vec)
-		hits = append(hits, hit)
+		if vec == nil {
+			continue
+		}
+		ch := vectorToChunk(vec)
+		chunks = append(chunks, *ch)
 	}
-	return hits, nil
+	s.logger.Debug("语义索引器: List 完成",
+		"offset", offset, "limit", limit, "total", total, "returned", len(chunks))
+	return chunks, total, nil
 }
 
-// GetChunks returns all chunks belonging to the specified document.
-// Converts vectors (with chunk metadata) back to Chunk objects.
-func (s *semanticIndexer) GetChunks(ctx context.Context, docId string) ([]*core.Chunk, error) {
-	vectors, err := s.db.GetByDocID(ctx, docId)
+// GetChunks 实现 IndexerAdmin 接口：按 docID 获取该文档的所有 Chunk。
+func (s *semanticIndexer) GetChunks(ctx context.Context, docID string) ([]*core.Chunk, error) {
+	if docID == "" {
+		return nil, fmt.Errorf("GetChunks: docID 不能为空")
+	}
+	vectors, err := s.db.GetByDocID(ctx, docID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get vectors by doc_id %s: %w", docId, err)
+		s.logger.Error("语义索引器: GetChunks 获取向量失败", err, "doc_id", docID)
+		return nil, fmt.Errorf("GetChunks: 获取文档 %s 的向量失败: %w", docID, err)
 	}
 	if len(vectors) == 0 {
 		return []*core.Chunk{}, nil
@@ -554,148 +797,39 @@ func (s *semanticIndexer) GetChunks(ctx context.Context, docId string) ([]*core.
 
 	chunks := make([]*core.Chunk, 0, len(vectors))
 	for _, vec := range vectors {
-		if vec == nil || vec.Metadata == nil {
+		if vec == nil {
 			continue
 		}
-		chunk := &core.Chunk{
-			ID:       vec.ChunkID,
-			Content:  "",
-			Metadata: map[string]any{},
-		}
-		if content, ok := vec.Metadata["content"].(string); ok {
-			chunk.Content = content
-		}
-		if did, ok := vec.Metadata["doc_id"].(string); ok {
-			chunk.DocID = did
-		}
-		if pid, ok := vec.Metadata["parent_id"].(string); ok {
-			chunk.ParentID = pid
-		}
-		if mt, ok := vec.Metadata["mime_type"].(string); ok {
-			chunk.MIMEType = mt
-		}
-		if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
-			chunk.ChunkMeta = mapToChunkMeta(cm)
-		}
-		// Copy non-internal metadata
-		for k, v := range vec.Metadata {
-			switch k {
-			case "content", "doc_id", "parent_id", "mime_type", "chunk_meta":
-				// skip internal fields already mapped above
-			default:
-				chunk.Metadata[k] = v
-			}
-		}
-		chunks = append(chunks, chunk)
+		chunks = append(chunks, vectorToChunk(vec))
 	}
+	s.logger.Debug("语义索引器: GetChunks 完成",
+		"doc_id", docID, "chunks", len(chunks))
 	return chunks, nil
 }
 
-// Close closes the underlying vector store to release resources (e.g., bbolt file locks)
-func (s *semanticIndexer) Close(ctx context.Context) error {
-	return s.db.Close(ctx)
-}
-
-// extractMetadata 从 Vector.Metadata 中提取原始 Chunk.Metadata
-// 排除内部使用字段（doc_id, parent_id, content, mime_type, chunk_meta）
-func extractMetadata(meta map[string]any) map[string]any {
-	if meta == nil {
-		return nil
-	}
-
-	internalFields := map[string]bool{
-		"doc_id":     true,
-		"parent_id":  true,
-		"content":    true,
-		"mime_type":  true,
-		"chunk_meta": true,
-	}
-
-	result := make(map[string]any)
-	for k, v := range meta {
-		if !internalFields[k] {
-			result[k] = v
-		}
-	}
-
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-// mapToChunkMeta 将 map[string]any 转换为 core.ChunkMeta
-func mapToChunkMeta(m map[string]any) core.ChunkMeta {
-	cm := core.ChunkMeta{}
-	if index, ok := m["index"].(float64); ok {
-		cm.Index = int(index)
-	}
-	if startPos, ok := m["start_pos"].(float64); ok {
-		cm.StartPos = int(startPos)
-	}
-	if endPos, ok := m["end_pos"].(float64); ok {
-		cm.EndPos = int(endPos)
-	}
-	if headingLevel, ok := m["heading_level"].(float64); ok {
-		cm.HeadingLevel = int(headingLevel)
-	}
-	if headingPath, ok := m["heading_path"].([]any); ok {
-		for _, h := range headingPath {
-			if hs, ok := h.(string); ok {
-				cm.HeadingPath = append(cm.HeadingPath, hs)
-			}
-		}
-	}
-	return cm
-}
-
-// vectorToHit converts a Vector to a Hit for browsing purposes.
-func vectorToHit(vec *core.Vector) core.Hit {
-	hit := core.Hit{
-		ID:      vec.ChunkID,
-		Content: "",
-	}
-
-	if vec == nil || vec.Metadata == nil {
-		return hit
-	}
-
-	if content, ok := vec.Metadata["content"].(string); ok {
-		hit.Content = content
-	}
-	if title, ok := vec.Metadata["title"].(string); ok {
-		hit.Title = title
-	}
-	if docID, ok := vec.Metadata["doc_id"].(string); ok {
-		hit.DocID = docID
-	}
-	if cm, ok := vec.Metadata["chunk_meta"].(map[string]any); ok {
-		hit.ChunkMeta = mapToChunkMeta(cm)
-	}
-
-	// Copy non-internal metadata
-	metadata := make(map[string]any)
-	for k, v := range vec.Metadata {
-		switch k {
-		case "content", "title", "doc_id", "parent_id", "mime_type", "chunk_meta":
-			// skip internal fields
-		default:
-			metadata[k] = v
-		}
-	}
-	if len(metadata) > 0 {
-		hit.Metadata = metadata
-	}
-
-	return hit
-}
-
-// Count returns the total number of indexed chunks.
+// Count 实现 IndexerAdmin 接口：返回已索引的 Chunk 总数。
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
 	return s.db.Count(ctx)
 }
 
-// Clear removes all vectors from the semantic indexer.
+// Clear 实现 IndexerAdmin 接口：清空索引。
 func (s *semanticIndexer) Clear(ctx context.Context) error {
-	return s.db.Clear(ctx)
+	s.logger.Debug("语义索引器: 清空索引")
+	if err := s.db.Clear(ctx); err != nil {
+		s.logger.Error("语义索引器: 清空索引失败", err)
+		return err
+	}
+	s.logger.Info("语义索引器: 索引已清空")
+	return nil
+}
+
+// Close 实现 IndexerCloser 接口：释放底层向量存储资源。
+func (s *semanticIndexer) Close(ctx context.Context) error {
+	s.logger.Debug("语义索引器: 关闭存储")
+	if err := s.db.Close(ctx); err != nil {
+		s.logger.Error("语义索引器: 关闭存储失败", err)
+		return err
+	}
+	s.logger.Debug("语义索引器: 存储已关闭")
+	return nil
 }

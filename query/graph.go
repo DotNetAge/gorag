@@ -2,6 +2,7 @@ package query
 
 import (
 	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // GraphQuery 图查询
@@ -26,7 +27,7 @@ func NewGraphQuery(terms string) core.Query {
 	return &GraphQuery{
 		BaseQuery: BaseQuery{
 			raw:        terms,
-			normalized: core.CleanText(terms),
+			normalized: utils.CleanText(terms),
 			filters:    make(map[string]any),
 		},
 		text:  terms,

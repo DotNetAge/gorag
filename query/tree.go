@@ -1,6 +1,9 @@
 package query
 
-import "github.com/DotNetAge/gorag/v2/core"
+import (
+	"github.com/DotNetAge/gorag/v2/core"
+	"github.com/DotNetAge/gorag/v2/utils"
+)
 
 // TreeQuery 树状知识结构查询。
 //
@@ -31,7 +34,7 @@ func NewTreeQuery(regionID string, depth int) core.Query {
 	return &TreeQuery{
 		BaseQuery: BaseQuery{
 			raw:        regionID,
-			normalized: core.CleanText(regionID),
+			normalized: utils.CleanText(regionID),
 			filters:    make(map[string]any),
 		},
 		RegionID: regionID,

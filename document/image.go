@@ -13,13 +13,12 @@ import (
 
 const thumbnailSize = 224
 
-// ParseImage 读取图片文件，返回 RawDocument
-// 优化：只加载缩略图（224x224）以节省内存，并检测图片真实 MIME 类型
-func ParseImage(r io.Reader) (*RawDocument, error) {
+// ParseImage 读取图片文件，返回 imageDoc（内容为 Base64 编码的缩略图）。
+// 仅加载缩略图（224x224）以节省内存，并检测图片真实 MIME 类型写入元数据。
+func ParseImage(r io.Reader) (RawDoc, error) {
 	// 读取图片二进制内容
-	var contentBytes []byte
-	var err error
-	if contentBytes, err = io.ReadAll(r); err != nil {
+	contentBytes, err := io.ReadAll(r)
+	if err != nil {
 		return nil, err
 	}
 
@@ -42,35 +41,25 @@ func ParseImage(r io.Reader) (*RawDocument, error) {
 	}
 	content := base64.StdEncoding.EncodeToString(buf.Bytes())
 
-	// 创建 RawDocument，设置 MIME 类型
-	doc := NewRawDoc(content)
-	doc.SetValue("mime_type", mimeType)
-	doc.SetValue("thumbnail_size", thumbnailSize)
-
-	return doc, nil
+	meta := map[string]any{
+		"mime_type":      mimeType,
+		"thumbnail_size": thumbnailSize,
+	}
+	return newParsedDoc(content, meta, RawDocImage), nil
 }
 
-// detectImageMimeType 检测图片的真实 MIME 类型
-// 通过检查文件头魔术字节来判断
+// detectImageMimeType 通过检查文件头魔术字节检测图片的真实 MIME 类型
 func detectImageMimeType(data []byte) string {
-	if len(data) < 4 {
-		return http.DetectContentType(data)
-	}
-
 	// PNG: 89 50 4E 47 0D 0A 1A 0A
 	if bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47}) {
 		return "image/png"
 	}
 	// JPEG: FF D8 FF
-	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+	if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
 		return "image/jpeg"
 	}
-	// GIF87a
-	if bytes.HasPrefix(data, []byte("GIF87a")) {
-		return "image/gif"
-	}
-	// GIF89a
-	if bytes.HasPrefix(data, []byte("GIF89a")) {
+	// GIF87a / GIF89a
+	if bytes.HasPrefix(data, []byte("GIF87a")) || bytes.HasPrefix(data, []byte("GIF89a")) {
 		return "image/gif"
 	}
 	// WebP: RIFF....WEBP
@@ -82,16 +71,12 @@ func detectImageMimeType(data []byte) string {
 	if bytes.HasPrefix(data, []byte("BM")) {
 		return "image/bmp"
 	}
-	// TIFF (little endian)
-	if bytes.HasPrefix(data, []byte("II\x2A\x00")) {
-		return "image/tiff"
-	}
-	// TIFF (big endian)
-	if bytes.HasPrefix(data, []byte("MM\x00\x2A")) {
+	// TIFF (小端 / 大端)
+	if bytes.HasPrefix(data, []byte("II\x2A\x00")) || bytes.HasPrefix(data, []byte("MM\x00\x2A")) {
 		return "image/tiff"
 	}
 
-	// 回退到 http.DetectContentType
+	// 兜底使用 http.DetectContentType
 	return http.DetectContentType(data)
 }
 

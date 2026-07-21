@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/DotNetAge/gorag/v2/core"
 )
 
 const (
@@ -84,69 +82,6 @@ func TestBGEEmbedder_CalcText(t *testing.T) {
 	}
 }
 
-func TestBGEEmbedder_Bulk(t *testing.T) {
-	skipIfBGEModelNotFound(t)
-
-	embedder := newBGEEmbedderForTest(t)
-	defer embedder.Close()
-
-	chunks := []*core.Chunk{
-		{ID: "bge_chunk1", Content: "第一段文本用于测试", DocID: "bge_doc1"},
-		{ID: "bge_chunk2", Content: "第二段文本用于测试", DocID: "bge_doc1"},
-		{ID: "bge_chunk3", Content: "第三段文本用于测试", DocID: "bge_doc2"},
-	}
-
-	vectors, err := embedder.Bulk(chunks)
-	if err != nil {
-		t.Fatalf("Bulk failed: %v", err)
-	}
-
-	if len(vectors) != len(chunks) {
-		t.Errorf("Expected %d vectors, got %d", len(chunks), len(vectors))
-	}
-
-	for i, v := range vectors {
-		if v.ChunkID != chunks[i].ID {
-			t.Errorf("Vector %d ChunkID mismatch: expected %s, got %s", i, chunks[i].ID, v.ChunkID)
-		}
-		if len(v.Values) == 0 {
-			t.Errorf("Vector %d has empty values", i)
-			continue
-		}
-		if len(v.Values) != bgeTestDim {
-			t.Errorf("Vector %d expected dim %d, got %d", i, bgeTestDim, len(v.Values))
-		}
-		norm := sqrtFloat32(vectorNorm(v.Values))
-		if norm < 0.001 {
-			t.Errorf("Vector %d norm is %.4f (near zero), embedding output is likely invalid", i, norm)
-		}
-		t.Logf("Chunk %q -> dim=%d, norm=%.4f", chunks[i].Content, len(v.Values), norm)
-	}
-}
-
-func TestBGEEmbedder_Bulk_SkipImageChunks(t *testing.T) {
-	skipIfBGEModelNotFound(t)
-
-	embedder := newBGEEmbedderForTest(t)
-	defer embedder.Close()
-
-	chunks := []*core.Chunk{
-		{ID: "text1", Content: "文本内容", DocID: "doc1"},
-		{ID: "img1", Content: "fake_image_data", DocID: "doc1", MIMEType: "image/jpeg"},
-		{ID: "text2", Content: "另一段文本", DocID: "doc2"},
-	}
-
-	vectors, err := embedder.Bulk(chunks)
-	if err != nil {
-		t.Fatalf("Bulk failed: %v", err)
-	}
-
-	// 图片 chunk 应被跳过，只返回 2 个文本向量
-	if len(vectors) != 2 {
-		t.Errorf("Expected 2 vectors (image chunk should be skipped), got %d", len(vectors))
-	}
-}
-
 func TestBGEEmbedder_CalcImage_NotSupported(t *testing.T) {
 	skipIfBGEModelNotFound(t)
 
@@ -176,21 +111,6 @@ func TestBGEEmbedder_CalcText_EmptyInput(t *testing.T) {
 	}
 	if vector != nil {
 		t.Error("Expected nil vector for empty string")
-	}
-}
-
-func TestBGEEmbedder_Bulk_EmptyInput(t *testing.T) {
-	skipIfBGEModelNotFound(t)
-
-	embedder := newBGEEmbedderForTest(t)
-	defer embedder.Close()
-
-	vectors, err := embedder.Bulk(nil)
-	if err != nil {
-		t.Fatalf("Bulk with nil should not error, got: %v", err)
-	}
-	if len(vectors) != 0 {
-		t.Errorf("Expected 0 vectors for nil input, got %d", len(vectors))
 	}
 }
 

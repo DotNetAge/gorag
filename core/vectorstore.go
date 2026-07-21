@@ -2,147 +2,56 @@ package core
 
 import "context"
 
-// VectorStore defines the interface for vector storage and similarity search.
-// It provides methods for storing embedding vectors and performing efficient nearest neighbor searches.
-// Implementations can use various vector databases like Milvus, Pinecone, Qdrant, Weaviate, or in-memory stores.
+// VectorStore 向量存储接口：负责向量数据的写入、相似度检索与生命周期管理。
 //
-// Key responsibilities:
-//   - Store and update vector embeddings with associated metadata
-//   - Perform similarity searches using cosine distance or other metrics
-//   - Support metadata filtering during searches
-//   - Manage the lifecycle of stored vectors
+// 设计要点：
+//   - 多维度向量索引：每个 Chunk 在 VectorStore 中有 1~3 条向量记录
+//     （主向量 chunkID 对应 Content；辅助向量 chunkID:title / chunkID:summary
+//     分别对应 Title/Summary），3 条向量的 embedding 维度相同但数据维度不同
+//   - 分块树落地：每条 Vector.Metadata 持有 parent_id 字段，分块树在 VectorStore
+//     中可向上追溯（Chunk 不作为 Node 写入 GraphStore）
+//   - List 通过 filters 参数控制是否过滤：传 nil 时返回全部，传非 nil 时按条件过滤
 //
-// Example usage:
-//
-//	store := NewMilvusVectorStore()
-//	err := store.Upsert(ctx, vectors)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	results, scores, err := store.Search(ctx, queryVector, 10, filters)
+// 实现可基于 Milvus / Pinecone / Qdrant / Weaviate / govector 等。
 type VectorStore interface {
-	// Upsert inserts or updates vectors in the store.
-	// If a vector with the same ID exists, it will be updated; otherwise, it will be inserted.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - vectors: Slice of vectors to insert or update
-	//
-	// Returns:
-	//   - error: Any error that occurred during the operation
+	// Upsert 批量插入或更新向量。
+	// 若 vector.ID 已存在则更新，否则插入。
 	Upsert(ctx context.Context, vectors []*Vector) error
 
-	// Search performs a similarity search to find the most similar vectors.
-	// It returns the topK most similar vectors along with their similarity scores.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - query: The query vector to search for
-	//   - topK: Maximum number of results to return
-	//   - filters: Optional metadata filters to apply
-	//
-	// Returns:
-	//   - []*Vector: The most similar vectors found
-	//   - []float32: Similarity scores for each result
-	//   - error: Any error that occurred during search
+	// Search 执行相似度检索，返回 topK 条最相似向量及对应得分。
+	// filters 用于元数据过滤（如按 doc_id / region_id 过滤），传 nil 表示不过滤。
 	Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*Vector, []float32, error)
 
-	// Delete removes a vector from the store by its ID.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - id: The unique identifier of the vector to delete
-	//
-	// Returns:
-	//   - error: Any error that occurred during deletion
+	// Delete 按 ID 删除单条向量。
 	Delete(ctx context.Context, id string) error
 
-	// GetByDocID retrieves all vectors belonging to the same document by doc_id.
-	// This enables "knowledge traceability" — reconstructing the original document
-	// from individual chunks stored in the vector store.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - docID: The document ID to search for (from Chunk.DocID)
-	//
-	// Returns:
-	//   - []*Vector: All vectors belonging to the document (sorted by chunk index)
-	//   - error: Any error that occurred during retrieval
-	//
-	// Example usage:
-	//
-	//	vectors, err := store.GetByDocID(ctx, docID)
-	//	if err != nil { ... }
-	//	doc := ReconstructDocument(vectors)
+	// GetByDocID 按 doc_id 检索该文档的所有向量（按 chunk index 排序），
+	// 用于「知识追溯」——从分片重建原文档。
 	GetByDocID(ctx context.Context, docID string) ([]*Vector, error)
 
-	// Count returns the total number of vectors in the store.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//
-	// Returns:
-	//   - int: The total count of vectors
-	//   - error: Any error that occurred
+	// List 分页获取向量，支持可选的元数据过滤条件。
+	// filters 为 nil 时返回全部，非 nil 时按条件过滤。
+	// 多个 FilterCondition 之间为 AND 语义。
+	// 返回分页结果与过滤前总数。
+	List(ctx context.Context, offset, limit int, filters []FilterCondition) ([]*Vector, int, error)
+
+	// Count 返回 VectorStore 中的向量总数。
 	Count(ctx context.Context) (int, error)
 
-	// Clear removes all vectors from the store.
-	// After Clear, the store is ready for new data (no reinitialization needed).
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//
-	// Returns:
-	//   - error: Any error that occurred during the operation
+	// Clear 清空所有向量数据，清空后可立即接收新数据。
 	Clear(ctx context.Context) error
 
-	// Close gracefully shuts down the vector store connection.
-	// It should release all resources and close any open connections.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//
-	// Returns:
-	//   - error: Any error that occurred during shutdown
+	// Close 优雅关闭连接，释放底层资源。
 	Close(ctx context.Context) error
-
-	// List returns paginated vectors from the store.
-	// This enables browsing stored chunk content without a search query.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - offset: Number of vectors to skip (0-based)
-	//   - limit: Maximum number of vectors to return
-	//
-	// Returns:
-	//   - []*Vector: The paginated vectors (sorted by insertion order)
-	//   - error: Any error that occurred during retrieval
-	List(ctx context.Context, offset, limit int) ([]*Vector, error)
-
-	// ListFiltered returns paginated vectors filtered by metadata conditions.
-	// Each FilterCondition is ANDed together (all must match).
-	//
-	// Supported ConditionType values:
-	//   "exact"  - exact value match on metadata key
-	//   "prefix" - prefix match on metadata key (string value only)
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - offset: Number of vectors to skip (0-based)
-	//   - limit: Maximum number of vectors to return
-	//   - filters: Metadata filter conditions (AND semantics)
-	//
-	// Returns:
-	//   - []*Vector: The paginated filtered vectors
-	//   - int: Total count of vectors matching the filter (before pagination)
-	//   - error: Any error that occurred during retrieval
-	ListFiltered(ctx context.Context, offset, limit int, filters []FilterCondition) ([]*Vector, int, error)
 }
 
-// FilterCondition represents a single metadata filter condition.
-// Used with ListFiltered to narrow results by vector metadata.
+// FilterCondition 单个元数据过滤条件，配合 VectorStore.List 使用。
+//
+// ConditionType 取值：
+//   - "exact"：精确匹配 metadata key 的值
+//   - "prefix"：前缀匹配（仅适用于 string 类型 value）
 type FilterCondition struct {
-	Key   string      `json:"key"`
-	Type  string      `json:"type"`  // "exact" or "prefix"
-	Value any         `json:"value"`
+	Key   string `json:"key"`
+	Type  string `json:"type"`  // "exact" 或 "prefix"
+	Value any    `json:"value"`
 }
