@@ -135,3 +135,105 @@ func parseSummarizeResult(resp string) (summarizeResult, error) {
 	}
 	return res, nil
 }
+
+// =====================================================================
+// 批量摘要（在 gochatSummarizer 上增加方法，不增加新类型）
+// =====================================================================
+
+// batchSummarizeEntry 是批量摘要的 JSON 序列化结构。
+// 同时用于 LLM 输入（title/summary 为空）和输出（LLM 填充 title/summary）。
+type batchSummarizeEntry struct {
+	ChunkID string `json:"chunk_id"`
+	Content string `json:"content"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
+// SummarizeBatch 一次 LLM 请求处理所有分片（批量模式）。
+// 与 Summarize 共存于 gochatSummarizer，调用方通过类型断言访问：
+//
+//	if bs, ok := s.(interface{ SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error) }); ok {
+//	    bs.SummarizeBatch(ctx, chunks)
+//	}
+func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chunk) ([]core.Chunk, error) {
+	if len(chunks) == 0 {
+		return chunks, nil
+	}
+	// 1. 序列化为 JSON 数组
+	entries := make([]batchSummarizeEntry, 0, len(chunks))
+	for _, c := range chunks {
+		entries = append(entries, batchSummarizeEntry{
+			ChunkID: c.ID,
+			Content: c.Content,
+		})
+	}
+	input, err := json.Marshal(entries)
+	if err != nil {
+		return chunks, fmt.Errorf("SummarizeBatch: 序列化分块失败: %w", err)
+	}
+	// 2. 一次 LLM 调用
+	resp, err := s.client.Chat(ctx, []chat.Message{
+		chat.NewSystemMessage(s.buildBatchSystemPrompt()),
+		chat.NewUserMessage(string(input)),
+	})
+	if err != nil {
+		return chunks, fmt.Errorf("SummarizeBatch: LLM 调用失败: %w", err)
+	}
+	// 3. 解析结果
+	result, err := parseBatchSummarizeResult(resp.Content)
+	if err != nil {
+		s.logger.Warn("SummarizeBatch: 解析 LLM 响应失败，保留原始分片", "error", err)
+		return chunks, nil
+	}
+	// 4. 按 chunk_id 匹配回写
+	resultByID := make(map[string]batchSummarizeEntry, len(result))
+	for _, r := range result {
+		if r.ChunkID != "" {
+			resultByID[r.ChunkID] = r
+		}
+	}
+	for i := range chunks {
+		if r, ok := resultByID[chunks[i].ID]; ok {
+			if r.Title != "" {
+				chunks[i].Title = r.Title
+			}
+			if r.Summary != "" {
+				chunks[i].Summary = r.Summary
+			}
+		}
+	}
+	return chunks, nil
+}
+
+// buildBatchSystemPrompt 构建批量模式的系统提示词。
+func (s *gochatSummarizer) buildBatchSystemPrompt() string {
+	var sb strings.Builder
+	sb.WriteString("你是一名精准的文档摘要助手。\n")
+	sb.WriteString("给定一个 JSON 数组形式的文档分块列表，请为每条记录生成 title 和 summary。\n")
+	sb.WriteString("输入格式：\n")
+	sb.WriteString("[{\"chunk_id\": \"...\", \"content\": \"...\"}]\n\n")
+	sb.WriteString("输出格式（严格的 JSON 数组，内容和输入一一对应）：\n")
+	sb.WriteString("[{\"chunk_id\": \"...\", \"title\": \"...\", \"summary\": \"...\"}]\n\n")
+	sb.WriteString("字段说明：\n")
+	sb.WriteString("- \"title\": 简洁、利于搜索的标题（最多 10 个词）\n")
+	sb.WriteString("- \"summary\": 1-3 句话，准确概括关键语义\n\n")
+	sb.WriteString("规则：\n")
+	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
+	sb.WriteString("- 标题和摘要使用 ")
+	sb.WriteString(s.config.Language)
+	sb.WriteString(" 表达。\n")
+	sb.WriteString("- 确保输出数组的长度与输入数组一致，chunk_id 一一对应。\n")
+	sb.WriteString("- 如果某个分块内容很短，标题和摘要也应简短但有意义。\n")
+	sb.WriteString("- 如果输入是代码段，标题优先使用函数/类名，摘要描述其行为。\n")
+	return sb.String()
+}
+
+// parseBatchSummarizeResult 解析批量 Summarizer 的 LLM 响应。
+func parseBatchSummarizeResult(resp string) ([]batchSummarizeEntry, error) {
+	resp = normalizeLLMJSON(resp)
+	var res []batchSummarizeEntry
+	if err := json.Unmarshal([]byte(resp), &res); err != nil {
+		return nil, fmt.Errorf("批量 JSON 解析失败: %w", err)
+	}
+	return res, nil
+}

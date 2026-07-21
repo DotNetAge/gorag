@@ -2,54 +2,162 @@ package gorag
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/DotNetAge/gograph/pkg/api"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/indexer"
 	"github.com/DotNetAge/gorag/v2/logging"
-	"github.com/fsnotify/fsnotify"
+	"github.com/DotNetAge/gorag/v2/store/meta"
+	"github.com/DotNetAge/gorag/v2/utils"
+	gvcore "github.com/DotNetAge/govector/core"
 )
 
-// indexedDoc 已索引文件的元数据记录
-type indexedDoc struct {
-	Chunks    []string `json:"chunks"`    // 文件产生的所有 Chunk ID
-	Timestamp string   `json:"timestamp"` // 索引时间 (RFC3339)
+// textExts 可索引的文本文件扩展名列表
+var textExts = []string{
+	".txt", ".md", ".json", ".yaml", ".yml",
+	".html", ".xml", ".css",
+	".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h",
+	".sh", ".bash", ".zsh",
+	".sql", ".conf", ".cfg", ".ini",
 }
 
-// IndexingService RAG 索引服务
-// 支持批量索引和文件监控两种模式
-type IndexingService struct {
-	dataDir      string              // 索引数据目录
-	watchs       []string            // 监控的文件目录
-	pendingFiles []string            // 待索引文件列表
-	indexedFiles map[string]*indexedDoc // 已索引文件记录（filePath → 元数据）
-	indexer      indexer.Indexer     // 索引器实例
-	logger       logging.Logger      // 日志记录器
-	workerCount  int                 // worker pool 大小
+// ── 初始化 RAG 库 ────────────────────────────────────────────────────
 
-	// 内部状态
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	indexFile string // 已索引文件记录文件路径（JSON）
+// InitOptions 初始化 RAG 库的配置选项。
+type InitOptions struct {
+	RagDir    string                 // .rag 库目录
+	IndexType string                 // 索引器类型: semantic/graph/hyper
+	ModelPath string                 // 本地模型文件路径（与 ModelID 二选一）
+	ModelID   string                 // HuggingFace 模型 ID（与 ModelPath 二选一）
+	ModelFile string                 // HuggingFace 模型文件名
+	Observer  utils.DownloadObserver // 下载进度观察者（可选）
+}
+
+// InitResult 初始化结果。
+type InitResult struct {
+	RagDir      string
+	IndexType   string
+	ModelPath   string
+	IndexerName string
+	Config      *Config
+	ConfigYAML  string
+}
+
+// InitRAG 初始化 RAG 库。
+// 包含完整的初始化流程：模型下载、目录创建、配置写入、索引器验证。
+func InitRAG(opts InitOptions) (*InitResult, error) {
+	// 1. 确定模型路径
+	modelPath, err := resolveModelPath(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 创建 .rag 目录结构
+	if err := Init(opts.RagDir); err != nil {
+		return nil, fmt.Errorf("创建 RAG 库失败: %w", err)
+	}
+
+	// 3. 写入配置
+	cfg, err := LoadConfig(opts.RagDir)
+	if err != nil {
+		return nil, fmt.Errorf("加载配置失败: %w", err)
+	}
+	cfg.Indexer.Type = opts.IndexType
+	if modelPath != "" {
+		cfg.Embedding.ModelFile = modelPath
+	}
+	if err := SaveConfig(opts.RagDir, cfg); err != nil {
+		return nil, fmt.Errorf("保存配置失败: %w", err)
+	}
+
+	// 4. 打开索引器验证（仅当有模型路径时）
+	var indexerName string
+	if modelPath != "" {
+		idx, err := Open(opts.RagDir)
+		if err == nil {
+			indexerName = idx.Name()
+			if closer, ok := idx.(indexer.IndexerCloser); ok {
+				closer.Close(context.Background())
+			}
+		}
+	}
+
+	// 5. 返回结果
+	_, raw, _ := loadConfigRaw(opts.RagDir)
+
+	return &InitResult{
+		RagDir:      opts.RagDir,
+		IndexType:   opts.IndexType,
+		ModelPath:   modelPath,
+		IndexerName: indexerName,
+		Config:      cfg,
+		ConfigYAML:  raw,
+	}, nil
+}
+
+// resolveModelPath 确定模型路径。
+// 策略：优先使用 ModelID 从 HuggingFace 下载，其次使用 ModelPath。
+func resolveModelPath(opts InitOptions) (string, error) {
+	if !needsModel(opts.IndexType) {
+		return "", nil
+	}
+
+	if opts.ModelID != "" {
+		modelFile := opts.ModelFile
+		if modelFile == "" {
+			modelFile = "onnx/model.onnx"
+		}
+		path, err := utils.CheckAndDownload(opts.ModelID, modelFile, opts.Observer)
+		if err != nil {
+			return "", fmt.Errorf("模型下载失败: %w", err)
+		}
+		return path, nil
+	}
+
+	if opts.ModelPath != "" {
+		if _, err := os.Stat(opts.ModelPath); os.IsNotExist(err) {
+			return "", fmt.Errorf("模型文件不存在: %s", opts.ModelPath)
+		}
+		return opts.ModelPath, nil
+	}
+
+	return "", fmt.Errorf("%s 索引器需要模型，请指定模型路径或 HuggingFace 模型 ID", opts.IndexType)
+}
+
+// needsModel 判断索引器类型是否需要模型。
+func needsModel(indexerType string) bool {
+	return indexerType == "hyper" || indexerType == "semantic"
+}
+
+// ── 索引服务 ──────────────────────────────────────────────────────────
+// 提供与 CLI 命令一一对应的业务方法。
+type IndexingService struct {
+	dataDir   string          // 索引数据目录
+	metaStore meta.Store      // 元数据存储
+	indexer   indexer.Indexer // 索引器实例
+	logger    logging.Logger  // 日志记录器
+
+	mu sync.RWMutex // 保护内部状态
 }
 
 // ServiceOption 服务配置选项
 type ServiceOption func(*IndexingService)
 
-// WithWatchs 设置监控目录
-func WithWatchs(dirs ...string) ServiceOption {
+// WithMetaStore 设置元数据存储
+func WithMetaStore(store meta.Store) ServiceOption {
 	return func(s *IndexingService) {
-		s.watchs = append(s.watchs, dirs...)
+		s.metaStore = store
 	}
 }
 
@@ -60,37 +168,28 @@ func WithLogger(logger logging.Logger) ServiceOption {
 	}
 }
 
-// WithWorkerCount 设置 worker pool 大小
-func WithWorkerCount(count int) ServiceOption {
-	return func(s *IndexingService) {
-		if count > 0 {
-			s.workerCount = count
-		}
-	}
-}
-
-// NewRAGService 创建 RAG 索引服务
-// dataDir: RAG 数据目录（必须）
-// opts: 可选配置项
+// NewRAGService 创建 RAG 索引服务。
+//
+// 参数：
+//   - dataDir: RAG 库目录（必须是以 .rag 结尾的绝对路径）
+//   - opts: 可选配置项
+//
+// 若未通过 WithMetaStore 注入元数据存储，会自动创建 SQLite 存储。
+// 若未通过 WithLogger 注入日志器，会自动创建文件日志。
 func NewRAGService(dataDir string, opts ...ServiceOption) (*IndexingService, error) {
 	if dataDir == "" {
-		return nil, fmt.Errorf("dataDir is required")
+		return nil, fmt.Errorf("dataDir 不能为空")
 	}
 
 	// 打开 RAG 库，获取索引器实例
-	indexer, err := Open(dataDir)
+	idx, err := Open(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open RAG: %w", err)
+		return nil, fmt.Errorf("打开 RAG 库失败: %w", err)
 	}
 
-	// 创建服务实例
 	svc := &IndexingService{
-		dataDir:      dataDir,
-		watchs:       []string{},
-		pendingFiles: []string{},
-		indexedFiles: make(map[string]*indexedDoc),
-		indexer:      indexer,
-		workerCount:  4, // 默认 4 个 worker
+		dataDir: dataDir,
+		indexer: idx,
 	}
 
 	// 应用配置选项
@@ -98,114 +197,111 @@ func NewRAGService(dataDir string, opts ...ServiceOption) (*IndexingService, err
 		opt(svc)
 	}
 
+	// 设置默认元数据存储
+	if svc.metaStore == nil {
+		metaDB := filepath.Join(dataDir, "meta.db")
+		store, err := meta.NewSQLiteStore(metaDB)
+		if err != nil {
+			// 关闭已打开的索引器
+			if closer, ok := idx.(indexer.IndexerCloser); ok {
+				closer.Close(context.Background())
+			}
+			return nil, fmt.Errorf("创建元数据存储失败: %w", err)
+		}
+		svc.metaStore = store
+	}
+
 	// 设置默认日志记录器
 	if svc.logger == nil {
 		logDir := filepath.Join(dataDir, "logs")
 		if err := os.MkdirAll(logDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create log directory: %w", err)
+			return nil, fmt.Errorf("创建日志目录失败: %w", err)
 		}
-		// 使用默认的文件 logger
-		logFile := filepath.Join(logDir, "indexing.log")
+		logFile := filepath.Join(logDir, "gorag.log")
 		logger, err := logging.DefaultFileLogger(logFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create logger: %w", err)
+			return nil, fmt.Errorf("创建日志记录器失败: %w", err)
 		}
 		svc.logger = logger
-	}
-
-	// 加载已索引文件记录
-	svc.indexFile = filepath.Join(dataDir, "history", "doc_index.json")
-	if err := svc.loadIndexedFiles(); err != nil {
-		svc.logger.Warn("failed to load indexed files history", "error", err.Error())
-	}
-
-	// 创建 history 目录
-	historyDir := filepath.Join(dataDir, "history")
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create history directory: %w", err)
 	}
 
 	return svc, nil
 }
 
-// Index 执行批量索引
-// 对监控目录下的全部文件进行全量索引
-func (s *IndexingService) Index() error {
+// Index 对指定路径执行批量索引。
+// targetPath 可以是文件或目录。
+func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.logger.Info("starting batch indexing", "watch_dirs", s.watchs, "worker_count", s.workerCount)
-
-	// 1. 扫描所有待索引文件
-	for _, watchDir := range s.watchs {
-		if err := s.scanDirectory(watchDir); err != nil {
-			s.logger.Error("failed to scan directory", err, "dir", watchDir)
-			continue
+	// 1. 扫描文件
+	var files []string
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		return fmt.Errorf("无法访问目标路径: %w", err)
+	}
+	if info.IsDir() {
+		files, err = scanDir(targetPath)
+	} else {
+		if isTextFile(targetPath) {
+			files = append(files, targetPath)
 		}
 	}
+	if err != nil {
+		return fmt.Errorf("扫描文件失败: %w", err)
+	}
 
-	if len(s.pendingFiles) == 0 {
-		s.logger.Info("no files to index")
+	if len(files) == 0 {
+		s.logger.Info("无待索引文件")
 		return nil
 	}
 
-	s.logger.Info("files found for indexing", "count", len(s.pendingFiles))
+	s.logger.Info("开始批量索引", "target", targetPath, "files", len(files))
 
 	// 2. 使用 worker pool 并发索引
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	workerCount := 4
+	jobs := make(chan string, len(files))
+	results := make(chan indexResult, len(files))
 
-	jobs := make(chan string, len(s.pendingFiles))
-	results := make(chan indexResult, len(s.pendingFiles))
-
-	// 启动 workers
 	var wg sync.WaitGroup
-	for i := 0; i < s.workerCount; i++ {
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go s.indexWorker(ctx, &wg, jobs, results)
 	}
 
-	// 发送任务
-	for _, file := range s.pendingFiles {
+	for _, file := range files {
 		jobs <- file
 	}
 	close(jobs)
 
-	// 等待所有 workers 完成
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	// 收集结果
 	var failedCount int
 	for result := range results {
 		if result.err != nil {
 			failedCount++
-			s.logger.Error("failed to index file", result.err, "file", result.file)
+			s.logger.Error("索引文件失败", result.err, "file", result.file)
 		} else {
-			s.logger.Info("file indexed successfully", "file", result.file, "chunk_count", result.count)
+			s.logger.Info("文件索引成功", "file", result.file, "chunk_count", result.count)
 		}
 	}
 
-	// 批量保存已索引记录（避免 worker 并发写文件）
-	if err := s.saveIndexedFiles(); err != nil {
-		s.logger.Warn("failed to persist indexed files after batch", "error", err)
-	}
-
-	s.logger.Info("batch indexing completed", "total", len(s.pendingFiles), "failed", failedCount, "success", len(s.pendingFiles)-failedCount)
-
-	// 3. 清空待索引列表
-	s.pendingFiles = []string{}
+	s.logger.Info("批量索引完成",
+		"total", len(files),
+		"failed", failedCount,
+		"success", len(files)-failedCount)
 
 	return nil
 }
 
 // indexResult 索引结果
 type indexResult struct {
-	file    string
-	count   int
-	err     error
+	file  string
+	count int
+	err   error
 }
 
 // indexWorker 索引 worker
@@ -218,370 +314,591 @@ func (s *IndexingService) indexWorker(ctx context.Context, wg *sync.WaitGroup, j
 			results <- indexResult{file: file, err: ctx.Err()}
 			return
 		default:
-			// 检查文件是否已索引
-			s.mu.RLock()
-			if _, exists := s.indexedFiles[file]; exists {
-				s.mu.RUnlock()
-				results <- indexResult{file: file}
-				continue
-			}
-			s.mu.RUnlock()
-
-			chunks, err := s.indexer.AddFile(ctx, file)
+			chunks, err := s.processFile(ctx, file)
 			if err != nil {
 				results <- indexResult{file: file, err: err}
 				continue
 			}
-
-			chunkIDs := s.recordFileChunks(file, chunks)
 			results <- indexResult{
-				file:    file,
-				count:   len(chunkIDs),
+				file:  file,
+				count: len(chunks),
 			}
 		}
 	}
 }
 
-// scanDirectory 扫描目录下的所有文件
-func (s *IndexingService) scanDirectory(dir string) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		// 检查文件是否为文本文件
-		if s.isTextFile(path) {
-			s.pendingFiles = append(s.pendingFiles, path)
-		}
-
-		return nil
-	})
-}
-
-// isTextFile 判断是否为文本文件
-func (s *IndexingService) isTextFile(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	textExts := []string{
-		".txt", ".md", ".json", ".yaml", ".yml",
-		".html", ".xml", ".css",
-		".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h",
-		".sh", ".bash", ".zsh",
-		".sql", ".conf", ".cfg", ".ini",
-	}
-
-	return slices.Contains(textExts, ext)
-}
-
-// Watch 启动文件监控服务
-// 当文件发生变更时自动进行索引
-// 首次启动时会执行全量索引
-func (s *IndexingService) Watch() error {
-	if len(s.watchs) == 0 {
-		return fmt.Errorf("no directories to watch")
-	}
-
-	// 创建文件监控器
-	watcher, err := fsnotify.NewWatcher()
+// processFile 对单个文件执行完整索引流程（含两级增量预检）。
+//
+// 流程：
+//  1. 两级预检：mtime + size → hash
+//  2. 清理旧数据
+//  3. 调用 indexer.AddFile 写入新数据
+//  4. 成功/失败写入 meta.db
+func (s *IndexingService) processFile(ctx context.Context, absPath string) ([]*core.Chunk, error) {
+	info, err := os.Stat(absPath)
 	if err != nil {
-		return fmt.Errorf("failed to create watcher: %w", err)
-	}
-	defer watcher.Close()
-
-	// 设置上下文
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	defer s.cancel()
-
-	// 添加监控目录
-	for _, dir := range s.watchs {
-		if err := watcher.Add(dir); err != nil {
-			return fmt.Errorf("failed to watch directory %s: %w", dir, err)
-		}
-		s.logger.Info("watching directory", "dir", dir)
+		return nil, fmt.Errorf("stat 文件失败: %w", err)
 	}
 
-	// 首次执行全量索引
-	if err := s.Index(); err != nil {
-		s.logger.Error("initial indexing failed", err)
-	}
-
-	// 启动事件处理 goroutine
-	s.wg.Add(1)
-	go s.handleWatchEvents(watcher)
-
-	s.logger.Info("file watch service started", "watch_dirs", s.watchs)
-
-	// 阻塞等待
-	<-s.ctx.Done()
-
-	s.logger.Info("file watch service stopped")
-
-	return nil
-}
-
-// handleWatchEvents 处理文件监控事件
-func (s *IndexingService) handleWatchEvents(watcher *fsnotify.Watcher) {
-	defer s.wg.Done()
-
-	debounceTimer := time.NewTimer(2 * time.Second)
-	defer debounceTimer.Stop()
-
-	var pendingEvents []string
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-
-			// 处理创建、写入和删除事件
-			if event.Op&fsnotify.Create == fsnotify.Create ||
-				event.Op&fsnotify.Write == fsnotify.Write ||
-				event.Op&fsnotify.Remove == fsnotify.Remove {
-				if s.isTextFile(event.Name) {
-					pendingEvents = append(pendingEvents, event.Name)
-					debounceTimer.Reset(2 * time.Second)
-				}
-			}
-
-		case <-debounceTimer.C:
-			if len(pendingEvents) > 0 {
-				s.processFileChanges(s.ctx, pendingEvents)
-				pendingEvents = []string{}
-			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			s.logger.Error("watcher error", err)
+	// 1. 两级预检：先查 mtime+size，不匹配才算 hash
+	existing, _ := s.metaStore.GetDocumentByPath(absPath)
+	if existing != nil && existing.Status == "indexed" {
+		if existing.ModifiedAt.Equal(info.ModTime()) && existing.SizeBytes == info.Size() {
+			s.logger.Info("文件未变更（mtime+size 命中），跳过", "path", absPath)
+			return nil, nil
 		}
 	}
-}
 
-// processFileChanges 处理文件变更（创建/修改/删除）
-func (s *IndexingService) processFileChanges(ctx context.Context, files []string) {
-	s.logger.Info("processing file changes", "count", len(files))
-
-	for _, file := range files {
-		// 文件已删除 → 清理索引
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			if err := s.removeFileIndex(ctx, file); err != nil {
-				s.logger.Error("failed to cleanup deleted file index", err, "file", file)
-			} else {
-				s.logger.Info("cleaned up index for deleted file", "file", file)
-			}
-			continue
-		}
-
-		// 检查文件是否已索引
-		s.mu.RLock()
-		_, exists := s.indexedFiles[file]
-		s.mu.RUnlock()
-
-		if exists {
-			// 已索引 → 更新（先删后加）
-			s.logger.Info("reindexing changed file", "file", file)
-			chunks, err := s.reindexFile(ctx, file)
-			if err != nil {
-				s.logger.Error("failed to reindex file", err, "file", file)
-				continue
-			}
-			s.logger.Info("file reindexed", "file", file,
-				"chunk_count", len(chunks), "first_chunk_id", chunks[0].ID)
-		} else {
-			// 新文件 → 直接索引
-			s.indexNewFile(ctx, file)
-		}
-	}
-}
-
-// removeFileIndex 删除文件的索引记录并移除所有关联 chunks
-func (s *IndexingService) removeFileIndex(ctx context.Context, file string) error {
-	s.mu.Lock()
-	doc, exists := s.indexedFiles[file]
-	if !exists {
-		s.mu.Unlock()
-		return nil
-	}
-	chunkIDs := make([]string, len(doc.Chunks))
-	copy(chunkIDs, doc.Chunks)
-	delete(s.indexedFiles, file)
-	s.mu.Unlock()
-
-	if err := s.saveIndexedFiles(); err != nil {
-		s.logger.Warn("failed to persist index after remove", "file", file, "error", err)
-	}
-
-	var errs []error
-	// Remove 在 IndexerAdmin 接口上，需 type-assert
-	admin, hasAdmin := s.indexer.(indexer.IndexerAdmin)
-	for _, chunkID := range chunkIDs {
-		if !hasAdmin {
-			errs = append(errs, fmt.Errorf("indexer 未实现 IndexerAdmin"))
-			break
-		}
-		if err := admin.Remove(ctx, chunkID); err != nil {
-			errs = append(errs, err)
-			s.logger.Warn("failed to remove chunk", "file", file, "chunkID", chunkID, "error", err)
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%d/%d chunks failed to remove: %w", len(errs), len(chunkIDs), errs[0])
-	}
-	return nil
-}
-
-// reindexFile 更新文件索引（删除旧数据 → 重新分块索引）
-func (s *IndexingService) reindexFile(ctx context.Context, file string) ([]*core.Chunk, error) {
-	// 1. 删除旧索引
-	if err := s.removeFileIndex(ctx, file); err != nil {
-		s.logger.Warn("partial failure removing old index, continuing with reindex",
-			"file", file, "error", err)
-	}
-
-	// 2. 执行索引（AddFile 内部完成分块，返回所有 chunk）
-	chunks, err := s.indexer.AddFile(ctx, file)
+	// 2. 计算内容 hash（仅 mtime/size 变化时计算）
+	contentHash, err := computeFileHash(absPath)
 	if err != nil {
-		return nil, err
+		s.recordFailure(absPath, "", err)
+		return nil, fmt.Errorf("计算文件 hash 失败: %w", err)
 	}
-	if len(chunks) == 0 {
+
+	if existing != nil && existing.ContentHash == contentHash && existing.Status == "indexed" {
+		s.logger.Info("文件未变更（hash 命中），跳过", "path", absPath)
 		return nil, nil
 	}
 
-	// 3. 记录文件 → chunkIDs 映射
-	s.recordFileChunks(file, chunks)
+	// 3. 先清理旧数据
+	if existing != nil && len(existing.ChunkIDs) > 0 {
+		if err := s.removeFileIndex(ctx, absPath); err != nil {
+			s.logger.Warn("清理旧索引失败，继续写入新数据", "path", absPath, "err", err)
+		}
+	}
 
-	if err := s.saveIndexedFiles(); err != nil {
-		s.logger.Warn("failed to persist reindex record", "file", file, "error", err)
+	// 4. 调用 indexer.AddFile 写入新数据
+	chunks, err := s.indexer.AddFile(ctx, absPath)
+	if err != nil {
+		s.recordFailure(absPath, contentHash, err)
+		return nil, fmt.Errorf("索引文件失败: %w", err)
+	}
+
+	// 5. 成功状态写入 meta.db
+	chunkIDs := make([]string, len(chunks))
+	for i, c := range chunks {
+		chunkIDs[i] = c.ID
+	}
+	if err := s.metaStore.SaveDocument(&meta.Document{
+		AbsolutePath: absPath,
+		FileName:     info.Name(),
+		Extension:    filepath.Ext(absPath),
+		SizeBytes:    info.Size(),
+		ModifiedAt:   info.ModTime(),
+		ContentHash:  contentHash,
+		Status:       "indexed",
+		ChunkIDs:     chunkIDs,
+		IndexedAt:    timePtr(time.Now()),
+	}); err != nil {
+		s.logger.Warn("保存元数据失败", "path", absPath, "error", err)
 	}
 
 	return chunks, nil
 }
 
-// indexNewFile 索引新文件并记录映射
-func (s *IndexingService) indexNewFile(ctx context.Context, file string) {
-	chunks, err := s.indexer.AddFile(ctx, file)
-	if err != nil {
-		s.logger.Error("failed to index file", err, "file", file)
-		return
+// recordFailure 将索引失败记录写入 meta.db。
+func (s *IndexingService) recordFailure(absPath, contentHash string, err error) {
+	if saveErr := s.metaStore.SaveDocument(&meta.Document{
+		AbsolutePath: absPath,
+		ContentHash:  contentHash,
+		Status:       "failed",
+		ErrorMessage: err.Error(),
+	}); saveErr != nil {
+		s.logger.Warn("保存失败记录到 meta.db 失败", "path", absPath, "error", saveErr)
 	}
-	if len(chunks) == 0 {
-		return
-	}
-
-	s.recordFileChunks(file, chunks)
-
-	if err := s.saveIndexedFiles(); err != nil {
-		s.logger.Warn("failed to persist indexed file record", "file", file, "error", err)
-	}
-
-	s.logger.Info("file indexed", "file", file, "chunk_count", len(chunks), "first_chunk_id", chunks[0].ID)
 }
 
-// Reindex 重新索引指定文件（公开 API）
-// 删除旧索引数据后重新分块并索引，适用于文件内容变更后的更新场景
-func (s *IndexingService) Reindex(ctx context.Context, file string) error {
-	_, err := s.reindexFile(ctx, file)
-	return err
-}
-
-// recordFileChunks 获取文件的 chunk IDs 并记录到内存（持久化由 Index 批量保存）
-func (s *IndexingService) recordFileChunks(file string, chunks []*core.Chunk) []string {
-	chunkIDs := make([]string, len(chunks))
-	for i, c := range chunks {
-		chunkIDs[i] = c.ID
-	}
-	s.mu.Lock()
-	s.indexedFiles[file] = &indexedDoc{
-		Chunks:    chunkIDs,
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-	s.mu.Unlock()
-
-	return chunkIDs
-}
-
-
-// loadIndexedFiles 从 JSON 文件加载已索引记录，不存在时尝试从旧格式迁移
-func (s *IndexingService) loadIndexedFiles() error {
-	data, err := os.ReadFile(s.indexFile)
-	if os.IsNotExist(err) {
-		return s.migrateLegacyIndexedFiles()
-	}
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, &s.indexedFiles)
-}
-
-// migrateLegacyIndexedFiles 从旧的纯文本格式迁移到 JSON 格式
-func (s *IndexingService) migrateLegacyIndexedFiles() error {
-	legacyFile := filepath.Join(filepath.Dir(s.indexFile), "indexed_files.txt")
-	data, err := os.ReadFile(legacyFile)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	count := 0
-	for line := range strings.SplitSeq(string(data), "\n") {
-		path := strings.TrimSpace(line)
-		if path != "" {
-			s.indexedFiles[path] = &indexedDoc{Timestamp: time.Now().Format(time.RFC3339)}
-			count++
-		}
-	}
-
-	if count > 0 {
-		if err := s.saveIndexedFiles(); err != nil {
+// scanDir 扫描目录下的所有文本文件。
+func scanDir(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
-		s.logger.Info("migrated indexed files to new format", "count", count)
-	}
-
-	return nil
+		if d.IsDir() {
+			// 跳过 .rag 子目录（避免索引库索引自己）
+			if strings.HasSuffix(path, ".rag") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isTextFile(path) {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
 }
 
-// saveIndexedFiles 将已索引记录持久化为 JSON 文件（原子写入）
-func (s *IndexingService) saveIndexedFiles() error {
-	s.mu.RLock()
-	data, err := json.MarshalIndent(s.indexedFiles, "", "  ")
-	s.mu.RUnlock()
+// isTextFile 判断是否为可索引的文本文件
+func isTextFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return slices.Contains(textExts, ext)
+}
+
+// removeFileIndex 删除文件的索引记录并清理所有关联 chunks。
+// 全部 Remove 成功后才删除 meta.db 记录，部分失败则标记 partial_deleted。
+func (s *IndexingService) removeFileIndex(ctx context.Context, absPath string) error {
+	doc, err := s.metaStore.GetDocumentByPath(absPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("查询文档元数据失败: %w", err)
+	}
+	if doc == nil {
+		return nil
 	}
 
-	dir := filepath.Dir(s.indexFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+	if len(doc.ChunkIDs) == 0 {
+		return s.metaStore.DeleteDocument(absPath)
 	}
-	tmpFile := s.indexFile + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return err
+
+	var failedChunks []string
+	if admin, ok := s.indexer.(indexer.IndexerAdmin); ok {
+		for _, chunkID := range doc.ChunkIDs {
+			if err := admin.Remove(ctx, chunkID); err != nil {
+				s.logger.Error("删除 chunk 失败", err, "chunk_id", chunkID)
+				failedChunks = append(failedChunks, chunkID)
+			}
+		}
 	}
-	return os.Rename(tmpFile, s.indexFile)
+
+	if len(failedChunks) > 0 {
+		return s.metaStore.SaveDocument(&meta.Document{
+			AbsolutePath: doc.AbsolutePath,
+			ContentHash:  doc.ContentHash,
+			Status:       "partial_deleted",
+			ChunkIDs:     failedChunks,
+			ErrorMessage: fmt.Sprintf("部分 chunk 删除失败：%d/%d", len(failedChunks), len(doc.ChunkIDs)),
+		})
+	}
+
+	return s.metaStore.DeleteDocument(absPath)
 }
 
-// Stop 停止服务
+// Stop 停止服务，关闭所有资源。
 func (s *IndexingService) Stop() error {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	s.wg.Wait()
-
-	// 关闭索引器（IndexerCloser 接口 Close(ctx)）
+	// 关闭索引器
 	if closer, ok := s.indexer.(indexer.IndexerCloser); ok {
-		return closer.Close(context.Background())
+		if err := closer.Close(context.Background()); err != nil {
+			s.logger.Error("关闭索引器失败", err)
+		}
+	}
+
+	// 关闭元数据存储
+	if s.metaStore != nil {
+		if err := s.metaStore.Close(); err != nil {
+			s.logger.Error("关闭元数据存储失败", err)
+		}
 	}
 
 	return nil
+}
+
+// computeFileHash 计算文件的 SHA256 哈希值。
+func computeFileHash(absPath string) (string, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return "", fmt.Errorf("打开文件失败: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("计算哈希失败: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// timePtr 返回 time.Time 的指针。
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
+// =====================================================================
+// 配置读取与文件系统工具（包内辅助函数）
+// =====================================================================
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// calcDirSizes 递归计算各子目录大小。
+func calcDirSizes(dataDir string) map[string]int64 {
+	sizes := make(map[string]int64)
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return sizes
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			fi, err := entry.Info()
+			if err == nil {
+				sizes["total"] += fi.Size()
+			}
+			continue
+		}
+		subSize := dirSize(filepath.Join(dataDir, entry.Name()))
+		sizes[entry.Name()] = subSize
+		sizes["total"] += subSize
+	}
+	return sizes
+}
+
+// dirSize 递归计算目录总大小。
+func dirSize(path string) int64 {
+	var size int64
+	filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		fi, err := d.Info()
+		if err == nil {
+			size += fi.Size()
+		}
+		return nil
+	})
+	return size
+}
+
+// getVectorCount 获取向量索引中的条目数。
+func getVectorCount(dbPath string) int {
+	storage, err := gvcore.NewStorage(dbPath)
+	if err != nil {
+		return -1
+	}
+	defer storage.Close()
+
+	collections, err := storage.ListCollections()
+	if err != nil || len(collections) == 0 {
+		return -1
+	}
+
+	meta, err := storage.LoadCollectionMeta(collections[0])
+	if err != nil {
+		return -1
+	}
+
+	col, err := gvcore.NewCollection(meta.Name, meta.VectorLen, meta.Metric, storage, meta.UseHNSW)
+	if err != nil {
+		return -1
+	}
+	return col.Count()
+}
+
+// getGraphCount 获取图索引的节点和边数量。
+func getGraphCount(dbPath string) (nodes int64, edges int64) {
+	db, err := api.Open(dbPath)
+	if err != nil {
+		return -1, -1
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	nodes = queryGraphCount(ctx, db, "MATCH (n) RETURN count(n) AS cnt")
+	edges = queryGraphCount(ctx, db, "MATCH ()-[r]->() RETURN count(r) AS cnt")
+	return nodes, edges
+}
+
+// queryGraphCount 执行图查询获取计数值。
+func queryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		return -1
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return 0
+	}
+
+	var count int64
+	if err := rows.Scan(&count); err != nil {
+		var val any
+		_ = rows.Scan(&val)
+		if val != nil {
+			switch v := val.(type) {
+			case int64:
+				return v
+			case int:
+				return int64(v)
+			case float64:
+				return int64(v)
+			}
+		}
+		return -1
+	}
+	return count
+}
+
+// =====================================================================
+// 服务方法（与 CLI 命令一一对应）
+// =====================================================================
+
+// Query 执行搜索查询。
+func (s *IndexingService) Query(ctx context.Context, text string) (*core.Hit, error) {
+	if text == "" {
+		return nil, fmt.Errorf("查询内容不能为空")
+	}
+	return s.indexer.Search(ctx, s.indexer.NewQuery(text))
+}
+
+// RAGInfo RAG 库信息
+type RAGInfo struct {
+	Config      *Config
+	ConfigYAML  string
+	AbsPath     string
+	Sizes       map[string]int64
+	VectorCount int
+	GraphNodes  int64
+	GraphEdges  int64
+}
+
+// Info 获取 RAG 库的完整信息。
+func (s *IndexingService) Info() (*RAGInfo, error) {
+	info := &RAGInfo{AbsPath: s.dataDir}
+
+	// 1. 读取配置
+	cfg, raw, err := loadConfigRaw(s.dataDir)
+	if err != nil {
+		return nil, err
+	}
+	info.Config = cfg
+	info.ConfigYAML = raw
+
+	// 2. 目录大小
+	info.Sizes = calcDirSizes(s.dataDir)
+
+	// 3. 向量索引统计
+	name := filepath.Base(s.dataDir)
+	vecDB := filepath.Join(s.dataDir, "vectors", name+".db")
+	if _, err := os.Stat(vecDB); err == nil {
+		info.VectorCount = getVectorCount(vecDB)
+	}
+
+	// 4. 图索引统计
+	graphDB := filepath.Join(s.dataDir, "graphs", name+".db")
+	if _, err := os.Stat(graphDB); err == nil {
+		info.GraphNodes, info.GraphEdges = getGraphCount(graphDB)
+	}
+
+	return info, nil
+}
+
+// CheckResult 诊断项结果
+type CheckResult struct {
+	Name string
+	OK   bool
+	Hint string
+}
+
+// Doctor 诊断 RAG 库的配置完整性。
+func (s *IndexingService) Doctor() []CheckResult {
+	cfg, err := loadConfig(s.dataDir)
+	if err != nil {
+		return []CheckResult{{Name: "config.yml", OK: false, Hint: "读取失败: " + err.Error()}}
+	}
+
+	return []CheckResult{
+		{Name: "config.yml", OK: true},
+		{Name: "embedding.model_file", OK: cfg.Embedding.ModelFile != "", Hint: "运行：grag config embedder <path>"},
+		{Name: "向量库目录", OK: dirExists(filepath.Join(s.dataDir, "vectors"))},
+		{Name: "图库目录", OK: dirExists(filepath.Join(s.dataDir, "graphs"))},
+		{Name: "meta.db", OK: fileExists(filepath.Join(s.dataDir, "meta.db"))},
+	}
+}
+
+// Logs 返回 RAG 库的日志内容。
+func (s *IndexingService) Logs() (string, error) {
+	logFile := filepath.Join(s.dataDir, "logs", "gorag.log")
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		return "", fmt.Errorf("读取日志失败: %w", err)
+	}
+	return string(data), nil
+}
+
+// Update 执行跨文件实体发现与关系线重建。
+// 对已索引的文档集合执行全量实体关系提取，
+// 将发现的新实体和关系追加到 GraphStore。
+// stub — 待实现。
+func (s *IndexingService) Update(ctx context.Context, path string) error {
+	return fmt.Errorf("Update: 暂未实现")
+}
+
+// ── 目录树 ────────────────────────────────────────────────────────────
+
+// SourceTreeNode 目录树节点，对应一个文件或目录。
+type SourceTreeNode struct {
+	Name     string            // 文件/目录名
+	Path     string            // 完整路径
+	Size     int64             // 文件内容总大小（所有 Chunk Content 长度之和）
+	IsDir    bool              // 是否为目录
+	Chunks   []SourceChunkNode // 该文件下的顶层 Chunk（ParentID==""）
+	Children []*SourceTreeNode // 子目录
+}
+
+// SourceChunkNode Chunk 树节点。
+type SourceChunkNode struct {
+	Type     string            // 数据|文档|图片|代码
+	Title    string            // Chunk 标题
+	Summary  string            // Chunk 摘要
+	Children []SourceChunkNode // 通过 ParentID 连结的子块
+}
+
+// Tree 基于所有 Chunk 的 Source 属性重建文件目录树。
+//
+// 获取全部已索引的 Chunk，按 Source 分组后重建目录层级。
+// 每个文件节点下挂载该文件的顶层 Chunk（ParentID=""），
+// 再通过 ParentID 连结子块形成块子树。
+func (s *IndexingService) Tree(ctx context.Context) (*SourceTreeNode, error) {
+	admin, ok := s.indexer.(indexer.IndexerAdmin)
+	if !ok {
+		return nil, fmt.Errorf("索引器不支持列表查询")
+	}
+
+	total, err := admin.Count(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Chunk 总数失败: %w", err)
+	}
+
+	if total == 0 {
+		return &SourceTreeNode{Name: ".", IsDir: true}, nil
+	}
+
+	allChunks, _, err := admin.List(ctx, 0, total, nil)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Chunk 列表失败: %w", err)
+	}
+
+	// 按 ChunkID 去重（List 可能返回多个维度的向量对应的 Chunk）
+	seen := make(map[string]bool, len(allChunks))
+	deduped := make([]core.Chunk, 0, len(allChunks))
+	for _, c := range allChunks {
+		if !seen[c.ID] {
+			seen[c.ID] = true
+			deduped = append(deduped, c)
+		}
+	}
+
+	if len(deduped) == 0 {
+		return &SourceTreeNode{Name: ".", IsDir: true}, nil
+	}
+
+	// 按 Source 分组
+	sourceChunks := make(map[string][]core.Chunk) // source -> 顶层 Chunk（ParentID==""）
+	allBySource := make(map[string][]core.Chunk)  // source -> 全部 Chunk
+	for _, chunk := range deduped {
+		src := chunk.Source
+		if src == "" {
+			continue
+		}
+		allBySource[src] = append(allBySource[src], chunk)
+		if chunk.ParentID == "" {
+			sourceChunks[src] = append(sourceChunks[src], chunk)
+		}
+	}
+
+	// 构建目录树
+	root := &SourceTreeNode{Name: ".", IsDir: true}
+	for source, topChunks := range sourceChunks {
+		allForSource := allBySource[source]
+
+		var fileSize int64
+		for _, c := range allForSource {
+			fileSize += int64(len(c.Content))
+		}
+
+		fileNode := &SourceTreeNode{
+			Name:   filepath.Base(source),
+			Path:   source,
+			Size:   fileSize,
+			Chunks: buildChunkTree(topChunks, allBySource[source]),
+		}
+
+		insertIntoTree(root, source, fileNode)
+	}
+
+	return root, nil
+}
+
+// buildChunkTree 为单个文件构建 Chunk 子树。
+func buildChunkTree(parentChunks []core.Chunk, allChunks []core.Chunk) []SourceChunkNode {
+	childMap := make(map[string][]core.Chunk)
+	for _, c := range allChunks {
+		if c.ParentID != "" {
+			childMap[c.ParentID] = append(childMap[c.ParentID], c)
+		}
+	}
+
+	nodes := make([]SourceChunkNode, 0, len(parentChunks))
+	for _, pc := range parentChunks {
+		nodes = append(nodes, chunkToNode(pc, childMap))
+	}
+	return nodes
+}
+
+// chunkToNode 递归构建单个 Chunk 节点及其子块。
+func chunkToNode(chunk core.Chunk, childMap map[string][]core.Chunk) SourceChunkNode {
+	node := SourceChunkNode{
+		Type:    chunkTypeFromSource(chunk.Source, chunk.Language),
+		Title:   chunk.Title,
+		Summary: chunk.Summary,
+	}
+	for _, child := range childMap[chunk.ID] {
+		node.Children = append(node.Children, chunkToNode(child, childMap))
+	}
+	return node
+}
+
+// chunkTypeFromSource 根据 Source 路径和 Language 判断 Chunk 显示类型。
+func chunkTypeFromSource(source, language string) string {
+	if language != "" {
+		return "代码"
+	}
+	ext := strings.ToLower(filepath.Ext(source))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif":
+		return "图片"
+	case ".csv", ".xlsx", ".json", ".yaml", ".yml", ".xml", ".toml", ".eml", ".msg", ".log":
+		return "数据"
+	default:
+		return "文档"
+	}
+}
+
+// insertIntoTree 将文件节点按 Source 路径插入到目录树中。
+func insertIntoTree(root *SourceTreeNode, source string, fileNode *SourceTreeNode) {
+	dir := filepath.Dir(source)
+	if dir == "." || dir == "/" || dir == "" {
+		root.Children = append(root.Children, fileNode)
+		return
+	}
+
+	parts := strings.Split(dir, string(filepath.Separator))
+	current := root
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		found := false
+		for _, child := range current.Children {
+			if child.IsDir && child.Name == part {
+				current = child
+				found = true
+				break
+			}
+		}
+		if !found {
+			dirNode := &SourceTreeNode{Name: part, IsDir: true}
+			current.Children = append(current.Children, dirNode)
+			current = dirNode
+		}
+	}
+	current.Children = append(current.Children, fileNode)
 }

@@ -10,14 +10,9 @@ import (
 	"github.com/DotNetAge/gorag/v2/chunker"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
-	"github.com/DotNetAge/gorag/v2/llm"
 	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/query"
 )
-
-// minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。
-// 短于此长度的分块没有摘要化的必要，直接跳过以节省 LLM 调用。
-const minSummaryContentLength = 100
 
 // semanticIndexer 语义索引器：使用向量数据库和向量模型进行索引及检索。
 //
@@ -29,12 +24,11 @@ const minSummaryContentLength = 100
 //
 // 不实现 TreeViewBuilder / GraphSearcher（仅 GraphIndexer 实现）。
 type semanticIndexer struct {
-	name       string
-	db         core.VectorStore
-	embedder   core.Embedder
-	summarizer llm.Summarizer  // 可选注入，nil 表示不使用
-	chunker    chunker.Chunker // 可选注入，nil 时 AddFile 内部用 chunker.New 路由
-	logger     logging.Logger
+	name     string
+	db       core.VectorStore
+	embedder core.Embedder
+	chunker  chunker.Chunker // 可选注入，nil 时 AddFile 内部用 chunker.New 路由
+	logger   logging.Logger
 }
 
 // SemanticOption 配置 semanticIndexer 的可选参数。
@@ -45,16 +39,6 @@ func WithSemanticLogger(logger logging.Logger) SemanticOption {
 	return func(s *semanticIndexer) {
 		if logger != nil {
 			s.logger = logger
-		}
-	}
-}
-
-// WithSemanticSummarizer 注入 LLM Summarizer，为 Chunk 生成/增强 title 与 summary。
-// 不传则不调用 Summarizer，title/summary 由 Chunker 默认策略产出。
-func WithSemanticSummarizer(summarizer llm.Summarizer) SemanticOption {
-	return func(s *semanticIndexer) {
-		if summarizer != nil {
-			s.summarizer = summarizer
 		}
 	}
 }
@@ -75,7 +59,7 @@ func WithSemanticChunker(c chunker.Chunker) SemanticOption {
 //   - db：向量存储，nil 返回 error
 //   - embedder：向量计算器，nil 返回 error
 //
-// 可选参数通过 WithSemanticLogger / WithSemanticSummarizer / WithSemanticChunker 注入。
+// 可选参数通过 WithSemanticLogger / WithSemanticChunker 注入。
 func NewSemanticIndexer(db core.VectorStore, embedder core.Embedder, opts ...SemanticOption) (Indexer, error) {
 	if db == nil {
 		return nil, fmt.Errorf("NewSemanticIndexer: db 不能为空")
@@ -170,12 +154,11 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 //
 // 流程：
 //  1. 从 doc.Chunks() 读取分片
-//  2. 如注入了 Summarizer，先调用 Summarize 补充 title/summary
-//  3. 对每个 chunk 按 Content / Title / Summary 三个维度生成向量：
+//  2. 对每个 chunk 按 Content / Title / Summary 三个维度生成向量：
 //     - 主向量（Content）：ChunkID = chunk.ID，携带完整 metadata
 //     - 从属向量（Title）：ChunkID = chunk.ID + ":title"，不存 metadata（Title 非空时）
 //     - 从属向量（Summary）：ChunkID = chunk.ID + ":summary"，不存 metadata（Summary 非空时）
-//  4. 主向量 metadata 包含 content/title/summary/doc_id/source/region_id 等字段（使用 core.VecMeta* 常量键名），便于 Search 重建 Chunk
+//  3. 主向量 metadata 包含 content/title/summary/doc_id/source/region_id 等字段（使用 core.VecMeta* 常量键名），便于 Search 重建 Chunk
 func (s *semanticIndexer) Save(ctx context.Context, doc core.StructuredDoc) error {
 	if doc == nil {
 		return fmt.Errorf("Save: doc 不能为空")
@@ -186,44 +169,6 @@ func (s *semanticIndexer) Save(ctx context.Context, doc core.StructuredDoc) erro
 		return nil // 无分片可保存，不视为错误
 	}
 	s.logger.Debug("语义索引器: 开始保存分片", "chunks", len(chunks))
-	// 注入了 Summarizer 时，仅对文档类且内容足够长的分块运行
-	// （代码/数据/图片块的 content 非语义化内容；过短内容摘要无意义，均跳过）
-	if s.summarizer != nil && doc.Raw() != nil && doc.Raw().Type() == document.RawDocDoc {
-		var toSummarize []core.Chunk
-		for _, c := range chunks {
-			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
-				toSummarize = append(toSummarize, c)
-			}
-		}
-		if len(toSummarize) == 0 {
-			s.logger.Debug("语义索引器: 所有分片内容过短，跳过 Summarizer",
-				"min_length", minSummaryContentLength)
-		} else {
-			s.logger.Debug("语义索引器: 调用 Summarizer",
-				"to_summarize", len(toSummarize),
-				"total", len(chunks))
-			updated, err := s.summarizer.Summarize(ctx, toSummarize)
-			if err != nil {
-				s.logger.Warn("语义索引器: Summarizer 调用失败，使用原始分片继续", "error", err)
-			} else {
-				// 用 Summarizer 返回的结果替换原 chunks 中对应 ID 的分块
-				updatedByID := make(map[string]core.Chunk, len(updated))
-				for _, u := range updated {
-					updatedByID[u.ID] = u
-				}
-				for i := range chunks {
-					if u, ok := updatedByID[chunks[i].ID]; ok {
-						chunks[i] = u
-					}
-				}
-				doc.SetChunks(chunks)
-				s.logger.Debug("语义索引器: Summarizer 完成", "summarized", len(updated))
-			}
-		}
-	} else if s.summarizer != nil {
-		s.logger.Debug("语义索引器: 非文档类内容，跳过 Summarizer",
-			"doc_type", doc.Raw().Type())
-	}
 
 	embedStart := time.Now()
 	embedErrCount := 0
@@ -368,12 +313,12 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 // vectorDimension 描述一个从属向量维度（概念维度，非数据维度）。
 // 维度信息隐含在 ChunkID 的后缀编码中，不需要额外的 Dim 字段。
 type vectorDimension struct {
-	suffix  string                // ":title" / ":summary"
+	suffix  string                   // ":title" / ":summary"
 	extract func(*core.Chunk) string // 从主向量对应的 Chunk 提取向量化文本（供 Refill 使用）
 }
 
 var (
-	dimTitle = vectorDimension{":title", func(c *core.Chunk) string { return c.Title }}
+	dimTitle   = vectorDimension{":title", func(c *core.Chunk) string { return c.Title }}
 	dimSummary = vectorDimension{":summary", func(c *core.Chunk) string { return c.Summary }}
 )
 

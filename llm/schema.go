@@ -1,11 +1,5 @@
 package llm
 
-import (
-	"fmt"
-
-	"github.com/stretchr/testify/assert/yaml"
-)
-
 // =====================================================================
 // 实体 Schema 定义
 // =====================================================================
@@ -64,52 +58,4 @@ func SchemasByDocType(docType string) []EntitySchema {
 	default:
 		return DocumentEntitySchemas
 	}
-}
-
-// 供编排层或外部的实体提取器使用。
-type EntityDef struct {
-	Prompt string // 实体类型提示词
-	Schema string // 实体类型 Schema（可选）
-}
-
-// entityTypeFile 定义 entities-*.yml 配置文件的结构。
-type entityTypeFile struct {
-	Domain string       `yaml:"domain"`
-	Title  string       `yaml:"title"`
-	Types  []entityType `yaml:"types"`
-}
-
-// entityType 描述一种实体类型的 YAML 结构。
-type entityType struct {
-	Name   string `yaml:"name"`
-	Title  string `yaml:"title"`
-	Desc   string `yaml:"desc"`
-	Prompt string `yaml:"prompt,omitempty"`
-	Schema string `yaml:"schema,omitempty"`
-}
-
-// ParseEntityDefsYAML 解析实体类型定义的 YAML 数据，返回 EntityDef 列表。
-// YAML 中每项支持两个输出字段：
-//   - prompt：直接使用；为空时自动生成为 "**{Name}** — {Desc}"
-//   - schema：可选字段，直接使用
-func ParseEntityDefsYAML(data []byte) ([]EntityDef, error) {
-	var f entityTypeFile
-	if err := yaml.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("图索引器: 解析实体定义 YAML 失败: %w", err)
-	}
-	if len(f.Types) == 0 {
-		return nil, nil
-	}
-	defs := make([]EntityDef, 0, len(f.Types))
-	for _, t := range f.Types {
-		if t.Name == "" {
-			continue
-		}
-		prompt := t.Prompt
-		if prompt == "" {
-			prompt = "**" + t.Name + "** — " + t.Desc
-		}
-		defs = append(defs, EntityDef{Prompt: prompt, Schema: t.Schema})
-	}
-	return defs, nil
 }

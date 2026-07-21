@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	gorag "github.com/DotNetAge/gorag/v2"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/formatter"
-	"github.com/DotNetAge/gorag/v2/indexer"
 	"github.com/DotNetAge/gorag/v2/utils"
 	"github.com/spf13/cobra"
 )
 
 var (
-	// 搜索参数
+	// 查询参数
 	searchText   string
 	outputFormat string
 	topK         int
@@ -35,86 +35,138 @@ var ui = NewUI()
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "gorag",
-		Short: "GoRAG - 高性能 RAG 检索增强生成工具",
-		Long: `GoRAG 是一个高性能的 RAG (Retrieval-Augmented Generation) 工具，
-支持向量检索、全文检索和图检索的混合索引。
+		Use:   "grag",
+		Short: "grag - RAG 检索增强生成工具",
+		Long: `grag 是一个 RAG (Retrieval-Augmented Generation) 工具，
+支持语义检索和图检索的混合索引。
 
 使用方法:
-  gorag init ./my-rag -t hybrid -i Xenova/chinese-clip-vit-base-patch16
-  gorag init ./my-rag -t semantic -m ./model.onnx
-  gorag add ./my-rag "要索引的文本"
-  gorag add ./my-rag -f document.txt
-  gorag watch ./my-rag ./documents
-  gorag search ./my-rag -s "搜索内容"`,
+  grag init                   # 在当前目录创建 .rag 库
+  grag index [./dir/]         # 索引文件
+  grag query "搜索内容"        # 查询
+  grag info                   # 查看库信息
+  grag doctor                 # 诊断配置
+  grag logs                   # 查看日志`,
 	}
 
 	// init 子命令
 	var initCmd = &cobra.Command{
-		Use:   "init <dataDir>",
-		Short: "初始化 RAG 库",
+		Use:   "init",
+		Short: "在当前目录创建 .rag 库",
 		Long: `初始化一个新的 RAG 库，创建目录结构和配置文件。
 
+在当前目录下创建 ./<basename>.rag，basename 取当前目录名。
+
 支持的索引器类型:
-  - hybrid:   混合索引（向量 + 全文 + 图）
-  - semantic: 语义向量索引
+  - semantic: 语义向量索引（默认）
   - graph:    图索引
-  - fulltext: 全文索引
+  - hyper:    混合索引（语义 + 图，需要 LLM）
 
 模型指定方式:
   1. 使用 -i/--model-id 从 HuggingFace 自动下载模型
   2. 使用 -m/--model 指定本地模型文件路径
 
-环境变量:
-  GORAG_MODEL_PATH - 模型存储目录（默认: ~/.embeddings）
-
 示例:
-  gorag init ./my-rag -t hybrid -i Xenova/chinese-clip-vit-base-patch16 -f onnx/model.onnx
-  gorag init ./my-rag -t semantic -m /path/to/model.onnx
-  gorag init ./my-rag -t fulltext`,
-		Args: cobra.ExactArgs(1),
+  grag init -t hyper -i Xenova/bge-base-zh-v1.5 -f onnx/model.onnx`,
+		Args: cobra.NoArgs,
 		Run:  runInit,
 	}
-	initCmd.Flags().StringVarP(&initType, "type", "t", "hybrid", "索引器类型: hybrid, semantic, graph, fulltext")
+	initCmd.Flags().StringVarP(&initType, "type", "t", "hyper", "索引器类型: semantic, graph, hyper")
 	initCmd.Flags().StringVarP(&initName, "name", "n", "", "RAG 库命名")
 	initCmd.Flags().StringVarP(&initModel, "model", "m", "", "本地模型文件路径")
 	initCmd.Flags().StringVarP(&initModelID, "model-id", "i", "", "HuggingFace 模型 ID")
 	initCmd.Flags().StringVarP(&initModelFile, "model-file", "f", "", "模型文件名")
 
-	// search 子命令
-	var searchCmd = &cobra.Command{
-		Use:   "search <dataDir>",
+	// index 子命令
+	var indexCmd = &cobra.Command{
+		Use:   "index [dest_path]",
+		Short: "索引文件或目录",
+		Long: `对当前目录或指定目录/文件执行索引。
+
+.rag 文件必须在当前工作目录（自动检测）。
+
+示例:
+  grag index                  # 索引当前目录
+  grag index ./docs/          # 索引指定子目录
+  grag index /abs/path/file   # 索引指定文件`,
+		Args: cobra.MaximumNArgs(1),
+		Run:  runIndex,
+	}
+
+	// query 子命令
+	var queryCmd = &cobra.Command{
+		Use:   "query <text>",
 		Short: "搜索 RAG 库",
 		Long: `在已存在的 RAG 库中执行搜索查询。
 
-使用方法:
-  gorag search ./my-rag -s "机器学习"
-  gorag search ./my-rag -s "机器学习" -o json -k 5`,
+.rag 文件必须在当前工作目录（自动检测）。
+
+示例:
+  grag query "机器学习"
+  grag query "机器学习" -o json -k 5`,
 		Args: cobra.ExactArgs(1),
-		Run:  runSearch,
+		Run:  runQuery,
 	}
-	searchCmd.Flags().StringVarP(&searchText, "search", "s", "", "搜索文本")
-	searchCmd.Flags().StringVarP(&outputFormat, "output", "o", "terminal", "输出格式: terminal, json, prompt")
-	searchCmd.Flags().IntVarP(&topK, "topk", "k", 10, "返回结果数量")
-	searchCmd.Flags().BoolVar(&showScore, "score", true, "显示相似度分数")
-	searchCmd.Flags().BoolVar(&showDocID, "docid", true, "显示文档ID")
-	searchCmd.Flags().IntVar(&contentMax, "max", 500, "内容最大显示长度")
+	queryCmd.Flags().StringVarP(&outputFormat, "output", "o", "terminal", "输出格式: terminal, json, prompt")
+	queryCmd.Flags().IntVarP(&topK, "topk", "k", 10, "返回结果数量")
+	queryCmd.Flags().BoolVar(&showScore, "score", true, "显示相似度分数")
+	queryCmd.Flags().BoolVar(&showDocID, "docid", true, "显示文档ID")
+	queryCmd.Flags().IntVar(&contentMax, "max", 500, "内容最大显示长度")
 
-	// 默认命令
-	var defaultCmd = &cobra.Command{
-		Use:   "<dataDir>",
-		Short: "搜索 RAG 库（简写形式）",
-		Args:  cobra.ExactArgs(1),
-		Run:   runSearch,
+	// doctor 子命令
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "诊断 RAG 库配置",
+		Long: `诊断当前 RAG 库的配置完整性，引导补全缺失项。
+
+示例:
+  grag doctor`,
+		Args: cobra.NoArgs,
+		Run:  runDoctor,
 	}
-	defaultCmd.Flags().StringVarP(&searchText, "search", "s", "", "搜索文本")
-	defaultCmd.Flags().StringVarP(&outputFormat, "output", "o", "terminal", "输出格式")
-	defaultCmd.Flags().IntVarP(&topK, "topk", "k", 10, "返回结果数量")
-	defaultCmd.Flags().BoolVar(&showScore, "score", true, "显示相似度分数")
-	defaultCmd.Flags().BoolVar(&showDocID, "docid", true, "显示文档ID")
-	defaultCmd.Flags().IntVar(&contentMax, "max", 500, "内容最大显示长度")
 
-	rootCmd.AddCommand(initCmd, addCmd, infoCmd, watchCmd, searchCmd, defaultCmd)
+	// logs 子命令
+	logsCmd := &cobra.Command{
+		Use:   "logs",
+		Short: "输出 RAG 库日志",
+		Long: `输出当前 RAG 库的日志文件内容。
+
+示例:
+  grag logs`,
+		Args: cobra.NoArgs,
+		Run:  runLogs,
+	}
+
+	// update 子命令
+	updateCmd := &cobra.Command{
+		Use:   "update [dest_path]",
+		Short: "更新 RAG 库的实体关系",
+		Long: `对已索引的文档执行跨文件实体关系发现与重建。
+
+.rag 文件必须在当前工作目录（自动检测）。
+
+示例:
+  grag update
+  grag update ./docs/`,
+		Args: cobra.MaximumNArgs(1),
+		Run:  runUpdate,
+	}
+
+	// tree 子命令
+	treeCmd := &cobra.Command{
+		Use:   "tree",
+		Short: "以目录树查看已索引的文件结构",
+		Long: `基于 Chunk 的 Source 属性重建完整目录树。
+
+每个文件下展示顶层 Chunk（ParentID=""）及其子块。
+
+示例:
+  grag tree`,
+		Args: cobra.NoArgs,
+		Run:  runTree,
+	}
+
+	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -122,150 +174,171 @@ func main() {
 	}
 }
 
-// runInit 初始化命令
+// findRAGInCWD 查找当前工作目录下的 .rag 子目录。
+func findRAGInCWD() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("获取当前工作目录失败: %w", err)
+	}
+
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		return "", fmt.Errorf("读取当前目录失败: %w", err)
+	}
+
+	var ragDirs []string
+	for _, e := range entries {
+		if e.IsDir() && strings.HasSuffix(e.Name(), ".rag") {
+			ragDirs = append(ragDirs, filepath.Join(cwd, e.Name()))
+		}
+	}
+
+	if len(ragDirs) == 0 {
+		return "", fmt.Errorf("当前目录下未找到 .rag 库，请先运行 grag init")
+	}
+	if len(ragDirs) > 1 {
+		return "", fmt.Errorf("当前目录有多个 .rag 库，请进入具体目录运行")
+	}
+	return ragDirs[0], nil
+}
+
+// ── init ──────────────────────────────────────────────────────────
+
 func runInit(cmd *cobra.Command, args []string) {
-	dataDir := args[0]
-
-	ui.Title("🚀 GoRAG 初始化")
-
-	var modelPath string
-	var err error
-
-	if initType == "hybrid" && ((initModel == "" && initModelID == "") || initModel == "") {
-		initModelID = "Xenova/chinese-clip-vit-base-patch16"
-		initModelFile = "onnx/model.onnx"
+	cwd, err := os.Getwd()
+	if err != nil {
+		ui.Error("获取当前目录失败: %v", err)
+		os.Exit(1)
 	}
 
-	if initType == "semantic" && ((initModel == "" && initModelID == "") || initModel == "") {
-		initModelID = "Xenova/bge-base-zh-v1.5"
-		initModelFile = "onnx/model.onnx"
+	basename := filepath.Base(cwd)
+	ragDir := filepath.Join(cwd, basename+".rag")
+
+	ui.Title("grag 初始化")
+
+	// 确定默认模型
+	if initType == "hyper" || initType == "semantic" {
+		if initModel == "" && initModelID == "" {
+			initModelID = "Xenova/bge-base-zh-v1.5"
+			initModelFile = "onnx/model.onnx"
+		}
 	}
 
-	// 处理模型
+	// 创建下载观察者
+	var observer utils.DownloadObserver
 	if initModelID != "" {
 		ui.Section("模型下载")
-		ui.KeyValue("模型目录", getModelDir())
 		ui.KeyValue("模型 ID", initModelID)
 		ui.KeyValue("模型文件", initModelFile)
-
-		// 使用下载观察者（UI 层只负责显示）
-		observer := NewDownloadObserver()
-		modelPath, err = utils.CheckAndDownload(initModelID, initModelFile, observer)
-		if err != nil {
-			ui.Error("模型下载失败: %v", err)
-			os.Exit(1)
-		}
-		ui.Success("模型已就绪")
-	} else if initModel != "" {
-		if _, err := os.Stat(initModel); os.IsNotExist(err) {
-			ui.Error("模型文件不存在: %s", initModel)
-			os.Exit(1)
-		}
-		modelPath = initModel
-	}
-
-	// 检查索引器类型是否需要模型
-	if needsModel(initType) && modelPath == "" {
-		ui.Error("%s 索引器需要模型，请使用 -i 或 -m 参数", initType)
-		os.Exit(1)
+		observer = NewDownloadObserver()
 	}
 
 	ui.Section("创建 RAG 库")
 
-	// 创建 RAG 库
 	spinner := ui.NewSpinner("正在初始化...")
 	spinner.Start()
 
-	// gorag.Init 创建 .rag 目录结构，gorag.Open 打开并实例化索引器
-	// 临时兼容：dataDir 必须以 .rag 结尾
-	ragDir := dataDir
-	if filepath.Ext(ragDir) != ".rag" {
-		ragDir = ragDir + ".rag"
-	}
+	result, err := gorag.InitRAG(gorag.InitOptions{
+		RagDir:    ragDir,
+		IndexType: initType,
+		ModelPath: initModel,
+		ModelID:   initModelID,
+		ModelFile: initModelFile,
+		Observer:  observer,
+	})
+	spinner.Stop()
 
-	// 1. 创建 .rag 目录结构
-	if err := gorag.Init(ragDir); err != nil {
-		spinner.Stop()
+	if err != nil {
 		ui.Error("初始化失败: %v", err)
 		os.Exit(1)
 	}
 
-	// 2. 写入 LLM 配置（如果有的话）和 embedder 配置到 config.yml
-	cfg, err := gorag.LoadConfig(ragDir)
-	if err != nil {
-		spinner.Stop()
-		ui.Error("加载配置失败: %v", err)
-		os.Exit(1)
+	if initModelID != "" {
+		ui.Success("模型已就绪")
 	}
-	cfg.Indexer.Type = initType
-	if modelPath != "" {
-		cfg.Embedding.ModelFile = modelPath
-	}
-	if err := gorag.SaveConfig(ragDir, cfg); err != nil {
-		spinner.Stop()
-		ui.Error("保存配置失败: %v", err)
-		os.Exit(1)
-	}
-
-	// 3. 打开 RAG 库（仅在配置完整时才打开）
-	var idx indexer.Indexer
-	if cfg.Embedding.ModelFile != "" {
-		idx, err = gorag.Open(ragDir)
-		if err != nil {
-			spinner.Stop()
-			ui.Warning("索引器未就绪（配置可能不完整）: %v", err)
-		}
-	}
-
-	spinner.Stop()
 
 	ui.Success("RAG 库初始化成功")
 	ui.Section("配置信息")
-	ui.KeyValue("目录", ragDir)
-	ui.KeyValue("类型", initType)
-	if modelPath != "" {
-		ui.KeyValue("模型", modelPath)
+	ui.KeyValue("目录", result.RagDir)
+	ui.KeyValue("类型", result.IndexType)
+	if result.ModelPath != "" {
+		ui.KeyValue("模型", result.ModelPath)
 	}
-	if initName != "" {
-		ui.KeyValue("名称", initName)
-	}
-	if idx != nil {
-		ui.KeyValue("索引器", idx.Name())
-		if closer, ok := idx.(indexer.IndexerCloser); ok {
-			closer.Close(context.Background())
-		}
+	if result.IndexerName != "" {
+		ui.KeyValue("索引器", result.IndexerName)
 	}
 }
 
-// runSearch 搜索命令
-func runSearch(cmd *cobra.Command, args []string) {
-	dataDir := args[0]
+// ── index ─────────────────────────────────────────────────────────
 
-	if searchText == "" {
-		ui.Error("请使用 -s 参数指定搜索文本")
+func runIndex(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
 		os.Exit(1)
 	}
 
-	ui.Title("🔍 搜索")
+	indexTarget := "."
+	if len(args) > 0 {
+		indexTarget = args[0]
+	}
 
-	spinner := ui.NewSpinner("正在加载 RAG 库...")
+	absTarget, err := filepath.Abs(indexTarget)
+	if err != nil {
+		ui.Error("无法解析路径: %v", err)
+		os.Exit(1)
+	}
+
+	ui.Title("索引")
+	ui.KeyValue("RAG 库", ragDir)
+	ui.KeyValue("目标", absTarget)
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("创建索引服务失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	spinner := ui.NewSpinner("正在索引...")
 	spinner.Start()
 
-	idx, err := gorag.Open(dataDir)
-	if err != nil {
+	if err := svc.Index(context.Background(), absTarget); err != nil {
 		spinner.Stop()
-		ui.Error("打开 RAG 库失败: %v", err)
+		ui.Error("索引失败: %v", err)
 		os.Exit(1)
 	}
 
 	spinner.Stop()
-	ui.Success("RAG 库已加载")
+	ui.Success("索引完成")
+}
+
+// ── query ─────────────────────────────────────────────────────────
+
+func runQuery(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	searchText = args[0]
+
+	ui.Title("查询")
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
 	ui.Info("查询: %s", searchText)
 
-	spinner = ui.NewSpinner("正在搜索...")
+	spinner := ui.NewSpinner("正在搜索...")
 	spinner.Start()
 
-	hit, err := idx.Search(context.Background(), idx.NewQuery(searchText))
+	hit, err := svc.Query(context.Background(), searchText)
 	if err != nil {
 		spinner.Stop()
 		ui.Error("搜索失败: %v", err)
@@ -284,29 +357,263 @@ func runSearch(cmd *cobra.Command, args []string) {
 	}
 	ui.Success("找到 %d 个结果", resultCount)
 
-	// 格式化输出
 	fmt.Println(formatOutput(hit))
 }
 
-// needsModel 检查索引器类型是否需要模型
-func needsModel(indexerType string) bool {
-	return indexerType == "hybrid" || indexerType == "semantic"
-}
+// ── doctor ────────────────────────────────────────────────────────
 
-// getModelDir 获取模型目录
-func getModelDir() string {
-	dir := os.Getenv("GORAG_MODEL_PATH")
-	if dir != "" {
-		return dir
-	}
-	homeDir, err := os.UserHomeDir()
+func runDoctor(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
 	if err != nil {
-		return "/embeddings"
+		ui.Error("%v", err)
+		os.Exit(1)
 	}
-	return filepath.Join(homeDir, ".embeddings")
+
+	ui.Title("诊断")
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	checks := svc.Doctor()
+
+	allOK := true
+	for _, c := range checks {
+		if c.OK {
+			ui.Success("%s", c.Name)
+		} else {
+			allOK = false
+			if c.Hint != "" {
+				ui.Warning("%s — %s", c.Name, c.Hint)
+			} else {
+				ui.Warning("%s", c.Name)
+			}
+		}
+	}
+
+	if allOK {
+		ui.Success("所有检查通过")
+	} else {
+		ui.Info("提示：embedder 未配置时，语义检索不可用")
+	}
 }
 
-// formatOutput 格式化输出
+// ── logs ──────────────────────────────────────────────────────────
+
+func runLogs(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	data, err := svc.Logs()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	fmt.Print(data)
+}
+
+// ── update ────────────────────────────────────────────────────────
+
+func runUpdate(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	updateTarget := "."
+	if len(args) > 0 {
+		updateTarget = args[0]
+	}
+
+	absTarget, err := filepath.Abs(updateTarget)
+	if err != nil {
+		ui.Error("无法解析路径: %v", err)
+		os.Exit(1)
+	}
+
+	ui.Title("更新实体关系")
+	ui.KeyValue("RAG 库", ragDir)
+	ui.KeyValue("目标", absTarget)
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	spinner := ui.NewSpinner("正在更新...")
+	spinner.Start()
+
+	if err := svc.Update(context.Background(), absTarget); err != nil {
+		spinner.Stop()
+		ui.Error("更新失败: %v", err)
+		os.Exit(1)
+	}
+
+	spinner.Stop()
+	ui.Success("更新完成")
+}
+
+// ── tree ─────────────────────────────────────────────────────────
+
+func runTree(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	ui.Title("目录树")
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	root, err := svc.Tree(context.Background())
+	if err != nil {
+		ui.Error("构建目录树失败: %v", err)
+		os.Exit(1)
+	}
+
+	renderTree(root, "")
+}
+
+// renderTree 递归渲染目录树。
+func renderTree(node *gorag.SourceTreeNode, prefix string) {
+	if node == nil {
+		return
+	}
+
+	// 对子节点排序：目录在前，字母序
+	sorted := sortTreeChildren(node.Children)
+	nodeChunks := node.Chunks
+
+	for i, child := range sorted {
+		isLast := i == len(sorted)-1 && len(nodeChunks) == 0
+		branch := "├── "
+		connector := "│   "
+		if isLast {
+			branch = "└── "
+			connector = "    "
+		}
+
+		if child.IsDir {
+			fmt.Printf("%s%s%s/\n", prefix, branch, child.Name)
+			renderTree(child, prefix+connector)
+		} else {
+			renderFileNode(child, prefix, branch, connector, isLast)
+		}
+	}
+
+	// 渲染当前层级下的文件节点（顶层文件）
+	for i, chunk := range nodeChunks {
+		isLast := i == len(nodeChunks)-1
+		branch := "├── "
+		connector := "│   "
+		if isLast && len(node.Children) == 0 {
+			branch = "└── "
+			connector = "    "
+		}
+		renderChunkNode(chunk, prefix+branch, prefix+connector, true)
+	}
+}
+
+// renderFileNode 渲染文件节点及 Chunk 子树。
+func renderFileNode(node *gorag.SourceTreeNode, prefix, branch, connector string, isLast bool) {
+	if len(node.Chunks) == 0 {
+		fmt.Printf("%s%s%s  [size:%s]\n", prefix, branch, node.Path, formatBytes(node.Size))
+		return
+	}
+
+	// 渲染第一个 Chunk 与文件名同一行
+	first := node.Chunks[0]
+	if isLast {
+		branch = "└── "
+		connector = "    "
+	}
+
+	fmt.Printf("%s%s[%s] %s - %s\n", prefix, branch, first.Type, first.Title, first.Summary)
+	fmt.Printf("%s%s%s  [size:%s]\n", prefix+connector, connector, node.Path, formatBytes(node.Size))
+
+	// 渲染第一个 Chunk 的子块
+	renderChunkChildren(first, prefix+connector+connector)
+
+	// 渲染其余 Chunk
+	for i := 1; i < len(node.Chunks); i++ {
+		chunkBranch := "├── "
+		chunkConn := "│   "
+		if i == len(node.Chunks)-1 {
+			chunkBranch = "└── "
+			chunkConn = "    "
+		}
+		renderChunkNode(node.Chunks[i], prefix+connector+chunkBranch, prefix+connector+chunkConn, false)
+	}
+}
+
+// renderChunkNode 渲染单个 Chunk 节点。
+func renderChunkNode(node gorag.SourceChunkNode, branch, connector string, showSource bool) {
+	fmt.Printf("%s[%s] %s - %s\n", branch, node.Type, node.Title, node.Summary)
+	renderChunkChildren(node, connector)
+}
+
+// renderChunkChildren 递归渲染 Chunk 子块。
+func renderChunkChildren(node gorag.SourceChunkNode, prefix string) {
+	for i, child := range node.Children {
+		isLast := i == len(node.Children)-1
+		branch := "├── "
+		connector := "│   "
+		if isLast {
+			branch = "└── "
+			connector = "    "
+		}
+		fmt.Printf("%s%s[%s] %s - %s\n", prefix+branch, "", child.Type, child.Title, child.Summary)
+		renderChunkChildren(child, prefix+connector)
+	}
+}
+
+// sortTreeChildren 对子节点排序：目录在前，文件在后，各自按名排序。
+func sortTreeChildren(children []*gorag.SourceTreeNode) []*gorag.SourceTreeNode {
+	sorted := make([]*gorag.SourceTreeNode, len(children))
+	copy(sorted, children)
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			less := false
+			if sorted[i].IsDir && !sorted[j].IsDir {
+				less = true
+			} else if !sorted[i].IsDir && sorted[j].IsDir {
+				less = false
+			} else {
+				less = sorted[i].Name < sorted[j].Name
+			}
+			if !less {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+	return sorted
+}
+
+// ── 工具函数 ──────────────────────────────────────────────────────
+
 func formatOutput(hit *core.Hit) string {
 	switch outputFormat {
 	case "json":

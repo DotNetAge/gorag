@@ -9,8 +9,6 @@ import (
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/embedder"
 	"github.com/DotNetAge/gorag/v2/indexer"
-	"github.com/DotNetAge/gorag/v2/llm"
-	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/store/graph/gograph"
 	"github.com/DotNetAge/gorag/v2/store/vector/govector"
 	"github.com/DotNetAge/gorag/v2/utils"
@@ -48,7 +46,6 @@ type Config struct {
 type StorageConfig struct {
 	VectorsDir string `yaml:"vectors_dir"` // 向量库目录
 	GraphsDir  string `yaml:"graphs_dir"`  // 图库目录
-	CachesDir  string `yaml:"caches_dir"`  // 缓存目录
 	LogsDir    string `yaml:"logs_dir"`    // 日志目录
 	MetaDB     string `yaml:"meta_db"`     // 元数据 SQLite 文件名
 }
@@ -120,7 +117,6 @@ func defaultConfig() *Config {
 		Storage: StorageConfig{
 			VectorsDir: "vectors",
 			GraphsDir:  "graphs",
-			CachesDir:  "caches",
 			LogsDir:    "logs",
 			MetaDB:     "meta.db",
 		},
@@ -133,7 +129,7 @@ func defaultConfig() *Config {
 			ContextLength: 128000,
 		},
 		Indexer: IndexerConfig{
-			Type: "semantic",
+			Type: "hyper",
 		},
 		Query: QueryConfig{
 			SemanticWeight: 0.8,
@@ -144,7 +140,7 @@ func defaultConfig() *Config {
 
 // Init 在指定路径创建 .rag 库目录结构。
 // 物理结构 = config.yml + .api_key + .ragignore + .lock +
-// meta.db + vectors/ + graphs/ + caches/ + logs/。
+// meta.db + vectors/ + graphs/ + logs/。
 //
 // ragDir 必须以 .rag 结尾，否则返回错误。
 // 已存在的 .rag 目录会被复用（不报错），但缺失的子目录和文件会被补齐。
@@ -159,7 +155,7 @@ func Init(ragDir string) error {
 	}
 
 	// 2. 创建子目录
-	subDirs := []string{"vectors", "graphs", "caches", "logs"}
+	subDirs := []string{"vectors", "graphs", "logs"}
 	for _, sub := range subDirs {
 		if err := os.MkdirAll(filepath.Join(ragDir, sub), 0755); err != nil {
 			return fmt.Errorf("创建 %s 子目录失败: %w", sub, err)
@@ -204,7 +200,6 @@ const defaultRagignoreContent = `# 敏感信息
 # 数据库（体积大，不入版本控制）
 vectors/
 graphs/
-caches/
 meta.db
 meta.db-wal
 meta.db-shm
@@ -308,42 +303,16 @@ func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 
 	case "hyper":
 		// 生产推荐模式：语义线 + 关系线
-		// 1. 可选创建 Summarizer（hasLLM 时尝试创建，失败降级为 nil，不阻塞主流程）
-		var summarizer llm.Summarizer
-		if hasLLM {
-			apiKey, keyErr := ResolveAPIKey(ragDir)
-			if keyErr != nil {
-				return nil, fmt.Errorf("解析 APIKey 失败: %w", keyErr)
-			}
-			summarizerCfg := llm.Config{
-				APIKey:        apiKey,
-				BaseURL:       cfg.LLM.BaseURL,
-				Model:         cfg.LLM.Model,
-				Language:      cfg.LLM.Language,
-				MaxTokens:     cfg.LLM.MaxTokens,
-				ContextLength: cfg.LLM.ContextLength,
-			}
-			if sm, smErr := llm.NewSummarizer(summarizerCfg, logging.DefaultNoopLogger()); smErr == nil {
-				summarizer = sm
-			}
-			// Summarizer 创建失败不阻塞，summarizer 保持为 nil，降级为不带摘要增强的 SemanticIndexer
-		}
+		// SemanticIndexer 不再持有 Summarizer（已移除），
+		// Summarizer 由 HyperIndexer 在后续版本中通过 WithHyperSummarizer 注入
 
-		// 2. 创建 SemanticIndexer（summarizer 为 nil 时不注入）
-		var semantic indexer.Indexer
-		if summarizer != nil {
-			semantic, err = indexer.NewSemanticIndexer(
-				vectorStore, clip,
-				indexer.WithSemanticSummarizer(summarizer),
-			)
-		} else {
-			semantic, err = indexer.NewSemanticIndexer(vectorStore, clip)
-		}
+		// 1. 创建 SemanticIndexer
+		semantic, err := indexer.NewSemanticIndexer(vectorStore, clip)
 		if err != nil {
 			return nil, fmt.Errorf("创建 SemanticIndexer 失败: %w", err)
 		}
 
-		// 3. 创建 GraphIndexer（不需要 LLM/extractor，只持有 GraphStore）
+		// 2. 创建 GraphIndexer（不需要 LLM/extractor，只持有 GraphStore）
 		graphStore, gErr := createGraphDB(ragDir)
 		if gErr != nil {
 			return nil, fmt.Errorf("创建图库失败: %w", gErr)
@@ -353,7 +322,7 @@ func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 			return nil, fmt.Errorf("创建 GraphIndexer 失败: %w", gErr)
 		}
 
-		// 4. 组合为 HyperIndexer（semantic 必传，graph 可为 nil 但此处不为 nil）
+		// 3. 组合为 HyperIndexer（semantic 必传，graph 可为 nil 但此处不为 nil）
 		return indexer.NewHyperIndexer(semantic, graph)
 
 	default:
@@ -381,9 +350,6 @@ func loadConfig(ragDir string) (*Config, error) {
 	}
 	if cfg.Storage.GraphsDir == "" {
 		cfg.Storage.GraphsDir = "graphs"
-	}
-	if cfg.Storage.CachesDir == "" {
-		cfg.Storage.CachesDir = "caches"
 	}
 	if cfg.Storage.LogsDir == "" {
 		cfg.Storage.LogsDir = "logs"
@@ -415,6 +381,20 @@ func saveConfig(ragDir string, cfg *Config) error {
 		return fmt.Errorf("序列化 config.yml 失败: %w", err)
 	}
 	return os.WriteFile(configPath, data, 0644)
+}
+
+// loadConfigRaw 加载配置并同时返回原始 YAML 字符串。
+func loadConfigRaw(ragDir string) (*Config, string, error) {
+	configPath := filepath.Join(ragDir, configFileName)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取 config.yml 失败: %w", err)
+	}
+	cfg, err := loadConfig(ragDir)
+	if err != nil {
+		return cfg, string(data), err
+	}
+	return cfg, string(data), nil
 }
 
 // SaveConfig 更新 .rag 目录的 config.yml（公开 API，供 grag config 调用）
@@ -493,5 +473,5 @@ func CheckModel(modelId, modelFile string) (string, error) {
 	return onnxFile, nil
 }
 
-// 兼容旧代码：DefaultConsoleLogger 等日志便捷函数仍可用
-var _ = logging.DefaultConsoleLogger
+
+

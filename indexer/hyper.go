@@ -2,11 +2,16 @@ package indexer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/DotNetAge/gorag/v2/chunker"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
+	"github.com/DotNetAge/gorag/v2/llm"
 	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/result"
 )
@@ -41,10 +46,14 @@ import (
 //   - hyper.(TreeViewBuilder)→ HyperIndexer 自身实现（先取 Region→Document，再补齐 Chunk）
 //   - hyper.(GraphSearcher)  → 委托 graph
 type HyperIndexer struct {
-	chunker  chunker.Chunker // 分块器（按 RawDoc.Type 路由，同时产出 Nodes/Edges）
-	semantic Indexer         // 语义线（必注入）
-	graph    Indexer         // 关系线（可选，nil 则不启用图功能）
-	logger   logging.Logger
+	chunker       chunker.Chunker           // 分块器（按 RawDoc.Type 路由，同时产出 Nodes/Edges）
+	semantic      Indexer                   // 语义线（必注入）
+	graph         Indexer                   // 关系线（可选，nil 则不启用图功能）
+	summarizer    llm.Summarizer            // 批量摘要器（可选，nil 则不摘要）
+	refiller      llm.Refiller              // 实体提取兜底（可选，nil 则不提取）
+	schemasByPath map[string][]llm.EntitySchema // Schema 注册表（key 为源目录 path）
+	hooks         hooks                     // 事件扩展 Hook 聚合
+	logger        logging.Logger
 }
 
 // HyperOption HyperIndexer 配置选项
@@ -68,12 +77,48 @@ func WithHyperChunker(c chunker.Chunker) HyperOption {
 	}
 }
 
+// WithHyperSummarizer 注入批量摘要器，在分块后为文档类分片批量生成 title/summary。
+// 不传则不调用 Summarizer，title/summary 由 Chunker 默认策略产出。
+// 若注入的 llm.Summarizer 同时实现了 SummarizeBatch 方法，优先使用批量模式；
+// 否则回退到逐分片 Summarize 模式。
+func WithHyperSummarizer(s llm.Summarizer) HyperOption {
+	return func(h *HyperIndexer) {
+		if s != nil {
+			h.summarizer = s
+		}
+	}
+}
+
+// WithHyperRefiller 注入实体提取兜底，在语义线保存后对分片执行 LLM 实体提取。
+// 提取结果追加到 doc.Nodes/Edges，再写入 GraphStore。
+// 不传则不执行实体提取，关系线只走 Chunker 代码解析器产出的 Nodes/Edges。
+func WithHyperRefiller(r llm.Refiller) HyperOption {
+	return func(h *HyperIndexer) {
+		if r != nil {
+			h.refiller = r
+		}
+	}
+}
+
+// WithHooks 注入事件扩展 Hook。
+//
+// 可传入任意数量的 Hook（OnFileOpenedHook、OnChunkHook、OnBeforeSemanticSaveHook、
+// OnIndexCompleteHook），WithHooks 按类型自动归入对应切片。
+// 单一类型可注册多个 Hook，按注册顺序执行。
+func WithHooks(hooksList ...any) HyperOption {
+	return func(h *HyperIndexer) {
+		for _, hook := range hooksList {
+			h.hooks.register(hook)
+		}
+	}
+}
+
 // NewHyperIndexer 创建复合索引器，返回 Indexer 接口。
 //
 // 参数：
 //   - semantic: 语义线索引器（必传，通常由 NewSemanticIndexer 创建）
 //   - graph:    关系线索引器（可选，传 nil 则不启用图功能；通常由 New（GraphIndexer）创建）
-//   - opts:     可选配置（WithHyperLogger、WithHyperChunker）
+//   - opts:     可选配置（WithHyperLogger、WithHyperChunker、WithHyperSummarizer、WithHyperRefiller）
 //
 // 设计要点：
 //   - semantic 为 nil 时返回 error（语义线是必传的核心能力）
@@ -84,9 +129,10 @@ func NewHyperIndexer(semantic Indexer, graph Indexer, opts ...HyperOption) (Inde
 		return nil, fmt.Errorf("NewHyperIndexer: semantic 不能为空")
 	}
 	h := &HyperIndexer{
-		semantic: semantic,
-		graph:    graph,
-		logger:   logging.DefaultNoopLogger(),
+		semantic:      semantic,
+		graph:         graph,
+		schemasByPath: make(map[string][]llm.EntitySchema),
+		logger:        logging.DefaultNoopLogger(),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -99,13 +145,19 @@ func (h *HyperIndexer) Name() string { return "hyper" }
 
 // AddFile 实现 Indexer 接口：对外统一入口，编排双线索引。
 //
-// 工作流：
+// 工作流（完整）：
 //  1. document.Open(filePath) → RawDoc
+//     [1a] OnFileOpenedHook：文件类型白名单、前置过滤
 //  2. core.NewStructuredDoc(raw) → StructuredDoc 容器
-//  3. 路由 Chunker（注入优先，否则 chunker.New(raw)）→ chunkerImpl.Chunk(raw) → ChunkResult
-//  4. doc.SetChunks/SetNodes/SetEdges（三类产物分别写入 doc）
+//  3. 路由 Chunker → chunkerImpl.Chunk(raw) → ChunkResult
+//  4. doc.SetChunks/SetNodes/SetEdges
+//     [4a] OnChunkHook：对每个 Chunk 执行敏感词过滤、补充标签
+//  4.5 [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
+//     [4b] OnBeforeSemanticSaveHook：批量审核、外部 API 增强
 //  5. semantic.Save(doc)（向量化 + 写入 VectorStore）
+//  5.5 [关系线加工] 若注入了 Refiller + 已注册 Schema，调用 Refiller 提取实体和关系
 //  6. graph.Save(doc)（实体 + CONTAINS 边 + 写入 GraphStore，若 graph 存在）
+//     [6a] OnIndexCompleteHook：通知下游、审计日志
 //
 // 返回本次索引生成的 Chunks（用于调用方追踪）。
 // 关系线失败不阻塞语义线，仅记录警告。
@@ -123,6 +175,16 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	}
 	h.logger.Debug("复合索引器: 文件归一化完成",
 		"file", filePath, "doc_type", raw.Type(), "doc_id", raw.ID())
+
+	// [1a] OnFileOpenedHook：文件类型白名单、前置过滤
+	if len(h.hooks.onFileOpened) > 0 {
+		var hookErr error
+		raw, hookErr = runOnFileOpenedHooks(ctx, raw, h.hooks.onFileOpened)
+		if hookErr != nil {
+			h.logger.Error("复合索引器: OnFileOpenedHook 失败", hookErr, "file", filePath)
+			return nil, fmt.Errorf("HyperIndexer: OnFileOpenedHook 失败: %w", hookErr)
+		}
+	}
 
 	// 2. 结构化为 StructuredDoc 容器（Chunks/Nodes/Edges 此时均为空，由 Chunker 填充）
 	doc, err := core.Structurize(raw)
@@ -154,12 +216,80 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		"nodes", len(result.Nodes),
 		"edges", len(result.Edges))
 
-	// 5. 把三类产物分别存入 StructuredDoc（供 Save 读取）
+	// 4a. 把三类产物分别存入 StructuredDoc（供 Save 读取）
 	doc.SetChunks(result.Chunks)
 	doc.SetNodes(result.Nodes)
 	doc.SetEdges(result.Edges)
 
-	// 6. 语义线：向量化 + 写入 VectorStore（失败返回 error）
+	// [4a] OnChunkHook：对每个 Chunk 执行敏感词过滤、补充标签
+	if len(h.hooks.onChunk) > 0 {
+		for i := range result.Chunks {
+			modified, hookErr := runOnChunkHooks(ctx, &result.Chunks[i], h.hooks.onChunk)
+			if hookErr != nil {
+				h.logger.Error("复合索引器: OnChunkHook 失败", hookErr,
+					"chunk_id", result.Chunks[i].ID)
+				return nil, fmt.Errorf("HyperIndexer: OnChunkHook 失败: %w", hookErr)
+			}
+			if modified != nil {
+				result.Chunks[i] = *modified
+			}
+		}
+		doc.SetChunks(result.Chunks)
+	}
+
+	// 4b. [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
+	if h.summarizer != nil && raw.Type() == document.RawDocDoc {
+		var toSummarize []core.Chunk
+		for _, c := range result.Chunks {
+			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
+				toSummarize = append(toSummarize, c)
+			}
+		}
+		if len(toSummarize) > 0 {
+			h.logger.Debug("复合索引器: 调用 Summarizer", "to_summarize", len(toSummarize))
+			// 优先使用批量模式（通过接口断言检测 SummarizeBatch 方法）
+			var updated []core.Chunk
+			var err error
+			if bs, ok := h.summarizer.(interface {
+				SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
+			}); ok {
+				updated, err = bs.SummarizeBatch(ctx, toSummarize)
+			} else {
+				updated, err = h.summarizer.Summarize(ctx, toSummarize)
+			}
+			if err != nil {
+				h.logger.Warn("复合索引器: Summarizer 调用失败，使用原始分片继续", "error", err)
+			} else {
+				updatedByID := make(map[string]core.Chunk, len(updated))
+				for _, u := range updated {
+					updatedByID[u.ID] = u
+				}
+				chunks := doc.Chunks()
+				for i := range chunks {
+					if u, ok := updatedByID[chunks[i].ID]; ok {
+						chunks[i] = u
+					}
+				}
+				doc.SetChunks(chunks)
+				h.logger.Debug("复合索引器: Summarizer 完成", "summarized", len(updated))
+			}
+		} else {
+			h.logger.Debug("复合索引器: 所有分片内容过短，跳过 Summarizer",
+				"min_length", minSummaryContentLength)
+		}
+	}
+
+	// [4b] OnBeforeSemanticSaveHook：批量审核、外部 API 增强
+	if len(h.hooks.onBeforeSemantic) > 0 {
+		var hookErr error
+		doc, hookErr = runOnBeforeSemanticSaveHooks(ctx, doc, h.hooks.onBeforeSemantic)
+		if hookErr != nil {
+			h.logger.Error("复合索引器: OnBeforeSemanticSaveHook 失败", hookErr, "file", filePath)
+			return nil, fmt.Errorf("HyperIndexer: OnBeforeSemanticSaveHook 失败: %w", hookErr)
+		}
+	}
+
+	// 5. 语义线：向量化 + 写入 VectorStore（失败返回 error）
 	if store, ok := h.semantic.(IndexerStore); ok {
 		if err := store.Save(ctx, doc); err != nil {
 			h.logger.Error("复合索引器: 语义线保存失败", err, "file", filePath)
@@ -170,7 +300,30 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		h.logger.Warn("复合索引器: semantic 未实现 IndexerStore，跳过语义线保存")
 	}
 
-	// 7. 关系线：实体 + CONTAINS 边 + 写入 GraphStore（若 graph 存在）
+	// 5b. [关系线加工] 若注入了 Refiller 且有已注册 Schema，调用 Refiller 提取实体和关系
+	if h.refiller != nil && len(h.schemasByPath) > 0 {
+		// 将注册表中所有 Schema 合并为一个列表传给 Refiller
+		var schemas []llm.EntitySchema
+		for _, ss := range h.schemasByPath {
+			schemas = append(schemas, ss...)
+		}
+		if len(schemas) > 0 {
+			refilled, rErr := h.refiller.Refill(ctx, result, schemas)
+			if rErr != nil {
+				h.logger.Warn("复合索引器: Refiller 调用失败（不阻塞语义线）",
+					"file", filePath, "error", rErr.Error())
+			} else {
+				// 将新增的 Nodes/Edges 合并到 doc
+				doc.SetNodes(append(doc.Nodes(), refilled.Nodes...))
+				doc.SetEdges(append(doc.Edges(), refilled.Edges...))
+				h.logger.Debug("复合索引器: Refiller 完成",
+					"nodes", len(refilled.Nodes),
+					"edges", len(refilled.Edges))
+			}
+		}
+	}
+
+	// 6. 关系线：实体 + CONTAINS 边 + 写入 GraphStore（若 graph 存在）
 	//    关系线失败不阻塞语义线结果，仅记录警告
 	if h.graph != nil {
 		if store, ok := h.graph.(IndexerStore); ok {
@@ -179,8 +332,8 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 					"file", filePath, "error", err.Error())
 			} else {
 				h.logger.Debug("复合索引器: 关系线保存完成",
-					"nodes", len(result.Nodes),
-					"edges", len(result.Edges))
+					"nodes", len(doc.Nodes()),
+					"edges", len(doc.Edges()))
 			}
 		} else {
 			h.logger.Warn("复合索引器: graph 未实现 IndexerStore，跳过关系线保存")
@@ -189,12 +342,18 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		h.logger.Debug("复合索引器: 未启用关系线，跳过图保存")
 	}
 
-	// 8. 转换 []core.Chunk → []*core.Chunk 返回（保持 AddFile 签名一致）
+	// 7. 转换 []core.Chunk → []*core.Chunk 返回（保持 AddFile 签名一致）
 	chunks := make([]*core.Chunk, 0, len(result.Chunks))
 	for i := range result.Chunks {
 		ch := result.Chunks[i]
 		chunks = append(chunks, &ch)
 	}
+
+	// [6a] OnIndexCompleteHook：通知下游、审计日志（不阻塞管线）
+	if len(h.hooks.onIndexComplete) > 0 {
+		runOnIndexCompleteHooks(ctx, chunks, h.hooks.onIndexComplete, h.logger)
+	}
+
 	h.logger.Debug("复合索引器: 索引文件完成",
 		"file", filePath, "chunks", len(chunks))
 	return chunks, nil
@@ -475,3 +634,61 @@ func (h *HyperIndexer) SearchGraph(ctx context.Context, q core.Query) (*core.Hit
 	}
 	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphSearcher")
 }
+
+// ---------------------------------------------------------------------------
+// Schema 注册
+// ---------------------------------------------------------------------------
+
+// AddSchemas 注册外部实体 Schema 到 HyperIndexer。
+//
+// path 是文件系统路径，指向该组 Schema 的源目录（如 "schemas/general"），
+// 保留溯源语义——调用方可追踪这些 Schema 来自哪个配置文件目录。
+// schemas 使用 llm/schema.go 中已定义的 EntitySchema 类型，
+// 可经由 llm.LoadEntitySchemasFromDir 或自定义加载函数解析后传入。
+//
+// path 不用于文件读取（schemas 已经是解析好的），仅作为注册标识。
+// HyperIndexer 将 path 作为 key 存储在内部注册表中，供 Refiller 消费时合并。
+func (h *HyperIndexer) AddSchemas(path string, schemas []llm.EntitySchema) {
+	if path == "" || len(schemas) == 0 {
+		return
+	}
+	if h.schemasByPath == nil {
+		h.schemasByPath = make(map[string][]llm.EntitySchema)
+	}
+	h.schemasByPath[path] = schemas
+	h.logger.Debug("复合索引器: Schema 注册完成", "path", path, "count", len(schemas))
+}
+
+// ---------------------------------------------------------------------------
+// 多文件实体关系发现
+// ---------------------------------------------------------------------------
+
+// Update 触发多文件实体关系发现。
+//
+// 遍历所有已索引的实体，执行跨文件关系发现（实体合并、关系推断）。
+// 此方法可能会调用 LLM，也可能仅使用规则匹配（如词汇相似度、共现频率）。
+//
+// Update 不是 AddFile 的隐式步骤，需用户或调度器在合适的时机显式触发。
+func (h *HyperIndexer) Update(ctx context.Context) error {
+	h.logger.Info("复合索引器: Update 待实现——多文件实体发现暂未实现")
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// 内部方法
+// ---------------------------------------------------------------------------
+
+// resolveRegionID 从文件路径推导 RegionID。
+//
+// RegionID 使用目录路径的 SHA256 哈希的前 16 位十六进制字符作为标识，
+// 同时横跨 Chunk（语义线）和 Node（关系线）。
+// 此方法通常在 AddFile 过程中由内部逻辑调用。
+func (h *HyperIndexer) resolveRegionID(filePath string) string {
+	dir := filepath.Dir(filePath)
+	sum := sha256.Sum256([]byte(dir))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。
+// 短于此长度的分块没有摘要化的必要，直接跳过以节省 LLM 调用。
+const minSummaryContentLength = 100
