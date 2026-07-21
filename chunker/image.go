@@ -13,7 +13,8 @@ import (
 //   - Chunk.Title 取文件名（去扩展名）
 //   - Chunk.StartPos=0, EndPos=len(content)
 //   - Chunk.Summary 留空（由 Extractor 填充）
-//   - DocID 使用 doc.ID()，Metadata["source"]=doc.FileName()
+//   - DocID 使用 doc.ID()，Chunk.Source=doc.FileName()（高频跨包属性提升为字段）
+//   - 图片元数据（mime_type/thumbnail_size）保留在 Metadata 中，使用 core.Meta* 常量键名
 type ImageChunker struct{}
 
 // NewImageChunker 创建图片分块器。
@@ -32,10 +33,19 @@ func (c *ImageChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	title := deriveTitle(doc.FileName())
 	chunk := buildChunk(doc, 0, 0, len(content), title, content)
-	// 回填 document 包已提取的图片元数据
+	// 回填 document 包已提取的图片元数据（使用 core.Meta* 常量键名）
 	for k, v := range doc.Meta() {
-		if k == "mime_type" || k == "thumbnail_size" {
-			chunk.Metadata[k] = v
+		switch k {
+		case core.MetaMimeType:
+			if chunk.Metadata == nil {
+				chunk.Metadata = map[string]any{}
+			}
+			chunk.Metadata[core.MetaMimeType] = v
+		case core.MetaThumbnailSize:
+			if chunk.Metadata == nil {
+				chunk.Metadata = map[string]any{}
+			}
+			chunk.Metadata[core.MetaThumbnailSize] = v
 		}
 	}
 	chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())

@@ -517,11 +517,11 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		if chunk.Metadata == nil {
 			chunk.Metadata = map[string]any{}
 		}
-		chunk.Metadata["symbol_type"] = sym.nodeType
-		chunk.Metadata["signature"] = sym.signature
-		chunk.Metadata["visibility"] = sym.visibility
+		chunk.Metadata[core.MetaSymbolType] = sym.nodeType
+		chunk.Metadata[core.MetaSignature] = sym.signature
+		chunk.Metadata[core.MetaVisibility] = sym.visibility
 		if sym.receiver != "" {
-			chunk.Metadata["receiver"] = sym.receiver
+			chunk.Metadata[core.MetaReceiver] = sym.receiver
 		}
 		if parent.idx >= 0 {
 			chunk.ParentID = chunks[parent.idx].ID
@@ -559,7 +559,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 			if chunks[i].Metadata == nil {
 				chunks[i].Metadata = map[string]any{}
 			}
-			chunks[i].Metadata["package"] = pkg
+			chunks[i].Metadata[core.MetaPackage] = pkg
 		}
 	}
 
@@ -599,7 +599,7 @@ func buildCodeGraph(doc document.RawDoc, content string, symbols []codeSymbol, s
 	}
 	pkg := extractPackageName(doc.FileName(), content)
 	if pkg != "" {
-		docProps["package"] = pkg
+		docProps[core.PropPackage] = pkg
 	}
 	// Document 节点保持文档级作用域；符号节点使用 package/模块作用域
 	docNode := buildNode(doc, docTitle, []string{"Document"}, "", docProps)
@@ -653,13 +653,13 @@ func buildCodeGraph(doc document.RawDoc, content string, symbols []codeSymbol, s
 
 		label := codeSymbolLabel(sym.nodeType)
 		props := map[string]any{
-			"node_type":  sym.nodeType,
-			"signature":  sym.signature,
-			"visibility": sym.visibility,
-			"language":   deriveLanguage(doc.FileName()),
+			"node_type":          sym.nodeType,
+			core.PropSignature:  sym.signature,
+			core.PropVisibility: sym.visibility,
+			"language":           deriveLanguage(doc.FileName()),
 		}
 		if sym.receiver != "" {
-			props["receiver"] = sym.receiver
+			props[core.PropReceiver] = sym.receiver
 		}
 		node := buildNode(doc, qualifiedName, []string{label}, chunkID, props, scope)
 		nodes = append(nodes, node)

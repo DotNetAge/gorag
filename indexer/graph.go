@@ -331,7 +331,7 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 						if n.Properties == nil {
 							n.Properties = map[string]any{}
 						}
-						n.Properties["source_file"] = sourceFile
+						n.Properties[core.PropSourceFile] = sourceFile
 						break
 					}
 				}
@@ -824,10 +824,10 @@ func nodeToTreeNode(n *core.Node, nodeType string) *core.TreeNode {
 		Name: n.Name,
 	}
 	if n.Properties != nil {
-		if sourceFile, ok := n.Properties["source_file"].(string); ok && sourceFile != "" {
+		if sourceFile, ok := n.Properties[core.PropSourceFile].(string); ok && sourceFile != "" {
 			tn.Path = sourceFile
 		}
-		if dir, ok := n.Properties["dir"].(string); ok && dir != "" {
+		if dir, ok := n.Properties[core.PropDir].(string); ok && dir != "" {
 			tn.Path = dir
 		}
 	}
@@ -842,10 +842,10 @@ func scoreNode(n *core.Node) float32 {
 	}
 	score := float32(0.3) // 基础分
 	if n.Properties != nil {
-		if f, ok := n.Properties["frequency"].(int); ok && f > 0 {
+		if f, ok := n.Properties[core.PropFrequency].(int); ok && f > 0 {
 			score += float32(f) * 0.01
 		}
-		if c, ok := n.Properties["confidence"].(float64); ok {
+		if c, ok := n.Properties[core.PropConfidence].(float64); ok {
 			score += float32(c) * 0.1
 		}
 	}
@@ -863,10 +863,10 @@ func scoreEdge(e *core.Edge) float32 {
 	}
 	score := float32(0.2) // 基础分
 	if e.Properties != nil {
-		if s, ok := e.Properties["score"].(float64); ok {
+		if s, ok := e.Properties[core.PropScore].(float64); ok {
 			score += float32(s) * 0.1
 		}
-		if c, ok := e.Properties["confidence"].(float64); ok {
+		if c, ok := e.Properties[core.PropConfidence].(float64); ok {
 			score += float32(c) * 0.1
 		}
 	}

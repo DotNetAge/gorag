@@ -198,13 +198,13 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 			Title:    extractFirstLine(content),
 			Summary:  "",
 			Content:  content,
+			Source:   "text",
 			Index:    0,
 			StartPos: 0,
 			EndPos:   len(content),
 			Metadata: map[string]any{
-				"mime_type": mime,
-				"strategy":  cfg.strategy,
-				"source":    "text",
+				core.MetaMimeType: mime,
+				"strategy":        cfg.strategy,
 			},
 		},
 	}
@@ -263,13 +263,13 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 			Title:    extractFirstLine(content),
 			Summary:  "",
 			Content:  content,
+			Source:   file,
 			Index:    0,
 			StartPos: 0,
 			EndPos:   len(content),
 			Metadata: map[string]any{
-				"mime_type":   mime,
-				"strategy":    cfg.strategy,
-				"source_file": file,
+				core.MetaMimeType: mime,
+				"strategy":        cfg.strategy,
 			},
 		},
 	}

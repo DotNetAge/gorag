@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
 )
 
@@ -28,11 +29,11 @@ func TestImageChunker_Metadata(t *testing.T) {
 	}
 
 	chunk := result.Chunks[0]
-	if chunk.Metadata["mime_type"] != "image/jpeg" {
-		t.Errorf("mime_type 期望 image/jpeg，实际 %v", chunk.Metadata["mime_type"])
+	if chunk.Metadata[core.MetaMimeType] != "image/jpeg" {
+		t.Errorf("mime_type 期望 image/jpeg，实际 %v", chunk.Metadata[core.MetaMimeType])
 	}
-	if size, ok := chunk.Metadata["thumbnail_size"].(int); !ok || size <= 0 {
-		t.Errorf("thumbnail_size 应为正整数，实际 %v", chunk.Metadata["thumbnail_size"])
+	if size, ok := chunk.Metadata[core.MetaThumbnailSize].(int); !ok || size <= 0 {
+		t.Errorf("thumbnail_size 应为正整数，实际 %v", chunk.Metadata[core.MetaThumbnailSize])
 	}
 }
 

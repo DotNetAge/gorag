@@ -451,8 +451,8 @@ func TestDatumChunker_DirectoryMetadata(t *testing.T) {
 	}
 	expectedDir := filepath.Dir(path)
 	for _, c := range result.Chunks {
-		if c.Metadata["directory"] != expectedDir {
-			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata["directory"])
+		if c.Metadata[core.MetaDirectory] != expectedDir {
+			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata[core.MetaDirectory])
 		}
 	}
 }

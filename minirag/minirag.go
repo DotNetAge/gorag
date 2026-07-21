@@ -82,7 +82,7 @@ func (r *NewRAG) AddText(content string) ([]byte, error) {
 			Values:  bytesToF32s(vecBytes),
 			ChunkID: id,
 			Metadata: map[string]any{
-				"content": text,
+				core.VecMetaContent: text,
 			},
 		}}); err != nil {
 			return nil, fmt.Errorf("store: %w", err)
@@ -167,9 +167,9 @@ func (r *NewRAG) AddFile(filePath string) ([]byte, error) {
 			Values:  bytesToF32s(vecBytes),
 			ChunkID: id,
 			Metadata: map[string]any{
-				"content":  part,
-				"filename": filename,
-				"filepath": absPath,
+				core.VecMetaContent: part,
+				"filename":          filename,
+				"filepath":          absPath,
 			},
 		}}); err != nil {
 			return nil, fmt.Errorf("store: %w", err)
@@ -209,7 +209,7 @@ func (r *NewRAG) Search(query string, topK int) ([]byte, error) {
 	}
 	results := make([]hitItem, len(vectors))
 	for i, v := range vectors {
-		content, _ := v.Metadata["content"].(string)
+		content, _ := v.Metadata[core.VecMetaContent].(string)
 		results[i] = hitItem{
 			ID:      v.ID,
 			Content: content,

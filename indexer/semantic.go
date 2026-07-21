@@ -175,7 +175,7 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 //     - 主向量（Content）：ChunkID = chunk.ID，携带完整 metadata
 //     - 从属向量（Title）：ChunkID = chunk.ID + ":title"，不存 metadata（Title 非空时）
 //     - 从属向量（Summary）：ChunkID = chunk.ID + ":summary"，不存 metadata（Summary 非空时）
-//  4. 主向量 metadata 包含 content/title/summary/doc_id/source_file 等字段，便于 Search 重建 Chunk
+//  4. 主向量 metadata 包含 content/title/summary/doc_id/source/region_id 等字段（使用 core.VecMeta* 常量键名），便于 Search 重建 Chunk
 func (s *semanticIndexer) Save(ctx context.Context, doc core.StructuredDoc) error {
 	if doc == nil {
 		return fmt.Errorf("Save: doc 不能为空")
@@ -312,30 +312,52 @@ func (s *semanticIndexer) saveOneChunk(ctx context.Context, chunk *core.Chunk) e
 	return nil
 }
 
+// vecMetaKeys 集合用于过滤已映射到 Chunk 顶层字段的 VecMeta* 键名。
+// buildVectorMetadata 与 vectorToChunk 在复制 Metadata 时跳过这些键，
+// 避免顶层字段与 Metadata 中的同名键重复存储。
+var vecMetaKeys = map[string]bool{
+	core.VecMetaContent:  true,
+	core.VecMetaTitle:    true,
+	core.VecMetaSummary:  true,
+	core.VecMetaDocID:    true,
+	core.VecMetaParentID: true,
+	core.VecMetaSource:   true,
+	core.VecMetaRegionID: true,
+	core.VecMetaLanguage: true,
+	core.VecMetaTags:     true,
+}
+
 // buildVectorMetadata 从 Chunk 构造 Vector 的 metadata 快照。
-// 包含 content/title/summary/doc_id/source_file/parent_id 等字段，与 vectorToChunk 反向对应。
+// 顶层字段使用 core.VecMeta* 常量键名序列化，与 vectorToChunk 反向对应。
+// Metadata 中的非 VecMeta 键原样复制（如 directory/heading_level 等扩展字段）。
 func buildVectorMetadata(chunk *core.Chunk) map[string]any {
-	metadata := map[string]any{
-		"content": chunk.Content,
-		"title":   chunk.Title,
-		"summary": chunk.Summary,
-		"doc_id":  chunk.DocID,
+	m := map[string]any{
+		core.VecMetaContent:  chunk.Content,
+		core.VecMetaDocID:    chunk.DocID,
+		core.VecMetaParentID: chunk.ParentID,
+		core.VecMetaSource:   chunk.Source,
+		core.VecMetaRegionID: chunk.RegionID,
 	}
-	if chunk.ParentID != "" {
-		metadata["parent_id"] = chunk.ParentID
+	if chunk.Title != "" {
+		m[core.VecMetaTitle] = chunk.Title
 	}
-	// source_file 优先取自 chunk.Metadata["source"]（由 chunker.buildChunk 写入）
-	if source, ok := chunk.Metadata["source"].(string); ok && source != "" {
-		metadata["source_file"] = source
+	if chunk.Summary != "" {
+		m[core.VecMetaSummary] = chunk.Summary
 	}
-	// 复制其他扩展字段（如 start_line/end_line/language/directory 等）
+	if chunk.Language != "" {
+		m[core.VecMetaLanguage] = chunk.Language
+	}
+	if len(chunk.Tags) > 0 {
+		m[core.VecMetaTags] = chunk.Tags
+	}
+	// 复制 Metadata 中的其他扩展属性（跳过已映射到顶层字段的 VecMeta* 键）
 	for k, v := range chunk.Metadata {
-		if k == "source" {
-			continue // 已映射到 source_file
+		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {
+			continue
 		}
-		metadata[k] = v
+		m[k] = v
 	}
-	return metadata
+	return m
 }
 
 // ── 从属向量维度辅助 ──────────────────────────────────────────────
@@ -346,19 +368,13 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 // vectorDimension 描述一个从属向量维度（概念维度，非数据维度）。
 // 维度信息隐含在 ChunkID 的后缀编码中，不需要额外的 Dim 字段。
 type vectorDimension struct {
-	suffix  string                      // ":title" / ":summary"
-	extract func(map[string]any) string // 从主向量 metadata 提取向量化文本（供 Refill 使用）
+	suffix  string                // ":title" / ":summary"
+	extract func(*core.Chunk) string // 从主向量对应的 Chunk 提取向量化文本（供 Refill 使用）
 }
 
 var (
-	dimTitle = vectorDimension{":title", func(m map[string]any) string {
-		t, _ := m["title"].(string)
-		return t
-	}}
-	dimSummary = vectorDimension{":summary", func(m map[string]any) string {
-		s, _ := m["summary"].(string)
-		return s
-	}}
+	dimTitle = vectorDimension{":title", func(c *core.Chunk) string { return c.Title }}
+	dimSummary = vectorDimension{":summary", func(c *core.Chunk) string { return c.Summary }}
 )
 
 // semanticDimensions 是 SemanticIndexer 启用的从属维度（title + summary）。
@@ -534,6 +550,8 @@ func topScore(scores []float32) float32 {
 }
 
 // vectorToChunk 从 Vector 的 metadata 重建 Chunk 对象。
+// 顶层字段使用 core.VecMeta* 常量键名反序列化，与 buildVectorMetadata 反向对应。
+// 非 VecMeta 键原样复制到 Metadata（如 directory/heading_level 等扩展字段）。
 func vectorToChunk(vec *core.Vector) *core.Chunk {
 	chunk := &core.Chunk{
 		ID:       vec.ChunkID,
@@ -542,29 +560,46 @@ func vectorToChunk(vec *core.Vector) *core.Chunk {
 	if vec.Metadata == nil {
 		return chunk
 	}
-	if content, ok := vec.Metadata["content"].(string); ok {
-		chunk.Content = content
+	if v, ok := vec.Metadata[core.VecMetaContent].(string); ok {
+		chunk.Content = v
 	}
-	if title, ok := vec.Metadata["title"].(string); ok {
-		chunk.Title = title
+	if v, ok := vec.Metadata[core.VecMetaTitle].(string); ok {
+		chunk.Title = v
 	}
-	if summary, ok := vec.Metadata["summary"].(string); ok {
-		chunk.Summary = summary
+	if v, ok := vec.Metadata[core.VecMetaSummary].(string); ok {
+		chunk.Summary = v
 	}
-	if did, ok := vec.Metadata["doc_id"].(string); ok {
-		chunk.DocID = did
+	if v, ok := vec.Metadata[core.VecMetaDocID].(string); ok {
+		chunk.DocID = v
 	}
-	if pid, ok := vec.Metadata["parent_id"].(string); ok {
-		chunk.ParentID = pid
+	if v, ok := vec.Metadata[core.VecMetaParentID].(string); ok {
+		chunk.ParentID = v
 	}
-	// 复制非内部字段到 Metadata
-	for k, v := range vec.Metadata {
-		switch k {
-		case "content", "title", "summary", "doc_id", "parent_id", "mime_type", "chunk_meta":
-			// 跳过已映射到顶层字段的内部字段
-		default:
-			chunk.Metadata[k] = v
+	if v, ok := vec.Metadata[core.VecMetaSource].(string); ok {
+		chunk.Source = v
+	}
+	if v, ok := vec.Metadata[core.VecMetaRegionID].(string); ok {
+		chunk.RegionID = v
+	}
+	if v, ok := vec.Metadata[core.VecMetaLanguage].(string); ok {
+		chunk.Language = v
+	}
+	if tags, ok := vec.Metadata[core.VecMetaTags].([]string); ok {
+		chunk.Tags = tags
+	} else if tagsAny, ok := vec.Metadata[core.VecMetaTags].([]any); ok {
+		// JSON 反序列化后可能是 []any
+		for _, t := range tagsAny {
+			if s, ok := t.(string); ok {
+				chunk.Tags = append(chunk.Tags, s)
+			}
 		}
+	}
+	// 复制非 VecMeta 键到 Metadata
+	for k, v := range vec.Metadata {
+		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {
+			continue
+		}
+		chunk.Metadata[k] = v
 	}
 	return chunk
 }
@@ -592,7 +627,7 @@ func (s *semanticIndexer) ReconstructDocument(ctx context.Context, docID string)
 		if v == nil || v.Metadata == nil {
 			continue
 		}
-		if c, ok := v.Metadata["content"].(string); ok && c != "" {
+		if c, ok := v.Metadata[core.VecMetaContent].(string); ok && c != "" {
 			parts = append(parts, c)
 		}
 	}
@@ -619,8 +654,8 @@ func (s *semanticIndexer) resolveParentChunks(vectors []*core.Vector) []*core.Ve
 		if vec == nil || vec.Metadata == nil {
 			continue
 		}
-		if isParent, _ := vec.Metadata["is_parent"].(bool); !isParent {
-			if parentID, ok := vec.Metadata["parent_id"].(string); ok && parentID != "" {
+		if isParent, _ := vec.Metadata[core.MetaIsParent].(bool); !isParent {
+			if parentID, ok := vec.Metadata[core.VecMetaParentID].(string); ok && parentID != "" {
 				for j, pv := range vectors {
 					// 比较 pv.ChunkID（chunk ID）而不是 pv.ID（UUID）
 					if pv != nil && pv.ChunkID == parentID {
@@ -709,9 +744,11 @@ func (s *semanticIndexer) Refill(ctx context.Context) error {
 			if vec.Metadata == nil {
 				continue
 			}
+			// 主向量 metadata 重建为 Chunk，供 dim.extract 读取顶层字段
+			chunk := vectorToChunk(vec)
 			// 遍历所有从属维度，逐个检查并补充
 			for _, dim := range semanticDimensions {
-				text := dim.extract(vec.Metadata)
+				text := dim.extract(chunk)
 				if text == "" {
 					continue
 				}

@@ -74,13 +74,13 @@ func New(doc document.RawDoc) (Chunker, error) {
 // 共用辅助函数
 // =====================================================================
 
-// buildChunk 构造单个 Chunk，统一填充 ID/DocID/Metadata。
+// buildChunk 构造单个 Chunk，统一填充 ID/DocID/Source。
 //
 // 设计要点：
 //   - Chunk.ID 使用 utils.GenerateID([]byte(docID + ":" + title + ":" + content)) 生成
 //     将 title（路径/符号名/数据路径等）纳入盐值，可避免数据文件中相同内容的记录（如数组里多个相同对象）产生重复 ID
 //   - Summary 字段默认留空，由各 Chunker 在返回前按统一策略填充
-//   - Metadata["source"] 统一记录 doc.FileName()
+//   - Chunk.Source 统一记录 doc.FileName()（高频跨包属性已提升为结构体字段）
 func buildChunk(
 	doc document.RawDoc,
 	idx int,
@@ -95,16 +95,14 @@ func buildChunk(
 		Index:    idx,
 		StartPos: start,
 		EndPos:   end,
-		Metadata: map[string]any{
-			"source": doc.FileName(),
-		},
+		Source:   doc.FileName(),
 	}
 }
 
 // enrichChunksMetadata 为每个 Chunk 补充通用元数据：
-//   - start_line / end_line：在源文件中的行号（从 1 开始）
-//   - language：从文件扩展名推导的语言标识
-//   - directory：文件所在目录（绝对路径）
+//   - StartLine / EndLine：在源文件中的行号（从 1 开始，提升为结构体字段）
+//   - Language：从文件扩展名推导的语言标识（提升为结构体字段）
+//   - directory：文件所在目录（绝对路径，保留在 Metadata 中，使用 core.MetaDirectory 常量）
 //
 // 每个 Chunker 在返回结果前应调用此函数统一 enriched。
 func enrichChunksMetadata(chunks []core.Chunk, fullContent, fileName string) []core.Chunk {
@@ -114,14 +112,16 @@ func enrichChunksMetadata(chunks []core.Chunk, fullContent, fileName string) []c
 		directory = filepath.Dir(fileName)
 	}
 	for i := range chunks {
-		if chunks[i].Metadata == nil {
-			chunks[i].Metadata = map[string]any{}
-		}
-		chunks[i].Metadata["start_line"] = byteOffsetToLine(fullContent, chunks[i].StartPos)
-		chunks[i].Metadata["end_line"] = byteOffsetToLine(fullContent, chunks[i].EndPos)
-		chunks[i].Metadata["language"] = lang
+		// 第一层属性提升为结构体字段
+		chunks[i].StartLine = byteOffsetToLine(fullContent, chunks[i].StartPos)
+		chunks[i].EndLine = byteOffsetToLine(fullContent, chunks[i].EndPos)
+		chunks[i].Language = lang
+		// 第二层属性保留在 Metadata 中，使用 core.Meta* 常量键名
 		if directory != "" {
-			chunks[i].Metadata["directory"] = directory
+			if chunks[i].Metadata == nil {
+				chunks[i].Metadata = map[string]any{}
+			}
+			chunks[i].Metadata[core.MetaDirectory] = directory
 		}
 	}
 	return chunks

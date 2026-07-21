@@ -189,7 +189,7 @@ func setMarkdownParentIDs(chunks []core.Chunk, headings []markdownHeadingInfo) {
 
 	// heading chunk 起始索引：如果第一个 chunk 是前言（无 heading_level），则从 1 开始
 	headingChunkIdx := 0
-	if level, ok := chunks[0].Metadata["heading_level"].(int); !ok || level == 0 {
+	if level, ok := chunks[0].Metadata[core.MetaHeadingLevel].(int); !ok || level == 0 {
 		headingChunkIdx = 1
 	}
 
@@ -241,7 +241,7 @@ func buildMarkdownGraph(doc document.RawDoc, chunks []core.Chunk, headings []mar
 	headingChunkIdx := 0
 	if len(chunks) > 0 {
 		// 第一个 chunk 可能是前言，heading chunk 从第二个开始
-		if level, ok := chunks[0].Metadata["heading_level"].(int); !ok || level == 0 {
+		if level, ok := chunks[0].Metadata[core.MetaHeadingLevel].(int); !ok || level == 0 {
 			headingChunkIdx = 1
 		}
 	}
@@ -335,6 +335,6 @@ func buildChunkWithMeta(
 	if c.Metadata == nil {
 		c.Metadata = map[string]any{}
 	}
-	c.Metadata["heading_level"] = headingLevel
+	c.Metadata[core.MetaHeadingLevel] = headingLevel
 	return c
 }

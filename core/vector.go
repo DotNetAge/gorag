@@ -2,6 +2,21 @@ package core
 
 import "github.com/google/uuid"
 
+// Vector 元数据键名常量。
+// 用于 buildVectorMetadata / vectorToChunk 等序列化/反序列化互逆操作，
+// 消除键名散落——改一处编译器自动报另一处。
+const (
+	VecMetaContent  = "content"   // Chunk.Content
+	VecMetaTitle    = "title"     // Chunk.Title
+	VecMetaSummary  = "summary"   // Chunk.Summary
+	VecMetaDocID    = "doc_id"    // Chunk.DocID
+	VecMetaParentID = "parent_id" // Chunk.ParentID
+	VecMetaSource   = "source"    // Chunk.Source
+	VecMetaRegionID = "region_id" // Chunk.RegionID
+	VecMetaLanguage = "language"  // Chunk.Language
+	VecMetaTags     = "tags"      // Chunk.Tags
+)
+
 // Vector 向量：Chunk 的向量化表示。
 //
 // 多维度向量索引设计：
@@ -17,13 +32,10 @@ type Vector struct {
 	ID       string         `json:"id"`                 // 向量唯一标识（chunkID / chunkID:title / chunkID:summary 三种形式）
 	ChunkID  string         `json:"chunk_id"`           // 关联的 Chunk ID（3 条向量指向同一 ChunkID）
 	Values   []float32      `json:"values"`             // 向量值（embedding model 输出，3 条向量的向量空间维度相同）
-	Metadata map[string]any `json:"metadata,omitempty"` // 持有 Chunk 的快照（doc_id/source_file/region_id/parent_id 等）
+	Metadata map[string]any `json:"metadata,omitempty"` // 持有 Chunk 的快照（使用 VecMeta* 常量键名）
 }
 
 // NewVector 创建一个新的 Vector 实例。
-//
-// Deprecated: 推荐使用 embedder.CalcChunk 为 Chunk 生成多维度向量，
-// 此构造函数仅保留供历史代码继续编译。
 //
 // 参数：
 //   - values: embedding 向量值（float32 切片）

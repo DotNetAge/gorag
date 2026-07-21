@@ -10,6 +10,10 @@ import (
 	gvcore "github.com/DotNetAge/govector/core"
 )
 
+// chunkMetaKey 是 store 层内部使用的元数据键名，
+// 用于在 Vector.Metadata 中嵌套存储 chunk 的序号等元信息（如 index）。
+const chunkMetaKey = "chunk_meta"
+
 // Store is an implementation of core.VectorStore using govector.
 type Store struct {
 	sync.RWMutex
@@ -380,12 +384,12 @@ func (s *Store) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, e
 	return vectors, nil
 }
 
-// extractChunkIndex extracts the chunk index from a Vector's Metadata["chunk_meta"].map["index"].
+// extractChunkIndex extracts the chunk index from a Vector's Metadata[chunkMetaKey].map["index"].
 func extractChunkIndex(v *core.Vector) int {
 	if v == nil || v.Metadata == nil {
 		return 0
 	}
-	cm, ok := v.Metadata["chunk_meta"].(map[string]any)
+	cm, ok := v.Metadata[chunkMetaKey].(map[string]any)
 	if !ok {
 		return 0
 	}

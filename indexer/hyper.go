@@ -399,7 +399,7 @@ func (h *HyperIndexer) Close(ctx context.Context) error {
 // 设计要点：
 //   - 仅 HyperIndexer 实现此接口——它需要同时访问 GraphStore 和 VectorStore
 //   - GraphIndexer 不实现 TreeViewBuilder，仅暴露未导出的 regionTree 供 HyperIndexer 调用
-//   - Chunk 不写入 GraphStore，而是在视图层通过 VectorStore.Metadata["doc_id"] 动态组装
+//   - Chunk 不写入 GraphStore，而是在视图层通过 VectorStore.Metadata[core.VecMetaDocID] 动态组装
 //
 // graph 为 nil 或非 *GraphIndexer 时返回 error。
 func (h *HyperIndexer) Tree(ctx context.Context, regionID string) (*core.TreeNode, error) {

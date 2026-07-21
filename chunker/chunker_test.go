@@ -59,11 +59,11 @@ func TestMarkdownChunker_ATXHeadings(t *testing.T) {
 			t.Errorf("chunk[%d].Title 期望 %q, 实际 %q", i, expectTitles[i], c.Title)
 		}
 	}
-	if level, _ := chunks[0].Metadata["heading_level"].(int); level != 1 {
-		t.Errorf("chunks[0].Metadata[heading_level] 期望 1, 实际 %v", chunks[0].Metadata["heading_level"])
+	if level, _ := chunks[0].Metadata[core.MetaHeadingLevel].(int); level != 1 {
+		t.Errorf("chunks[0].Metadata[heading_level] 期望 1, 实际 %v", chunks[0].Metadata[core.MetaHeadingLevel])
 	}
-	if level, _ := chunks[1].Metadata["heading_level"].(int); level != 2 {
-		t.Errorf("chunks[1].Metadata[heading_level] 期望 2, 实际 %v", chunks[1].Metadata["heading_level"])
+	if level, _ := chunks[1].Metadata[core.MetaHeadingLevel].(int); level != 2 {
+		t.Errorf("chunks[1].Metadata[heading_level] 期望 2, 实际 %v", chunks[1].Metadata[core.MetaHeadingLevel])
 	}
 	// 验证 ParentID：一级标题为根，二级标题指向其所属一级标题
 	if chunks[0].ParentID != "" {
@@ -226,42 +226,42 @@ func (p Person) Greet() string {
 	if !found {
 		t.Errorf("期望存在 Person.Greet --BELONGS_TO--> Person 的边，实际未找到")
 	}
-	// 验证 Chunk.Metadata 包含语言、行号、签名、可见性
+	// 验证 Chunk 第一层字段（language/StartLine/EndLine）与 Metadata 第二层属性（signature/visibility）
 	for _, c := range chunks {
-		if c.Metadata["language"] != "go" {
-			t.Errorf("%s 的 language 期望 go，实际 %v", c.Title, c.Metadata["language"])
+		if c.Language != "go" {
+			t.Errorf("%s 的 language 期望 go，实际 %v", c.Title, c.Language)
 		}
-		if c.Metadata["start_line"].(int) <= 0 {
-			t.Errorf("%s 的 start_line 应大于 0，实际 %v", c.Title, c.Metadata["start_line"])
+		if c.StartLine <= 0 {
+			t.Errorf("%s 的 start_line 应大于 0，实际 %v", c.Title, c.StartLine)
 		}
-		if c.Metadata["end_line"].(int) < c.Metadata["start_line"].(int) {
+		if c.EndLine < c.StartLine {
 			t.Errorf("%s 的 end_line 不应小于 start_line", c.Title)
 		}
-		if c.Metadata["signature"] == "" {
+		if c.Metadata[core.MetaSignature] == "" {
 			t.Errorf("%s 的 signature 不应为空", c.Title)
 		}
-		if c.Metadata["visibility"] == "" {
+		if c.Metadata[core.MetaVisibility] == "" {
 			t.Errorf("%s 的 visibility 不应为空", c.Title)
 		}
 	}
-	// 验证 Node.Properties 包含 signature/visibility/receiver
+	// 验证 Node.Properties 包含 signature/visibility/receiver（使用 core.Prop* 常量）
 	if greetNode, ok := nodeByName["Person.Greet"]; ok {
-		if greetNode.Properties["signature"] != "func (p Person) Greet() string {" {
-			t.Errorf("Person.Greet Node signature 期望 %q，实际 %q", "func (p Person) Greet() string {", greetNode.Properties["signature"])
+		if greetNode.Properties[core.PropSignature] != "func (p Person) Greet() string {" {
+			t.Errorf("Person.Greet Node signature 期望 %q，实际 %q", "func (p Person) Greet() string {", greetNode.Properties[core.PropSignature])
 		}
-		if greetNode.Properties["visibility"] != "exported" {
-			t.Errorf("Person.Greet Node visibility 期望 exported，实际 %v", greetNode.Properties["visibility"])
+		if greetNode.Properties[core.PropVisibility] != "exported" {
+			t.Errorf("Person.Greet Node visibility 期望 exported，实际 %v", greetNode.Properties[core.PropVisibility])
 		}
-		if greetNode.Properties["receiver"] != "Person" {
-			t.Errorf("Person.Greet Node receiver 期望 Person，实际 %v", greetNode.Properties["receiver"])
+		if greetNode.Properties[core.PropReceiver] != "Person" {
+			t.Errorf("Person.Greet Node receiver 期望 Person，实际 %v", greetNode.Properties[core.PropReceiver])
 		}
 	} else {
 		t.Errorf("未找到 Person.Greet Node")
 	}
-	// 验证 Document Node 包含 package
+	// 验证 Document Node 包含 package（使用 core.PropPackage 常量）
 	docNode := result.Nodes[0]
-	if docNode.Properties["package"] != "main" {
-		t.Errorf("Document Node package 期望 main，实际 %v", docNode.Properties["package"])
+	if docNode.Properties[core.PropPackage] != "main" {
+		t.Errorf("Document Node package 期望 main，实际 %v", docNode.Properties[core.PropPackage])
 	}
 	// 验证 ParentID：Go 方法不在类型字节范围内，属于顶层符号，ParentID 为空
 	chunkByTitle := map[string]core.Chunk{}
@@ -761,8 +761,8 @@ func TestChunkMetadata_Directory(t *testing.T) {
 
 	expectedDir := filepath.Dir(path)
 	for _, c := range result.Chunks {
-		if c.Metadata["directory"] != expectedDir {
-			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata["directory"])
+		if c.Metadata[core.MetaDirectory] != expectedDir {
+			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata[core.MetaDirectory])
 		}
 	}
 }

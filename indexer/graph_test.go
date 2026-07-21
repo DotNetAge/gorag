@@ -141,24 +141,12 @@ Go语言的垃圾回收机制和丰富的标准库也大大提高了开发效率
 		t.Logf("  Chunk #%d: ID=%s len=%d", i, chunk.ID, len(chunk.Content))
 
 		// 验证 summary 存在
-		summary, ok := chunk.Metadata["summary"].(string)
-		assert.True(t, ok, "chunk.Metadata 应有 summary")
+		summary := chunk.Summary
 		assert.NotEmpty(t, summary, "summary 不应为空")
 		t.Logf("    summary: %s", truncate(summary, 60))
 
 		// 验证 tags 存在且数量在 3-5 之间
-		tagsRaw, ok := chunk.Metadata["tags"].([]string)
-		if !ok {
-			// 也可能是 []any 类型
-			if tagsAny, ok2 := chunk.Metadata["tags"].([]any); ok2 {
-				tagsRaw = make([]string, 0, len(tagsAny))
-				for _, tag := range tagsAny {
-					if s, ok3 := tag.(string); ok3 {
-						tagsRaw = append(tagsRaw, s)
-					}
-				}
-			}
-		}
+		tagsRaw := chunk.Tags
 		assert.NotEmpty(t, tagsRaw, "tags 不应为空")
 		if len(tagsRaw) > 0 {
 			t.Logf("    tags: %v (count=%d)", tagsRaw, len(tagsRaw))
@@ -168,7 +156,7 @@ Go语言的垃圾回收机制和丰富的标准库也大大提高了开发效率
 		}
 
 		// 验证 entity_ids 存在
-		entityIDs, ok := chunk.Metadata["entity_ids"].([]string)
+		entityIDs, ok := chunk.Metadata[core.MetaEntityIDs].([]string)
 		if ok {
 			t.Logf("    entity_ids: %v", entityIDs)
 		}
@@ -235,28 +223,18 @@ func TestGraphIndexer_AddFile(t *testing.T) {
 	for i, chunk := range chunks {
 		t.Logf("  Chunk #%d: ID=%s len=%d", i, chunk.ID, len(chunk.Content))
 
-		summary, _ := chunk.Metadata["summary"].(string)
+		summary := chunk.Summary
 		t.Logf("    summary: %s", truncate(summary, 60))
 
 		// 验证 tags
-		tags, _ := chunk.Metadata["tags"].([]string)
-		if len(tags) == 0 {
-			// 也可能是 []any 类型
-			if tagsAny, ok := chunk.Metadata["tags"].([]any); ok {
-				for _, tag := range tagsAny {
-					if s, ok2 := tag.(string); ok2 {
-						tags = append(tags, s)
-					}
-				}
-			}
-		}
+		tags := chunk.Tags
 		if len(tags) > 0 {
 			tagsFound = true
 			t.Logf("    tags: %v (count=%d)", tags, len(tags))
 		}
 
 		// 验证 entity_ids
-		entityIDs, _ := chunk.Metadata["entity_ids"].([]string)
+		entityIDs, _ := chunk.Metadata[core.MetaEntityIDs].([]string)
 		if len(entityIDs) > 0 {
 			t.Logf("    entity_ids: %v", entityIDs)
 		}
@@ -311,14 +289,12 @@ func TestGraphIndexer_Search(t *testing.T) {
 	t.Logf("Search 返回 %d 个 Hit", len(hits))
 	for i, hit := range hits {
 		t.Logf("  Hit #%d: ID=%s Score=%.4f", i+1, hit.ID, hit.Score)
-		if hit.Metadata != nil {
-			// 验证 tags 在搜索结果的 Metadata 中
-			if tags, ok := hit.Metadata["tags"]; ok {
-				t.Logf("    tags: %v", tags)
-			}
-			if summary, ok := hit.Metadata["summary"]; ok {
-				t.Logf("    summary: %s", truncate(fmt.Sprintf("%v", summary), 60))
-			}
+		// 验证 tags 在搜索结果中（已提升为 Chunk 顶层字段）
+		if len(hit.Tags) > 0 {
+			t.Logf("    tags: %v", hit.Tags)
+		}
+		if hit.Summary != "" {
+			t.Logf("    summary: %s", truncate(hit.Summary, 60))
 		}
 	}
 }
@@ -390,7 +366,7 @@ func TestGraphIndexer_SliceAndMerge(t *testing.T) {
 		if i < 3 {
 			t.Logf("  Chunk #%d: ID=%s len=%d", i, chunk.ID, len(chunk.Content))
 		}
-		tags, _ := chunk.Metadata["tags"].([]string)
+		tags := chunk.Tags
 		if len(tags) > 0 {
 			tagsCount++
 		}
