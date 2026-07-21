@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -292,4 +293,168 @@ func writeSchemaFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("写入 schema 文件失败: %v", err)
 	}
+}
+
+// ── buildNodesAndEdges 单元测试 ────────────────────────────────────
+
+// TestBuildNodesAndEdges_MissingEntity 验证关系引用未提取的实体时，
+// 该关系被跳过而不是产生空 Source/Target 的边。
+func TestBuildNodesAndEdges_MissingEntity(t *testing.T) {
+	ext := refillExtraction{
+		Entities: []refillEntity{
+			{Name: "多维度索引", EntityType: "concept"},
+		},
+		Relations: []refillRelation{
+			// "语义搜索" 不在实体列表中，这条边应被跳过
+			{Subject: "多维度索引", Predicate: "enhances", Object: "语义搜索"},
+			// "检索效果" 也不在实体列表中，应被跳过
+			{Subject: "检索效果", Predicate: "depends_on", Object: "多维度索引"},
+		},
+	}
+	nodes, edges := buildNodesAndEdges(ext, []string{"doc-1"})
+	if len(nodes) != 1 {
+		t.Fatalf("期望 1 个 node，实际 %d", len(nodes))
+	}
+	if len(edges) != 0 {
+		t.Fatalf("期望 0 个 edge（引用不存在的实体），实际 %d", len(edges))
+	}
+}
+
+// TestBuildNodesAndEdges_PartialMissingObject 验证关系主体存在但客体
+// 不在实体列表中时，该关系被跳过。
+func TestBuildNodesAndEdges_PartialMissingObject(t *testing.T) {
+	ext := refillExtraction{
+		Entities: []refillEntity{
+			{Name: "Alice", EntityType: "person"},
+		},
+		Relations: []refillRelation{
+			// Object "Acme" 不在实体列表中
+			{Subject: "Alice", Predicate: "works_for", Object: "Acme"},
+		},
+	}
+	_, edges := buildNodesAndEdges(ext, []string{"doc-1"})
+	if len(edges) != 0 {
+		t.Fatalf("期望 0 个 edge（Object 不存在），实际 %d", len(edges))
+	}
+}
+
+// TestBuildNodesAndEdges_PartialMissingSubject 验证关系客体存在但主体
+// 不在实体列表中时，该关系被跳过。
+func TestBuildNodesAndEdges_PartialMissingSubject(t *testing.T) {
+	ext := refillExtraction{
+		Entities: []refillEntity{
+			{Name: "Acme", EntityType: "organization"},
+		},
+		Relations: []refillRelation{
+			// Subject "Alice" 不在实体列表中
+			{Subject: "Alice", Predicate: "works_for", Object: "Acme"},
+		},
+	}
+	_, edges := buildNodesAndEdges(ext, []string{"doc-1"})
+	if len(edges) != 0 {
+		t.Fatalf("期望 0 个 edge（Subject 不存在），实际 %d", len(edges))
+	}
+}
+
+// TestBuildNodesAndEdges_AllMatch 验证实体和关系都匹配时，所有边正常产生。
+func TestBuildNodesAndEdges_AllMatch(t *testing.T) {
+	ext := refillExtraction{
+		Entities: []refillEntity{
+			{Name: "Alice", EntityType: "person"},
+			{Name: "Acme", EntityType: "organization"},
+		},
+		Relations: []refillRelation{
+			{Subject: "Alice", Predicate: "works_for", Object: "Acme"},
+		},
+	}
+	_, edges := buildNodesAndEdges(ext, []string{"doc-1"})
+	if len(edges) != 1 {
+		t.Fatalf("期望 1 个 edge，实际 %d", len(edges))
+	}
+	if edges[0].Source == "" || edges[0].Target == "" {
+		t.Errorf("Source 和 Target 不应为空: Source=%q Target=%q",
+			edges[0].Source, edges[0].Target)
+	}
+}
+
+// ── 集成测试：使用环境变量配置的真实 LLM ──────────────────────────
+
+// envLLMConfig 从环境变量读取 LLM 配置，仅用于集成测试。
+// 环境变量未设置时返回 nil，测试应跳过。
+func envLLMConfig() *Config {
+	apiKey := os.Getenv("GORAG_API_KEY")
+	baseURL := os.Getenv("GORAG_BASE_URL")
+	model := os.Getenv("GORAG_MODEL")
+	if apiKey == "" || baseURL == "" || model == "" {
+		return nil
+	}
+	return &Config{
+		APIKey:  apiKey,
+		BaseURL: baseURL,
+		Model:   model,
+	}
+}
+
+// TestRefill_WithRealLLM 使用真实 LLM 验证实体提取全流程，
+// 确保 LLM 返回的关系不会引用不存在的实体。
+//
+// 运行条件：GORAG_API_KEY、GORAG_BASE_URL、GORAG_MODEL 三个环境变量必须设置。
+func TestRefill_WithRealLLM(t *testing.T) {
+	cfg := envLLMConfig()
+	if cfg == nil {
+		t.Skip("跳过集成测试：未设置 GORAG_API_KEY / GORAG_BASE_URL / GORAG_MODEL")
+	}
+
+	r, err := NewRefiller(*cfg, logging.DefaultNoopLogger())
+	if err != nil {
+		t.Fatalf("创建 Refiller 失败: %v", err)
+	}
+
+	// 构建带真实内容的 ChunkResult
+	input := chunker.ChunkResult{
+		Chunks: []core.Chunk{
+			{
+				ID:      "c1",
+				Title:   "项目概述",
+				Content: "这是一个基于 Go 语言开发的 RAG 检索增强生成系统。系统支持语义检索和图检索两种索引方式。",
+			},
+			{
+				ID:      "c2",
+				Title:   "架构设计",
+				Content: "系统采用分层架构，包含文档解析层、分块层、向量化层和存储层。向量化使用 Embedder 将文本转为向量。",
+			},
+		},
+	}
+
+	schemas := []EntitySchema{
+		{
+			Type:   "concept",
+			Prompt: "技术概念或术语",
+		},
+		{
+			Type:   "technology",
+			Prompt: "技术栈或框架",
+		},
+	}
+
+	result, err := r.Refill(context.Background(), input, schemas)
+	if err != nil {
+		t.Fatalf("Refill 失败: %v", err)
+	}
+
+	// 验证：所有边的 Source 和 Target 都应能在节点列表中找到
+	nodeIDMap := make(map[string]bool, len(result.Nodes))
+	for _, n := range result.Nodes {
+		nodeIDMap[n.ID] = true
+	}
+	for i, e := range result.Edges {
+		if !nodeIDMap[e.Source] {
+			t.Errorf("Edge[%d] Source=%q 在节点列表中不存在", i, e.Source)
+		}
+		if !nodeIDMap[e.Target] {
+			t.Errorf("Edge[%d] Target=%q 在节点列表中不存在", i, e.Target)
+		}
+	}
+
+	t.Logf("集成测试通过：实体=%d 关系=%d", len(result.Nodes), len(result.Edges))
 }

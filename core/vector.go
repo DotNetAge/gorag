@@ -15,6 +15,8 @@ const (
 	VecMetaRegionID = "region_id" // Chunk.RegionID
 	VecMetaLanguage = "language"  // Chunk.Language
 	VecMetaTags     = "tags"      // Chunk.Tags
+	VecMetaStartLine = "start_line" // Chunk.StartLine
+	VecMetaEndLine   = "end_line"   // Chunk.EndLine
 )
 
 // Vector 向量：Chunk 的向量化表示。

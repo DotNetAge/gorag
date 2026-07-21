@@ -66,7 +66,8 @@ func New(doc document.RawDoc) (Chunker, error) {
 	case document.RawDocData:
 		return &DatumChunker{}, nil
 	default:
-		return nil, fmt.Errorf("chunker.New: unknown RawDocType %q", doc.Type())
+		// 未知类型兜底到 MarkdownChunker（按段落切分）
+		return &MarkdownChunker{}, nil
 	}
 }
 

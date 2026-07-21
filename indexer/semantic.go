@@ -261,15 +261,34 @@ func (s *semanticIndexer) saveOneChunk(ctx context.Context, chunk *core.Chunk) e
 // buildVectorMetadata 与 vectorToChunk 在复制 Metadata 时跳过这些键，
 // 避免顶层字段与 Metadata 中的同名键重复存储。
 var vecMetaKeys = map[string]bool{
-	core.VecMetaContent:  true,
-	core.VecMetaTitle:    true,
-	core.VecMetaSummary:  true,
-	core.VecMetaDocID:    true,
-	core.VecMetaParentID: true,
-	core.VecMetaSource:   true,
-	core.VecMetaRegionID: true,
-	core.VecMetaLanguage: true,
-	core.VecMetaTags:     true,
+	core.VecMetaContent:   true,
+	core.VecMetaTitle:     true,
+	core.VecMetaSummary:   true,
+	core.VecMetaDocID:     true,
+	core.VecMetaParentID:  true,
+	core.VecMetaSource:    true,
+	core.VecMetaRegionID:  true,
+	core.VecMetaLanguage:  true,
+	core.VecMetaTags:      true,
+	core.VecMetaStartLine: true,
+	core.VecMetaEndLine:   true,
+}
+
+// toIntFromMeta 从 VecMeta 元数据中安全提取 int 值。
+// govector 存储整数时为 int64（protobuf），JSON 反序列化后为 float64。
+func toIntFromMeta(v any) int {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case int64:
+		return int(val)
+	case float64:
+		return int(val)
+	case int:
+		return val
+	}
+	return 0
 }
 
 // buildVectorMetadata 从 Chunk 构造 Vector 的 metadata 快照。
@@ -294,6 +313,12 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 	}
 	if len(chunk.Tags) > 0 {
 		m[core.VecMetaTags] = chunk.Tags
+	}
+	if chunk.StartLine > 0 {
+		m[core.VecMetaStartLine] = chunk.StartLine
+	}
+	if chunk.EndLine > 0 {
+		m[core.VecMetaEndLine] = chunk.EndLine
 	}
 	// 复制 Metadata 中的其他扩展属性（跳过已映射到顶层字段的 VecMeta* 键）
 	for k, v := range chunk.Metadata {
@@ -539,6 +564,8 @@ func vectorToChunk(vec *core.Vector) *core.Chunk {
 			}
 		}
 	}
+	chunk.StartLine = toIntFromMeta(vec.Metadata[core.VecMetaStartLine])
+	chunk.EndLine = toIntFromMeta(vec.Metadata[core.VecMetaEndLine])
 	// 复制非 VecMeta 键到 Metadata
 	for k, v := range vec.Metadata {
 		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {

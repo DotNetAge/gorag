@@ -40,29 +40,51 @@ func NewSQLiteStore(dbPath string) (Store, error) {
 	return s, nil
 }
 
-// init 创建 documents 表（若不存在）。
+// init 创建 documents 和 chunk_llm_status 表（若不存在）。
 func (s *sqliteStore) init() error {
-	query := `CREATE TABLE IF NOT EXISTS documents (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		absolute_path TEXT UNIQUE NOT NULL,
-		file_name TEXT NOT NULL DEFAULT '',
-		extension TEXT DEFAULT '',
-		size_bytes INTEGER DEFAULT 0,
-		modified_at TIMESTAMP,
-		content_hash TEXT DEFAULT '',
-		status TEXT NOT NULL DEFAULT '',
-		chunk_ids TEXT DEFAULT '[]',
-		indexed_at TIMESTAMP,
-		error_message TEXT DEFAULT '',
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	)`
-	if _, err := s.db.Exec(query); err != nil {
-		return fmt.Errorf("创建 documents 表失败: %w", err)
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS documents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			absolute_path TEXT UNIQUE NOT NULL,
+			file_name TEXT NOT NULL DEFAULT '',
+			extension TEXT DEFAULT '',
+			size_bytes INTEGER DEFAULT 0,
+			modified_at TIMESTAMP,
+			content_hash TEXT DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			chunk_ids TEXT DEFAULT '[]',
+			indexed_at TIMESTAMP,
+			error_message TEXT DEFAULT '',
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS chunk_llm_status (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			chunk_id TEXT UNIQUE NOT NULL,
+			doc_path TEXT NOT NULL DEFAULT '',
+			doc_id TEXT NOT NULL DEFAULT '',
+			content_hash TEXT NOT NULL DEFAULT '',
+			content_length INTEGER NOT NULL DEFAULT 0,
+			summarized INTEGER NOT NULL DEFAULT 0,
+			last_summarized_at TIMESTAMP,
+			refilled INTEGER NOT NULL DEFAULT 0,
+			last_refilled_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+	for _, q := range queries {
+		if _, err := s.db.Exec(q); err != nil {
+			return fmt.Errorf("创建表失败: %w", err)
+		}
 	}
 	// 创建索引
 	for _, idx := range []string{
 		"CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)",
 		"CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash)",
+		"CREATE INDEX IF NOT EXISTS idx_cls_doc_path ON chunk_llm_status(doc_path)",
+		"CREATE INDEX IF NOT EXISTS idx_cls_chunk_id ON chunk_llm_status(chunk_id)",
+		"CREATE INDEX IF NOT EXISTS idx_cls_summarized ON chunk_llm_status(summarized)",
+		"CREATE INDEX IF NOT EXISTS idx_cls_refilled ON chunk_llm_status(refilled)",
 	} {
 		if _, err := s.db.Exec(idx); err != nil {
 			return fmt.Errorf("创建索引失败: %w", err)
@@ -279,4 +301,252 @@ func extractFileName(absPath string) string {
 		}
 	}
 	return absPath
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ChunkLLMStatus CRUD
+// ═════════════════════════════════════════════════════════════════════
+
+// SaveChunkLLMStatus 实现 Store 接口。按 chunk_id UPSERT。
+func (s *sqliteStore) SaveChunkLLMStatus(status *ChunkLLMStatus) error {
+	if status == nil {
+		return fmt.Errorf("SaveChunkLLMStatus: status 不能为空")
+	}
+	if status.ChunkID == "" {
+		return fmt.Errorf("SaveChunkLLMStatus: ChunkID 不能为空")
+	}
+
+	query := `INSERT INTO chunk_llm_status
+		(chunk_id, doc_path, doc_id, content_hash, content_length,
+		 summarized, last_summarized_at, refilled, last_refilled_at,
+		 updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(chunk_id) DO UPDATE SET
+		doc_path=excluded.doc_path,
+		doc_id=excluded.doc_id,
+		content_hash=excluded.content_hash,
+		content_length=excluded.content_length,
+		summarized=excluded.summarized,
+		last_summarized_at=excluded.last_summarized_at,
+		refilled=excluded.refilled,
+		last_refilled_at=excluded.last_refilled_at,
+		updated_at=CURRENT_TIMESTAMP`
+
+	_, err := s.db.Exec(query,
+		status.ChunkID,
+		status.DocPath,
+		status.DocID,
+		status.ContentHash,
+		status.ContentLength,
+		boolToInt(status.Summarized),
+		status.LastSummarizedAt,
+		boolToInt(status.Refilled),
+		status.LastRefilledAt,
+	)
+	if err != nil {
+		return fmt.Errorf("SaveChunkLLMStatus: 写入失败: %w", err)
+	}
+	return nil
+}
+
+// GetChunkLLMStatus 实现 Store 接口。
+func (s *sqliteStore) GetChunkLLMStatus(chunkID string) (*ChunkLLMStatus, error) {
+	if chunkID == "" {
+		return nil, fmt.Errorf("GetChunkLLMStatus: chunkID 不能为空")
+	}
+	row := s.db.QueryRow(`SELECT
+		id, chunk_id, doc_path, doc_id, content_hash, content_length,
+		summarized, last_summarized_at, refilled, last_refilled_at,
+		created_at, updated_at
+		FROM chunk_llm_status WHERE chunk_id = ?`, chunkID)
+
+	return scanChunkLLMStatus(row)
+}
+
+// GetChunkLLMStatusesByDocPath 实现 Store 接口。
+func (s *sqliteStore) GetChunkLLMStatusesByDocPath(docPath string) ([]*ChunkLLMStatus, error) {
+	if docPath == "" {
+		return nil, fmt.Errorf("GetChunkLLMStatusesByDocPath: docPath 不能为空")
+	}
+	rows, err := s.db.Query(`SELECT
+		id, chunk_id, doc_path, doc_id, content_hash, content_length,
+		summarized, last_summarized_at, refilled, last_refilled_at,
+		created_at, updated_at
+		FROM chunk_llm_status WHERE doc_path = ?`, docPath)
+	if err != nil {
+		return nil, fmt.Errorf("GetChunkLLMStatusesByDocPath: 查询失败: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*ChunkLLMStatus
+	for rows.Next() {
+		s, err := scanChunkLLMStatus(rows)
+		if err != nil {
+			return nil, fmt.Errorf("GetChunkLLMStatusesByDocPath: 扫描失败: %w", err)
+		}
+		results = append(results, s)
+	}
+	return results, rows.Err()
+}
+
+// DeleteChunkLLMStatusByDocPath 实现 Store 接口。
+func (s *sqliteStore) DeleteChunkLLMStatusByDocPath(docPath string) error {
+	if docPath == "" {
+		return fmt.Errorf("DeleteChunkLLMStatusByDocPath: docPath 不能为空")
+	}
+	_, err := s.db.Exec("DELETE FROM chunk_llm_status WHERE doc_path = ?", docPath)
+	if err != nil {
+		return fmt.Errorf("DeleteChunkLLMStatusByDocPath: 删除失败: %w", err)
+	}
+	return nil
+}
+
+// DeleteChunkLLMStatusByChunkID 实现 Store 接口。
+func (s *sqliteStore) DeleteChunkLLMStatusByChunkID(chunkID string) error {
+	if chunkID == "" {
+		return fmt.Errorf("DeleteChunkLLMStatusByChunkID: chunkID 不能为空")
+	}
+	_, err := s.db.Exec("DELETE FROM chunk_llm_status WHERE chunk_id = ?", chunkID)
+	if err != nil {
+		return fmt.Errorf("DeleteChunkLLMStatusByChunkID: 删除失败: %w", err)
+	}
+	return nil
+}
+
+// GetChunksNeedingLLM 实现 Store 接口。
+func (s *sqliteStore) GetChunksNeedingLLM(docPath string, summarized, refilled bool, limit int) ([]*ChunkLLMStatus, error) {
+	// 构建 WHERE 条件：summarized=false OR refilled=false
+	needSummarized := !summarized
+	needRefilled := !refilled
+
+	var conditions []string
+	var args []any
+
+	if docPath != "" {
+		conditions = append(conditions, "doc_path = ?")
+		args = append(args, docPath)
+	}
+
+	var orParts []string
+	if needSummarized {
+		orParts = append(orParts, "summarized = 0")
+	}
+	if needRefilled {
+		orParts = append(orParts, "refilled = 0")
+	}
+	if len(orParts) > 0 {
+		conditions = append(conditions, "("+joinOr(orParts)+")")
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + joinAnd(conditions)
+	}
+
+	query := `SELECT
+		id, chunk_id, doc_path, doc_id, content_hash, content_length,
+		summarized, last_summarized_at, refilled, last_refilled_at,
+		created_at, updated_at
+		FROM chunk_llm_status` + where + ` ORDER BY doc_path, chunk_id`
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("GetChunksNeedingLLM: 查询失败: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*ChunkLLMStatus
+	for rows.Next() {
+		st, err := scanChunkLLMStatus(rows)
+		if err != nil {
+			return nil, fmt.Errorf("GetChunksNeedingLLM: 扫描失败: %w", err)
+		}
+		results = append(results, st)
+	}
+	return results, rows.Err()
+}
+
+// ── ChunkLLMStatus 辅助函数 ───────────────────────────────────────
+
+// scanChunkLLMStatus 从数据库行扫描 ChunkLLMStatus。
+func scanChunkLLMStatus(row scanner) (*ChunkLLMStatus, error) {
+	var (
+		id             int64
+		chunkID        string
+		docPath        string
+		docID          string
+		contentHash    string
+		contentLength  int
+		summarized     int
+		lastSumAt      sql.NullTime
+		refilled       int
+		lastRefAt      sql.NullTime
+		createdAt      time.Time
+		updatedAt      time.Time
+	)
+	err := row.Scan(
+		&id, &chunkID, &docPath, &docID, &contentHash, &contentLength,
+		&summarized, &lastSumAt, &refilled, &lastRefAt,
+		&createdAt, &updatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("扫描 chunk_llm_status 失败: %w", err)
+	}
+	st := &ChunkLLMStatus{
+		ID:            id,
+		ChunkID:       chunkID,
+		DocPath:       docPath,
+		DocID:         docID,
+		ContentHash:   contentHash,
+		ContentLength: contentLength,
+		Summarized:    intToBool(summarized),
+		Refilled:      intToBool(refilled),
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
+	}
+	if lastSumAt.Valid {
+		st.LastSummarizedAt = &lastSumAt.Time
+	}
+	if lastRefAt.Valid {
+		st.LastRefilledAt = &lastRefAt.Time
+	}
+	return st, nil
+}
+
+// boolToInt 将 bool 转换为 sqlite 的 int（0/1）。
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// intToBool 将 sqlite 的 int（0/1）转换为 bool。
+func intToBool(i int) bool {
+	return i != 0
+}
+
+// joinAnd 用 AND 连接条件字符串。
+func joinAnd(parts []string) string {
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += " AND " + parts[i]
+	}
+	return result
+}
+
+// joinOr 用 OR 连接条件字符串。
+func joinOr(parts []string) string {
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += " OR " + parts[i]
+	}
+	return result
 }

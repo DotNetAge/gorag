@@ -185,7 +185,7 @@ func (p Person) Greet() string {
 	for _, c := range chunks {
 		titles[c.Title] = true
 	}
-	for _, expected := range []string{"hello", "add", "Person", "Greet"} {
+	for _, expected := range []string{"func hello()", "func add(a, b int) int", "Person struct", "func (p Person) Greet() string"} {
 		if !titles[expected] {
 			t.Errorf("期望包含符号 %q，实际 chunks 标题集合: %v", expected, titles)
 		}
@@ -195,11 +195,11 @@ func (p Person) Greet() string {
 	for _, c := range chunks {
 		summaryByTitle[c.Title] = c.Summary
 	}
-	if summaryByTitle["hello"] != "hello prints hello message" {
-		t.Errorf("hello 的 Summary 期望 %q，实际 %q", "hello prints hello message", summaryByTitle["hello"])
+	if summaryByTitle["func hello()"] != "hello prints hello message" {
+		t.Errorf("hello 的 Summary 期望 %q，实际 %q", "hello prints hello message", summaryByTitle["func hello()"])
 	}
-	if summaryByTitle["add"] != "add returns a + b" {
-		t.Errorf("add 的 Summary 期望 %q，实际 %q", "add returns a + b", summaryByTitle["add"])
+	if summaryByTitle["func add(a, b int) int"] != "add returns a + b" {
+		t.Errorf("add 的 Summary 期望 %q，实际 %q", "add returns a + b", summaryByTitle["func add(a, b int) int"])
 	}
 	// 验证代码分块同时产出符号 Node/Edge
 	if len(result.Nodes) == 0 {
@@ -246,8 +246,8 @@ func (p Person) Greet() string {
 	}
 	// 验证 Node.Properties 包含 signature/visibility/receiver（使用 core.Prop* 常量）
 	if greetNode, ok := nodeByName["Person.Greet"]; ok {
-		if greetNode.Properties[core.PropSignature] != "func (p Person) Greet() string {" {
-			t.Errorf("Person.Greet Node signature 期望 %q，实际 %q", "func (p Person) Greet() string {", greetNode.Properties[core.PropSignature])
+		if greetNode.Properties[core.PropSignature] != "func (p Person) Greet() string" {
+			t.Errorf("Person.Greet Node signature 期望 %q，实际 %q", "func (p Person) Greet() string", greetNode.Properties[core.PropSignature])
 		}
 		if greetNode.Properties[core.PropVisibility] != "exported" {
 			t.Errorf("Person.Greet Node visibility 期望 exported，实际 %v", greetNode.Properties[core.PropVisibility])
@@ -307,7 +307,7 @@ class Animal:
 	for _, c := range result.Chunks {
 		titles[c.Title] = true
 	}
-	for _, expected := range []string{"greet", "Animal"} {
+	for _, expected := range []string{"def greet(name):", "class Animal:"} {
 		if !titles[expected] {
 			t.Errorf("期望包含符号 %q，实际 chunks 标题集合: %v", expected, titles)
 		}
@@ -319,18 +319,18 @@ class Animal:
 		summaryByTitle[c.Title] = c.Summary
 		chunkByTitle[c.Title] = c
 	}
-	if !strings.Contains(summaryByTitle["greet"], "hello") {
-		t.Errorf("greet 的 Summary 期望包含 hello，实际 %q", summaryByTitle["greet"])
+	if !strings.Contains(summaryByTitle["def greet(name):"], "hello") {
+		t.Errorf("greet 的 Summary 期望包含 hello，实际 %q", summaryByTitle["def greet(name):"])
 	}
 	// 验证 ParentID：类方法在类的字节范围内，ParentID 指向类
-	if chunkByTitle["Animal"].ParentID != "" {
-		t.Errorf("顶层类 Animal 的 ParentID 应为空，实际 %q", chunkByTitle["Animal"].ParentID)
+	if chunkByTitle["class Animal:"].ParentID != "" {
+		t.Errorf("顶层类 Animal 的 ParentID 应为空，实际 %q", chunkByTitle["class Animal:"].ParentID)
 	}
-	if chunkByTitle["__init__"].ParentID != chunkByTitle["Animal"].ID {
-		t.Errorf("__init__ ParentID 期望 %q，实际 %q", chunkByTitle["Animal"].ID, chunkByTitle["__init__"].ParentID)
+	if chunkByTitle["def __init__(self, name):"].ParentID != chunkByTitle["class Animal:"].ID {
+		t.Errorf("__init__ ParentID 期望 %q，实际 %q", chunkByTitle["class Animal:"].ID, chunkByTitle["def __init__(self, name):"].ParentID)
 	}
-	if chunkByTitle["speak"].ParentID != chunkByTitle["Animal"].ID {
-		t.Errorf("speak ParentID 期望 %q，实际 %q", chunkByTitle["Animal"].ID, chunkByTitle["speak"].ParentID)
+	if chunkByTitle["def speak(self):"].ParentID != chunkByTitle["class Animal:"].ID {
+		t.Errorf("speak ParentID 期望 %q，实际 %q", chunkByTitle["class Animal:"].ID, chunkByTitle["def speak(self):"].ParentID)
 	}
 }
 

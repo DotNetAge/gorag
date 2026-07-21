@@ -165,7 +165,7 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	if filePath == "" {
 		return nil, fmt.Errorf("HyperIndexer: 文件路径不能为空")
 	}
-	h.logger.Debug("复合索引器: 开始索引文件", "file", filePath)
+	h.logger.Info("复合索引器: 开始索引文件", "file", filePath)
 
 	// 1. 读文件 + 归一化
 	raw, err := document.Open(filePath)
@@ -210,7 +210,7 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		h.logger.Error("复合索引器: 分块失败", err, "file", filePath)
 		return nil, fmt.Errorf("HyperIndexer: 分块失败: %w", err)
 	}
-	h.logger.Debug("复合索引器: 分块完成",
+	h.logger.Info("复合索引器: 分块完成",
 		"file", filePath,
 		"chunks", len(result.Chunks),
 		"nodes", len(result.Nodes),
@@ -246,7 +246,7 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 			}
 		}
 		if len(toSummarize) > 0 {
-			h.logger.Debug("复合索引器: 调用 Summarizer", "to_summarize", len(toSummarize))
+			h.logger.Info("复合索引器: 调用 Summarizer", "分片数", len(toSummarize))
 			// 优先使用批量模式（通过接口断言检测 SummarizeBatch 方法）
 			var updated []core.Chunk
 			var err error
@@ -271,11 +271,11 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 					}
 				}
 				doc.SetChunks(chunks)
-				h.logger.Debug("复合索引器: Summarizer 完成", "summarized", len(updated))
+				h.logger.Info("复合索引器: Summarizer 完成", "已摘要", len(updated))
 			}
 		} else {
-			h.logger.Debug("复合索引器: 所有分片内容过短，跳过 Summarizer",
-				"min_length", minSummaryContentLength)
+			h.logger.Info("复合索引器: 所有分片内容过短，跳过 Summarizer",
+				"最短长度", minSummaryContentLength)
 		}
 	}
 
@@ -316,9 +316,9 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 				// 将新增的 Nodes/Edges 合并到 doc
 				doc.SetNodes(append(doc.Nodes(), refilled.Nodes...))
 				doc.SetEdges(append(doc.Edges(), refilled.Edges...))
-				h.logger.Debug("复合索引器: Refiller 完成",
-					"nodes", len(refilled.Nodes),
-					"edges", len(refilled.Edges))
+				h.logger.Info("复合索引器: Refiller 完成",
+					"实体数", len(refilled.Nodes),
+					"关系数", len(refilled.Edges))
 			}
 		}
 	}
@@ -331,9 +331,9 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 				h.logger.Warn("复合索引器: 关系线保存失败（不阻塞语义线）",
 					"file", filePath, "error", err.Error())
 			} else {
-				h.logger.Debug("复合索引器: 关系线保存完成",
-					"nodes", len(doc.Nodes()),
-					"edges", len(doc.Edges()))
+				h.logger.Info("复合索引器: 关系线保存完成",
+					"实体数", len(doc.Nodes()),
+					"关系数", len(doc.Edges()))
 			}
 		} else {
 			h.logger.Warn("复合索引器: graph 未实现 IndexerStore，跳过关系线保存")
@@ -354,7 +354,7 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		runOnIndexCompleteHooks(ctx, chunks, h.hooks.onIndexComplete, h.logger)
 	}
 
-	h.logger.Debug("复合索引器: 索引文件完成",
+	h.logger.Info("复合索引器: 索引文件完成",
 		"file", filePath, "chunks", len(chunks))
 	return chunks, nil
 }
@@ -659,19 +659,163 @@ func (h *HyperIndexer) AddSchemas(path string, schemas []llm.EntitySchema) {
 	h.logger.Debug("复合索引器: Schema 注册完成", "path", path, "count", len(schemas))
 }
 
+// SetSummarizer 在运行时注入或替换 Summarizer。
+// 若传入 nil，则禁用 Summarizer 功能。
+func (h *HyperIndexer) SetSummarizer(s llm.Summarizer) {
+	h.summarizer = s
+	if s != nil {
+		h.logger.Info("复合索引器: Summarizer 已注入")
+	} else {
+		h.logger.Info("复合索引器: Summarizer 已移除")
+	}
+}
+
+// SetRefiller 在运行时注入或替换 Refiller。
+// 若传入 nil，则禁用 Refiller 功能。
+func (h *HyperIndexer) SetRefiller(r llm.Refiller) {
+	h.refiller = r
+	if r != nil {
+		h.logger.Info("复合索引器: Refiller 已注入")
+	} else {
+		h.logger.Info("复合索引器: Refiller 已移除")
+	}
+}
+
+// SetLogger 在运行时设置日志记录器。
+func (h *HyperIndexer) SetLogger(logger logging.Logger) {
+	if logger != nil {
+		h.logger = logger
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 多文件实体关系发现
 // ---------------------------------------------------------------------------
 
-// Update 触发多文件实体关系发现。
+// ProcessChunks 对指定分片执行增量 LLM 处理（摘要 + 实体提取）。
 //
-// 遍历所有已索引的实体，执行跨文件关系发现（实体合并、关系推断）。
-// 此方法可能会调用 LLM，也可能仅使用规则匹配（如词汇相似度、共现频率）。
+// 流程：
+//  1. [摘要] 若注入了 Summarizer，对所有内容足够长的分片调用 Summarizer
+//  2. [向量更新] 摘要后的分片重新向量化并写入 VectorStore
+//  3. [实体提取] 若注入了 Refiller + 已注册 Schema，对所有分片调用 Refiller
+//  4. [图更新] 新提取的 Nodes/Edges 写入 GraphStore
 //
-// Update 不是 AddFile 的隐式步骤，需用户或调度器在合适的时机显式触发。
-func (h *HyperIndexer) Update(ctx context.Context) error {
-	h.logger.Info("复合索引器: Update 待实现——多文件实体发现暂未实现")
-	return nil
+// 参数：
+//   - ctx: 上下文
+//   - chunks: 需要处理的分片（必须已从 VectorStore 或其他来源加载完整数据）
+//
+// 返回值：
+//   - processedChunks: 处理后的分片列表（Summary/Title 已更新）
+//   - addedNodes: 新提取的实体节点
+//   - addedEdges: 新提取的关系边
+//   - error: 整体错误（单个阶段失败不阻塞后续阶段，仅记录警告）
+//
+// 典型调用方：IndexingService.Update，从 meta.db 查询需要 LLM 处理的分片，
+// 从 VectorStore 加载完整数据后传给此方法。
+func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (processedChunks []core.Chunk, addedNodes []core.Node, addedEdges []core.Edge, err error) {
+	h.logger.Info("复合索引器: 开始增量 LLM 处理", "chunks", len(chunks))
+	if len(chunks) == 0 {
+		return chunks, nil, nil, nil
+	}
+
+	// 1. [摘要] Summarizer 阶段
+	if h.summarizer != nil {
+		var toSummarize []core.Chunk
+		for _, c := range chunks {
+			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
+				toSummarize = append(toSummarize, c)
+			}
+		}
+		if len(toSummarize) > 0 {
+			h.logger.Info("复合索引器: ProcessChunks 调用 Summarizer", "分片数", len(toSummarize))
+			var result []core.Chunk
+			var sErr error
+			if bs, ok := h.summarizer.(interface {
+				SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
+			}); ok {
+				result, sErr = bs.SummarizeBatch(ctx, toSummarize)
+			} else {
+				result, sErr = h.summarizer.Summarize(ctx, toSummarize)
+			}
+			if sErr != nil {
+				h.logger.Warn("复合索引器: ProcessChunks Summarizer 失败", "error", sErr)
+			} else {
+				// 按 ID 回写到 processedChunks
+				updatedByID := make(map[string]core.Chunk, len(result))
+				for _, u := range result {
+					updatedByID[u.ID] = u
+				}
+				processedChunks = make([]core.Chunk, len(chunks))
+				for i, c := range chunks {
+					if u, ok := updatedByID[c.ID]; ok {
+						processedChunks[i] = u
+					} else {
+						processedChunks[i] = c
+					}
+				}
+				h.logger.Info("复合索引器: ProcessChunks Summarizer 完成", "已摘要", len(result))
+			}
+		}
+	}
+
+	// 2. [向量更新] 将摘要后的分片重新向量化
+	if len(processedChunks) > 0 {
+		if si, ok := h.semantic.(*semanticIndexer); ok {
+			for i := range processedChunks {
+				if err := si.saveOneChunk(ctx, &processedChunks[i]); err != nil {
+					h.logger.Warn("复合索引器: 更新分片向量失败",
+						"chunk_id", processedChunks[i].ID, "error", err)
+				}
+			}
+			h.logger.Info("复合索引器: 向量更新完成", "chunks", len(processedChunks))
+		} else {
+			h.logger.Warn("复合索引器: semantic 不是 *semanticIndexer，无法更新向量")
+		}
+	} else if len(chunks) > 0 {
+		// 没有经过摘要处理，直接使用原始分片
+		processedChunks = make([]core.Chunk, len(chunks))
+		copy(processedChunks, chunks)
+	}
+
+	// 3. [实体提取] Refiller 阶段
+	if h.refiller != nil && len(h.schemasByPath) > 0 {
+		var schemas []llm.EntitySchema
+		for _, ss := range h.schemasByPath {
+			schemas = append(schemas, ss...)
+		}
+		if len(schemas) > 0 {
+			result := chunker.ChunkResult{Chunks: chunks}
+			refilled, rErr := h.refiller.Refill(ctx, result, schemas)
+			if rErr != nil {
+				h.logger.Warn("复合索引器: ProcessChunks Refiller 失败", "error", rErr)
+			} else {
+				addedNodes = refilled.Nodes
+				addedEdges = refilled.Edges
+				h.logger.Info("复合索引器: ProcessChunks Refiller 完成",
+					"实体数", len(addedNodes), "关系数", len(addedEdges))
+			}
+		}
+	}
+
+	// 4. [图更新] 将新实体/关系写入 GraphStore
+	if h.graph != nil && (len(addedNodes) > 0 || len(addedEdges) > 0) {
+		doc := core.NewStructuredDocFromParts(addedNodes, addedEdges)
+		if store, ok := h.graph.(IndexerStore); ok {
+			if gErr := store.Save(ctx, doc); gErr != nil {
+				h.logger.Warn("复合索引器: ProcessChunks 图保存失败", "error", gErr)
+			} else {
+				h.logger.Info("复合索引器: ProcessChunks 图更新完成",
+					"实体数", len(addedNodes), "关系数", len(addedEdges))
+			}
+		}
+	}
+
+	h.logger.Info("复合索引器: 增量 LLM 处理完成",
+		"总分片", len(chunks),
+		"已摘要", len(processedChunks),
+		"实体数", len(addedNodes),
+		"关系数", len(addedEdges))
+	return
 }
 
 // ---------------------------------------------------------------------------

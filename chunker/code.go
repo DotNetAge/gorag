@@ -354,10 +354,8 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	ext := strings.ToLower(filepath.Ext(doc.FileName()))
 	spec, ok := codeLangRegistry[ext]
 	if !ok {
-		// 未注册语言：走纯文本兜底
-		chunks := c.chunkPlainText(doc, content)
-		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		// 非代码文件：委托给 MarkdownChunker
+		return (&MarkdownChunker{}).Chunk(doc)
 	}
 
 	// 1. 用 tree-sitter 解析代码
@@ -367,20 +365,16 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	ctx := context.Background()
 	tree, err := parser.ParseCtx(ctx, nil, src)
 	if err != nil || tree == nil {
-		// 解析失败：走纯文本兜底
-		chunks := c.chunkPlainText(doc, content)
-		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		// 解析失败：委托给 MarkdownChunker
+		return (&MarkdownChunker{}).Chunk(doc)
 	}
 	defer tree.Close()
 
 	// 2. 构造 Query
 	q, err := sitter.NewQuery([]byte(spec.query), spec.lang)
 	if err != nil {
-		// Query 构造失败：走纯文本兜底
-		chunks := c.chunkPlainText(doc, content)
-		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		// Query 构造失败：委托给 MarkdownChunker
+		return (&MarkdownChunker{}).Chunk(doc)
 	}
 	defer q.Close()
 
@@ -491,6 +485,9 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		}
 
 		title := sym.name
+		if sym.signature != "" {
+			title = sym.signature
+		}
 		if title == "" {
 			title = deriveTitle(doc.FileName())
 		}
@@ -509,11 +506,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		parent := parentStack[len(parentStack)-1]
 
 		chunk := buildChunk(doc, len(chunks), start, end, title, body)
-		if sym.summary != "" {
-			chunk.Summary = sym.summary
-		} else {
-			chunk.Summary = deriveSummary(body, 1)
-		}
+		chunk.Summary = sym.summary
 		if chunk.Metadata == nil {
 			chunk.Metadata = map[string]any{}
 		}
@@ -1336,7 +1329,11 @@ func extractPackageName(fileName, content string) string {
 // extractSymbolSignature 提取符号定义的第一行作为签名。
 func extractSymbolSignature(content string, sym codeSymbol) string {
 	body := content[sym.start:sym.end]
-	return firstNonEmptyLine(body)
+	sig := firstNonEmptyLine(body)
+	// 去除定义行末尾的 {（Go、C、Java 等语言函数/结构体定义末尾的 {）
+	sig = strings.TrimRight(sig, "{ \t")
+	sig = strings.TrimSpace(sig)
+	return sig
 }
 
 // extractSymbolVisibility 根据语言特征推断符号可见性。
@@ -1570,76 +1567,4 @@ func firstNonEmptyLine(text string) string {
 		return line
 	}
 	return ""
-}
-
-// chunkPlainText 纯文本兜底：按段落（空行）切分，每块不超过 codeMaxChunkSize 字符。
-func (c *CodeChunker) chunkPlainText(doc document.RawDoc, content string) []core.Chunk {
-	paragraphs := strings.Split(content, "\n\n")
-	var chunks []core.Chunk
-	var buf strings.Builder
-	var startByte = 0
-	var paraIdx = 0
-	var paraStart = 0
-
-	flush := func(endByte int) {
-		if buf.Len() == 0 {
-			return
-		}
-		title := deriveTitle(doc.FileName())
-		if paraIdx-1 > paraStart {
-			title = title + " (段落 " + itoa(paraStart) + "-" + itoa(paraIdx-1) + ")"
-		} else {
-			title = title + " (段落 " + itoa(paraStart) + ")"
-		}
-		body := strings.TrimRight(buf.String(), "\n")
-		chunks = append(chunks, buildChunk(doc, len(chunks), startByte, endByte, title, body))
-		buf.Reset()
-		startByte = endByte
-		paraStart = paraIdx
-	}
-
-	curByte := 0
-	for _, p := range paragraphs {
-		paraLen := len(p) + 2 // +2 for \n\n
-		if buf.Len() > 0 && buf.Len()+paraLen > codeMaxChunkSize {
-			flush(curByte)
-		}
-		if buf.Len() == 0 {
-			paraStart = paraIdx
-			startByte = curByte
-		}
-		if buf.Len() > 0 {
-			buf.WriteString("\n\n")
-		}
-		buf.WriteString(p)
-		paraIdx++
-		curByte += paraLen
-	}
-	flush(curByte)
-
-	if len(chunks) == 0 {
-		title := deriveTitle(doc.FileName())
-		chunks = append(chunks, buildChunk(doc, 0, 0, len(content), title, content))
-	}
-	return chunks
-}
-
-// itoa 简易整数转字符串（避免引入 strconv 仅用于一处）。
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if negative {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
 }

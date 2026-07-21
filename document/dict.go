@@ -5,9 +5,9 @@ package document
 // 基于扩展名查找解析器；未知扩展名兜底到 ParseText。
 //
 // 归一化策略：
-//   - 文档类（pdf/docx/html/epub/pptx）→ Markdown
+//   - 文档类（pdf/docx/html/epub/pptx/md）→ Markdown
 //   - 数据类（csv/xlsx/json/yaml/xml/eml/msg/toml/log）→ JSON
-//   - 文本类（txt/代码/md 等）→ 原文
+//   - 文本类（txt/代码等）→ 原文
 //   - 图片类（jpg/png/gif/webp/bmp/tiff）→ Base64
 var funcDict = map[string]ParseFunc{
 	// 文档类 → Markdown
@@ -19,6 +19,8 @@ var funcDict = map[string]ParseFunc{
 	".html": ParseHTML,
 	".htm":  ParseHTML,
 	".epub": ParseEPUB,
+	".md":   ParseMarkdown,
+	".markdown": ParseMarkdown,
 
 	// 数据类 → JSON
 	".csv":  ParseCSV,

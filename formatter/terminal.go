@@ -125,27 +125,14 @@ func (f *TerminalFormatter) formatChunk(idx int, ch core.ChunkHit) string {
 		sb.WriteString(Reset)
 	}
 
-	// 分数
-	if f.config.ShowScore {
-		sb.WriteString(f.config.ScoreColor)
-		fmt.Fprintf(&sb, "[%.4f]", ch.Score)
-		sb.WriteString(Reset)
-		sb.WriteString(" ")
+	// 来源文件和行号
+	sb.WriteString(f.config.MetaColor)
+	fmt.Fprintf(&sb, "[%s]", ch.Source)
+	if ch.StartLine > 0 || ch.EndLine > 0 {
+		fmt.Fprintf(&sb, " [L%d-L%d]", ch.StartLine, ch.EndLine)
 	}
-
-	// 元数据
-	var meta []string
-	if f.config.ShowDocID && ch.DocID != "" {
-		meta = append(meta, fmt.Sprintf("doc:%s", ch.ID))
-	}
-	if len(meta) > 0 {
-		sb.WriteString(f.config.MetaColor)
-		sb.WriteString("(")
-		sb.WriteString(strings.Join(meta, ", "))
-		sb.WriteString(")")
-		sb.WriteString(Reset)
-		sb.WriteString("\n")
-	}
+	sb.WriteString(Reset)
+	sb.WriteString("\n")
 
 	// 内容
 	sb.WriteString(f.config.ContentColor)

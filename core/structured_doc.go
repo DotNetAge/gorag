@@ -72,3 +72,12 @@ func Structurize(raw document.RawDoc) (StructuredDoc, error) {
 	}
 	return &baseStructuredDoc{raw: raw}, nil
 }
+
+// NewStructuredDocFromParts 从节点和边直接创建结构化文档容器。
+// 用于 ProcessChunks 增量更新场景，无需 RawDoc 和 Chunks。
+func NewStructuredDocFromParts(nodes []Node, edges []Edge) StructuredDoc {
+	return &baseStructuredDoc{
+		nodes: nodes,
+		edges: edges,
+	}
+}

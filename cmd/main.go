@@ -10,6 +10,9 @@ import (
 	gorag "github.com/DotNetAge/gorag/v2"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/formatter"
+	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/llm"
+	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/utils"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +32,12 @@ var (
 	initModel     string
 	initModelID   string
 	initModelFile string
+
+	// update 命令参数（LLM + Schema）
+	updateLLMKey   string
+	updateLLMURL   string
+	updateLLMModel string
+	updateSchema   string
 )
 
 var ui = NewUI()
@@ -55,7 +64,7 @@ func main() {
 		Short: "在当前目录创建 .rag 库",
 		Long: `初始化一个新的 RAG 库，创建目录结构和配置文件。
 
-在当前目录下创建 ./<basename>.rag，basename 取当前目录名。
+在当前目录下创建 .rag 作为 RAG 库目录。
 
 支持的索引器类型:
   - semantic: 语义向量索引（默认）
@@ -80,10 +89,12 @@ func main() {
 	// index 子命令
 	var indexCmd = &cobra.Command{
 		Use:   "index [dest_path]",
-		Short: "索引文件或目录",
-		Long: `对当前目录或指定目录/文件执行索引。
+		Short: "索引文件或目录（快路径，无 LLM）",
+		Long: `对当前目录或指定目录/文件执行基础索引（扫描、分块、向量化）。
 
 .rag 文件必须在当前工作目录（自动检测）。
+
+此命令不调用 LLM，仅做基础索引。LLM 增强（摘要、实体提取）请使用 update 命令。
 
 示例:
   grag index                  # 索引当前目录
@@ -140,17 +151,34 @@ func main() {
 	// update 子命令
 	updateCmd := &cobra.Command{
 		Use:   "update [dest_path]",
-		Short: "更新 RAG 库的实体关系",
-		Long: `对已索引的文档执行跨文件实体关系发现与重建。
+		Short: "增量更新：重新索引 + LLM 增强（摘要 + 实体提取）",
+		Long: `双阶段增量更新，自动处理文件变更并可选执行 LLM 增强。
+
+第一阶段：检测文件系统变更，对变更文件重新分块 + 向量化（同 index 快路径）
+第二阶段：对需要 LLM 处理的分片执行摘要生成和实体关系提取
 
 .rag 文件必须在当前工作目录（自动检测）。
 
+LLM 参数可选。不传时只执行第一阶段（等效于 index + 增量检测）。
+传入 LLM 参数时执行完整的双阶段流程。
+
+LLM 参数:
+  --llm-key        API Key（支持 GORAG_API_KEY 环境变量）
+  --llm-url        LLM Base URL
+  --llm-model      LLM 模型名
+  --schema         实体 Schema 目录（目录下所有 .json 文件加载为 EntitySchema）
+
 示例:
-  grag update
-  grag update ./docs/`,
+  grag update                                              # 只做重新索引
+  grag update --llm-key sk-xxx --llm-url https://... --llm-model gpt-4o    # 完整双阶段
+  grag update --schema ./schemas/                          # 重新索引 + Schema 准备（下次有 LLM 时可用）`,
 		Args: cobra.MaximumNArgs(1),
 		Run:  runUpdate,
 	}
+	updateCmd.Flags().StringVarP(&updateLLMKey, "llm-key", "", "", "API Key（支持 GORAG_API_KEY 环境变量）")
+	updateCmd.Flags().StringVarP(&updateLLMURL, "llm-url", "", "", "LLM Base URL")
+	updateCmd.Flags().StringVarP(&updateLLMModel, "llm-model", "", "", "LLM 模型名")
+	updateCmd.Flags().StringVarP(&updateSchema, "schema", "", "", "实体 Schema 目录（目录下所有 .json 文件）")
 
 	// tree 子命令
 	treeCmd := &cobra.Command{
@@ -211,8 +239,7 @@ func runInit(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	basename := filepath.Base(cwd)
-	ragDir := filepath.Join(cwd, basename+".rag")
+	ragDir := filepath.Join(cwd, ".rag")
 
 	ui.Title("grag 初始化")
 
@@ -293,23 +320,28 @@ func runIndex(cmd *cobra.Command, args []string) {
 	ui.KeyValue("RAG 库", ragDir)
 	ui.KeyValue("目标", absTarget)
 
-	svc, err := gorag.NewRAGService(ragDir)
+	// 创建控制台日志器（实时输出到屏幕）
+	consoleLogger := logging.DefaultConsoleLogger()
+
+	// 创建索引服务
+	svc, err := gorag.NewRAGService(ragDir, gorag.WithLogger(consoleLogger))
 	if err != nil {
 		ui.Error("创建索引服务失败: %v", err)
 		os.Exit(1)
 	}
 	defer svc.Stop()
 
-	spinner := ui.NewSpinner("正在索引...")
-	spinner.Start()
+	// 将控制台日志器注入到 HyperIndexer
+	if hyper, ok := svc.Indexer().(*indexer.HyperIndexer); ok {
+		hyper.SetLogger(consoleLogger)
+	}
 
+	// 执行索引（快路径：无 LLM）
+	consoleLogger.Info("开始批量索引", "target", absTarget)
 	if err := svc.Index(context.Background(), absTarget); err != nil {
-		spinner.Stop()
 		ui.Error("索引失败: %v", err)
 		os.Exit(1)
 	}
-
-	spinner.Stop()
 	ui.Success("索引完成")
 }
 
@@ -446,18 +478,125 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	ui.Title("更新实体关系")
+	ui.Title("增量 LLM 处理")
 	ui.KeyValue("RAG 库", ragDir)
 	ui.KeyValue("目标", absTarget)
 
-	svc, err := gorag.NewRAGService(ragDir)
+	// 1. 加载配置
+	cfg, _ := gorag.LoadConfig(ragDir)
+
+	// 2. 持久化 LLM 配置到 .rag 库
+	hasLLMFlag := false
+	configUpdated := false
+
+	if updateLLMKey != "" {
+		hasLLMFlag = true
+		if err := gorag.WriteAPIKey(ragDir, updateLLMKey); err != nil {
+			ui.Warning("写入 API Key 失败: %v", err)
+		}
+	}
+
+	if updateLLMURL != "" {
+		hasLLMFlag = true
+		cfg.LLM.BaseURL = updateLLMURL
+		configUpdated = true
+	}
+
+	if updateLLMModel != "" {
+		hasLLMFlag = true
+		cfg.LLM.Model = updateLLMModel
+		configUpdated = true
+	}
+
+	if hasLLMFlag {
+		if cfg.LLM.Language == "" {
+			cfg.LLM.Language = "Chinese"
+			configUpdated = true
+		}
+		if configUpdated {
+			if err := gorag.SaveConfig(ragDir, cfg); err != nil {
+				ui.Warning("保存 LLM 配置失败: %v", err)
+			}
+		}
+	}
+
+	// 3. 创建日志器和索引服务
+	consoleLogger := logging.DefaultConsoleLogger()
+
+	svc, err := gorag.NewRAGService(ragDir, gorag.WithLogger(consoleLogger))
 	if err != nil {
 		ui.Error("打开 RAG 库失败: %v", err)
 		os.Exit(1)
 	}
 	defer svc.Stop()
 
-	spinner := ui.NewSpinner("正在更新...")
+	// 4. 确定 API Key
+	var apiKey string
+	if updateLLMKey != "" {
+		apiKey = updateLLMKey
+	} else {
+		if k, err := gorag.ResolveAPIKey(ragDir); err == nil {
+			apiKey = k
+		}
+	}
+
+	// 5. 确定 LLM 配置
+	llmBaseURL := updateLLMURL
+	llmModel := updateLLMModel
+	if llmBaseURL == "" {
+		llmBaseURL = cfg.LLM.BaseURL
+	}
+	if llmModel == "" {
+		llmModel = cfg.LLM.Model
+	}
+
+	hasLLM := apiKey != "" && llmBaseURL != "" && llmModel != ""
+
+	if hasLLM {
+		llmCfg := llm.Config{
+			APIKey:  apiKey,
+			BaseURL: llmBaseURL,
+			Model:   llmModel,
+		}
+
+		// 5a. 注入 Summarizer
+		summarizer, sErr := llm.NewSummarizer(llmCfg, consoleLogger)
+		if sErr != nil {
+			ui.Warning("创建 Summarizer 失败: %v", sErr)
+		} else if hyper, ok := svc.Indexer().(*indexer.HyperIndexer); ok {
+			hyper.SetSummarizer(summarizer)
+			hyper.SetLogger(consoleLogger)
+			consoleLogger.Info("Summarizer 已注入", "model", llmModel)
+		}
+
+		// 5b. 注入 Refiller + Schema
+		refiller, rErr := llm.NewRefiller(llmCfg, consoleLogger)
+		if rErr != nil {
+			ui.Warning("创建 Refiller 失败: %v", rErr)
+		} else if hyper, ok := svc.Indexer().(*indexer.HyperIndexer); ok {
+			hyper.SetRefiller(refiller)
+			consoleLogger.Info("Refiller 已注入", "model", llmModel)
+
+			if updateSchema != "" {
+				schemas, schErr := llm.LoadEntitySchemasFromDir(updateSchema)
+				if schErr != nil {
+					ui.Warning("加载 Schema 失败: %v", schErr)
+				} else {
+					hyper.AddSchemas(updateSchema, schemas)
+					consoleLogger.Info("Schema 已加载", "文件数", len(schemas), "目录", updateSchema)
+				}
+			}
+		}
+
+		ui.Info("包含 LLM 增强：将执行摘要 + 实体提取")
+	} else {
+		ui.Warning("LLM 未配置，仅执行重新索引（跳过摘要 + 实体提取）")
+		ui.Info("提示：可通过 --llm-key/--llm-url/--llm-model 参数启用 LLM 增强")
+	}
+
+	// 6. 执行 update
+	ui.Info("正在执行增量更新（重新索引 → LLM 增强）...")
+	spinner := ui.NewSpinner("正在处理...")
 	spinner.Start()
 
 	if err := svc.Update(context.Background(), absTarget); err != nil {
@@ -467,7 +606,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	}
 
 	spinner.Stop()
-	ui.Success("更新完成")
+	ui.Success("增量更新完成")
 }
 
 // ── tree ─────────────────────────────────────────────────────────
@@ -478,8 +617,6 @@ func runTree(cmd *cobra.Command, args []string) {
 		ui.Error("%v", err)
 		os.Exit(1)
 	}
-
-	ui.Title("目录树")
 
 	svc, err := gorag.NewRAGService(ragDir)
 	if err != nil {
@@ -492,6 +629,12 @@ func runTree(cmd *cobra.Command, args []string) {
 	if err != nil {
 		ui.Error("构建目录树失败: %v", err)
 		os.Exit(1)
+	}
+
+	// 以项目根目录为树根，不显示上方无关的全路径
+	projectRoot := filepath.Dir(ragDir)
+	if trimmed := trimTreeToRoot(root, projectRoot); trimmed != nil {
+		root = trimmed
 	}
 
 	renderTree(root, "")
@@ -533,45 +676,35 @@ func renderTree(node *gorag.SourceTreeNode, prefix string) {
 			branch = "└── "
 			connector = "    "
 		}
-		renderChunkNode(chunk, prefix+branch, prefix+connector, true)
+		renderChunkNode(chunk, prefix+branch, prefix+connector)
 	}
 }
 
 // renderFileNode 渲染文件节点及 Chunk 子树。
 func renderFileNode(node *gorag.SourceTreeNode, prefix, branch, connector string, isLast bool) {
-	if len(node.Chunks) == 0 {
-		fmt.Printf("%s%s%s  [size:%s]\n", prefix, branch, node.Path, formatBytes(node.Size))
-		return
-	}
-
-	// 渲染第一个 Chunk 与文件名同一行
-	first := node.Chunks[0]
+	// 文件节点：只显示文件名
 	if isLast {
 		branch = "└── "
 		connector = "    "
 	}
+	fmt.Printf("%s%s%s  [size:%s]\n", prefix, branch, filepath.Base(node.Path), formatBytes(node.Size))
 
-	fmt.Printf("%s%s[%s] %s - %s\n", prefix, branch, first.Type, first.Title, first.Summary)
-	fmt.Printf("%s%s%s  [size:%s]\n", prefix+connector, connector, node.Path, formatBytes(node.Size))
-
-	// 渲染第一个 Chunk 的子块
-	renderChunkChildren(first, prefix+connector+connector)
-
-	// 渲染其余 Chunk
-	for i := 1; i < len(node.Chunks); i++ {
+	// Chunk 子树相对于文件节点缩进
+	childPrefix := prefix + connector
+	for i, chunk := range node.Chunks {
 		chunkBranch := "├── "
 		chunkConn := "│   "
 		if i == len(node.Chunks)-1 {
 			chunkBranch = "└── "
 			chunkConn = "    "
 		}
-		renderChunkNode(node.Chunks[i], prefix+connector+chunkBranch, prefix+connector+chunkConn, false)
+		renderChunkNode(chunk, childPrefix+chunkBranch, childPrefix+chunkConn)
 	}
 }
 
 // renderChunkNode 渲染单个 Chunk 节点。
-func renderChunkNode(node gorag.SourceChunkNode, branch, connector string, showSource bool) {
-	fmt.Printf("%s[%s] %s - %s\n", branch, node.Type, node.Title, node.Summary)
+func renderChunkNode(node gorag.SourceChunkNode, branch, connector string) {
+	fmt.Printf("%s%s\n", branch, formatChunkLine(node.Title, node.Summary, node.StartLine, node.EndLine))
 	renderChunkChildren(node, connector)
 }
 
@@ -585,9 +718,21 @@ func renderChunkChildren(node gorag.SourceChunkNode, prefix string) {
 			branch = "└── "
 			connector = "    "
 		}
-		fmt.Printf("%s%s[%s] %s - %s\n", prefix+branch, "", child.Type, child.Title, child.Summary)
+		fmt.Printf("%s%s%s\n", prefix+branch, "", formatChunkLine(child.Title, child.Summary, child.StartLine, child.EndLine))
 		renderChunkChildren(child, prefix+connector)
 	}
+}
+
+// formatChunkLine 格式化 Chunk 行：[Lstart-Lend] Title [- Summary]
+func formatChunkLine(title, summary string, startLine, endLine int) string {
+	pos := formatPos(startLine, endLine)
+	title = strings.ReplaceAll(title, "\n", " ")
+	summary = strings.ReplaceAll(summary, "\n", " ")
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return fmt.Sprintf("%s %s", pos, title)
+	}
+	return fmt.Sprintf("%s %s - %s", pos, title, summary)
 }
 
 // sortTreeChildren 对子节点排序：目录在前，文件在后，各自按名排序。
@@ -612,6 +757,30 @@ func sortTreeChildren(children []*gorag.SourceTreeNode) []*gorag.SourceTreeNode 
 	return sorted
 }
 
+// trimTreeToRoot 从树根向下找到指定路径的节点，作为新的渲染根。
+// 用于去掉绝对路径前缀，只显示项目根目录以下的目录树。
+func trimTreeToRoot(root *gorag.SourceTreeNode, absPath string) *gorag.SourceTreeNode {
+	parts := strings.Split(absPath, string(filepath.Separator))
+	current := root
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		found := false
+		for _, child := range current.Children {
+			if child.IsDir && child.Name == part {
+				current = child
+				found = true
+				break
+			}
+		}
+		if !found {
+			return root
+		}
+	}
+	return current
+}
+
 // ── 工具函数 ──────────────────────────────────────────────────────
 
 func formatOutput(hit *core.Hit) string {
@@ -630,4 +799,12 @@ func formatOutput(hit *core.Hit) string {
 			formatter.WithContentMax(contentMax),
 		).FormatAll(hit)
 	}
+}
+
+// formatPos 将行号格式化为 [Lstart-Lend]，行号都为 0 时返回空字符串。
+func formatPos(start, end int) string {
+	if start == 0 && end == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  [L%d-L%d]", start, end)
 }

@@ -73,10 +73,10 @@ func (r *gochatRefiller) Refill(ctx context.Context, result chunker.ChunkResult,
 		return result, fmt.Errorf("llm.Refiller: 序列化分块失败: %w", err)
 	}
 
-	resp, err := r.client.Chat(ctx, []chat.Message{
+	resp, err := timedChat(ctx, r.client, []chat.Message{
 		chat.NewSystemMessage(r.buildSystemPrompt(schemas)),
 		chat.NewUserMessage(r.buildUserPrompt(content)),
-	})
+	}, r.logger, "Refiller")
 	if err != nil {
 		return result, fmt.Errorf("llm.Refiller: LLM 调用失败: %w", err)
 	}
@@ -238,11 +238,19 @@ func buildNodesAndEdges(ext refillExtraction, docIDs []string) ([]core.Node, []c
 		if rel.Subject == "" || rel.Predicate == "" || rel.Object == "" {
 			continue
 		}
+		sourceID, sourceOK := nodeIDByName[rel.Subject]
+		targetID, targetOK := nodeIDByName[rel.Object]
+		if !sourceOK {
+			continue
+		}
+		if !targetOK {
+			continue
+		}
 		edges = append(edges, core.Edge{
 			ID:           utils.GenerateID([]byte(rel.Subject + ":" + rel.Predicate + ":" + rel.Object)),
 			Type:         rel.Predicate,
-			Source:       nodeIDByName[rel.Subject],
-			Target:       nodeIDByName[rel.Object],
+			Source:       sourceID,
+			Target:       targetID,
 			SourceDocIDs: docIDs,
 		})
 	}

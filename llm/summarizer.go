@@ -94,10 +94,10 @@ type summarizeResult struct {
 
 // summarizeOne 对单段内容调用 LLM，返回 (title, summary, error)。
 func (s *gochatSummarizer) summarizeOne(ctx context.Context, content string) (string, string, error) {
-	resp, err := s.client.Chat(ctx, []chat.Message{
+	resp, err := timedChat(ctx, s.client, []chat.Message{
 		chat.NewSystemMessage(s.buildSystemPrompt()),
 		chat.NewUserMessage(content),
-	})
+	}, s.logger, "Summarizer(单条)")
 	if err != nil {
 		return "", "", fmt.Errorf("LLM 调用失败: %w", err)
 	}
@@ -171,11 +171,11 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 	if err != nil {
 		return chunks, fmt.Errorf("SummarizeBatch: 序列化分块失败: %w", err)
 	}
-	// 2. 一次 LLM 调用
-	resp, err := s.client.Chat(ctx, []chat.Message{
+	// 2. 一次 LLM 调用（带耗时统计）
+	resp, err := timedChat(ctx, s.client, []chat.Message{
 		chat.NewSystemMessage(s.buildBatchSystemPrompt()),
 		chat.NewUserMessage(string(input)),
-	})
+	}, s.logger, "Summarizer(批量)")
 	if err != nil {
 		return chunks, fmt.Errorf("SummarizeBatch: LLM 调用失败: %w", err)
 	}

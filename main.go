@@ -197,6 +197,11 @@ const defaultRagignoreContent = `# 敏感信息
 # 运行时锁文件
 .lock
 
+# 版本控制
+.git/
+.svn/
+.hg/
+
 # 数据库（体积大，不入版本控制）
 vectors/
 graphs/
@@ -206,6 +211,24 @@ meta.db-shm
 
 # 日志
 logs/
+
+# 依赖和构建产物
+node_modules/
+vendor/
+dist/
+build/
+target/
+.next/
+.turbo/
+.cache/
+__pycache__/
+**.pyc
+
+# 备份和临时文件
+.backup/
+.DS_Store
+*.swp
+*.swo
 `
 
 // Open 打开已存在的 .rag 库。

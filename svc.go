@@ -228,11 +228,20 @@ func NewRAGService(dataDir string, opts ...ServiceOption) (*IndexingService, err
 	return svc, nil
 }
 
-// Index 对指定路径执行批量索引。
+// Indexer 返回底层索引器实例。
+func (s *IndexingService) Indexer() indexer.Indexer {
+	return s.indexer
+}
+
+// reindexChangedFiles 对指定路径执行增量重新索引（扫描、分块、向量化）。
+//
+// 复用 Index 的核心扫描 + worker pool 逻辑，但不加锁（调用方负责上锁）。
+// 用于 Index 和 Update 双阶段流程的第一阶段。
+//
 // targetPath 可以是文件或目录。
-func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *IndexingService) reindexChangedFiles(ctx context.Context, targetPath string) error {
+	// 0. 加载 .ragignore 规则
+	ragignore := loadRagignore(s.dataDir)
 
 	// 1. 扫描文件
 	var files []string
@@ -241,7 +250,7 @@ func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
 		return fmt.Errorf("无法访问目标路径: %w", err)
 	}
 	if info.IsDir() {
-		files, err = scanDir(targetPath)
+		files, err = scanDir(targetPath, ragignore)
 	} else {
 		if isTextFile(targetPath) {
 			files = append(files, targetPath)
@@ -256,7 +265,7 @@ func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
 		return nil
 	}
 
-	s.logger.Info("开始批量索引", "target", targetPath, "files", len(files))
+	s.logger.Info("开始重新索引变更的文件", "target", targetPath, "files", len(files))
 
 	// 2. 使用 worker pool 并发索引
 	workerCount := 4
@@ -289,12 +298,20 @@ func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
 		}
 	}
 
-	s.logger.Info("批量索引完成",
+	s.logger.Info("重新索引完成",
 		"total", len(files),
 		"failed", failedCount,
 		"success", len(files)-failedCount)
 
 	return nil
+}
+
+// Index 对指定路径执行批量索引（快路径，无 LLM）。
+// targetPath 可以是文件或目录。
+func (s *IndexingService) Index(ctx context.Context, targetPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reindexChangedFiles(ctx, targetPath)
 }
 
 // indexResult 索引结果
@@ -394,6 +411,21 @@ func (s *IndexingService) processFile(ctx context.Context, absPath string) ([]*c
 		s.logger.Warn("保存元数据失败", "path", absPath, "error", err)
 	}
 
+	// 6. 写入 chunk_llm_status（初始状态：未摘要、未实体提取）
+	for _, c := range chunks {
+		if err := s.metaStore.SaveChunkLLMStatus(&meta.ChunkLLMStatus{
+			ChunkID:       c.ID,
+			DocPath:       absPath,
+			DocID:         c.DocID,
+			ContentHash:   computeChunkContentHash(c.Content),
+			ContentLength: len(c.Content),
+			Summarized:    false,
+			Refilled:      false,
+		}); err != nil {
+			s.logger.Warn("保存 chunk_llm_status 失败", "chunk_id", c.ID, "error", err)
+		}
+	}
+
 	return chunks, nil
 }
 
@@ -409,8 +441,8 @@ func (s *IndexingService) recordFailure(absPath, contentHash string, err error) 
 	}
 }
 
-// scanDir 扫描目录下的所有文本文件。
-func scanDir(dir string) ([]string, error) {
+// scanDir 扫描目录下的所有文本文件，跳过 .ragignore 匹配的目录。
+func scanDir(dir string, ragignore []string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -421,6 +453,10 @@ func scanDir(dir string) ([]string, error) {
 			if strings.HasSuffix(path, ".rag") {
 				return filepath.SkipDir
 			}
+			// 跳过 .ragignore 匹配的目录
+			if matchRagignoreDir(path, dir, ragignore) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if isTextFile(path) {
@@ -429,6 +465,61 @@ func scanDir(dir string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+// loadRagignore 从 .rag 目录加载 .ragignore 忽略规则。
+// 返回非空、非注释的规则行列表。文件不存在时返回空切片。
+func loadRagignore(ragDir string) []string {
+	data, err := os.ReadFile(filepath.Join(ragDir, ".ragignore"))
+	if err != nil {
+		return nil
+	}
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+	return patterns
+}
+
+// matchRagignoreDir 判断目录是否匹配任一 .ragignore 规则。
+// 规则支持目录匹配（尾随 /）和文件名匹配。
+func matchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
+	rel, err := filepath.Rel(scanRoot, dirPath)
+	if err != nil {
+		return false
+	}
+	dirName := filepath.Base(dirPath)
+	for _, pattern := range patterns {
+		// 通配符规则：**.pyc → 检查是否以 .pyc 结尾
+		if strings.HasPrefix(pattern, "**.") {
+			suffix := strings.TrimPrefix(pattern, "**")
+			if strings.HasSuffix(dirName, suffix) {
+				return true
+			}
+			if strings.HasSuffix(rel, suffix) {
+				return true
+			}
+			continue
+		}
+		// *.swp, *.swo 等通配符
+		if strings.HasPrefix(pattern, "*.") {
+			suffix := strings.TrimPrefix(pattern, "*")
+			if strings.HasSuffix(dirName, suffix) {
+				return true
+			}
+			continue
+		}
+		cleanPattern := strings.TrimSuffix(pattern, "/")
+		// 路径中的任意一级匹配
+		if strings.HasPrefix(rel, cleanPattern) || strings.Contains("/"+rel+"/", "/"+cleanPattern+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // isTextFile 判断是否为可索引的文本文件
@@ -472,7 +563,14 @@ func (s *IndexingService) removeFileIndex(ctx context.Context, absPath string) e
 		})
 	}
 
-	return s.metaStore.DeleteDocument(absPath)
+	if err := s.metaStore.DeleteDocument(absPath); err != nil {
+		return err
+	}
+	// 清理 chunk_llm_status
+	if err := s.metaStore.DeleteChunkLLMStatusByDocPath(absPath); err != nil {
+		s.logger.Warn("清理 chunk_llm_status 失败", "path", absPath, "error", err)
+	}
+	return nil
 }
 
 // Stop 停止服务，关闭所有资源。
@@ -512,6 +610,40 @@ func computeFileHash(absPath string) (string, error) {
 // timePtr 返回 time.Time 的指针。
 func timePtr(t time.Time) *time.Time {
 	return &t
+}
+
+// ── 内容变更阈值 ──────────────────────────────────────────────────
+
+// minContentChangeForLLM 触发 LLM 重新处理的最小内容长度变化量（字符数）。
+// 已处理过的分片再次发生内容变更时，若长度变化低于此阈值，视为微小改动，
+// 跳过 LLM 处理以避免浪费调用。
+const minContentChangeForLLM = 50
+
+// computeChunkContentHash 计算分片内容的简短哈希（SHA256 前 16 位十六进制）。
+func computeChunkContentHash(content string) string {
+	if content == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// abs 返回 int 绝对值。
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// contains 检查字符串切片是否包含指定值。
+func contains(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
 }
 
 // =====================================================================
@@ -723,12 +855,172 @@ func (s *IndexingService) Logs() (string, error) {
 	return string(data), nil
 }
 
-// Update 执行跨文件实体发现与关系线重建。
-// 对已索引的文档集合执行全量实体关系提取，
-// 将发现的新实体和关系追加到 GraphStore。
-// stub — 待实现。
+// Update 对已索引的文件分片执行增量 LLM 处理（摘要 + 实体提取）。
+//
+// 流程：
+//  1. 从 meta.db 查询所有需要 LLM 处理的分片（summarized=false 或 refilled=false）
+//  2. 按 DocID 分组，从 VectorStore 加载分片完整数据
+//  3. 内容变更阈值检查：已处理过的分片再次发生内容变更但长度变化低于阈值时跳过
+//  4. 调用 HyperIndexer.ProcessChunks 执行 LLM 处理
+//  5. 更新 chunk_llm_status（标记 summarized/refilled=true）
+//
+// path 参数当前暂未使用（处理所有已索引文件的分片）。
 func (s *IndexingService) Update(ctx context.Context, path string) error {
-	return fmt.Errorf("Update: 暂未实现")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// ── 第一阶段：重新索引变更的文件 ──
+	// 检测文件系统变更（mtime+size → content_hash），对变更文件重新分块 + 向量化。
+	// 同时自动更新 chunk_llm_status（新分片标记为 summarized=false, refilled=false）。
+	s.logger.Info("Update: 第一阶段 - 重新索引变更的文件", "target", path)
+	if err := s.reindexChangedFiles(ctx, path); err != nil {
+		s.logger.Warn("Update: 重新索引阶段有部分错误", "error", err)
+	}
+
+	// ── 第二阶段：增量 LLM 处理（摘要 + 实体提取） ──
+	// 从 chunk_llm_status 查询需要 LLM 的分片并处理。
+	// LLM 不可用时（索引器不是 HyperIndexer）降级退出，仅完成第一阶段的重新索引。
+	hyper, ok := s.indexer.(*indexer.HyperIndexer)
+	if !ok {
+		s.logger.Info("Update: 索引器不是 HyperIndexer，跳过 LLM 增强（仅完成重新索引）")
+		return nil
+	}
+
+	admin, ok := s.indexer.(indexer.IndexerAdmin)
+	if !ok {
+		return fmt.Errorf("Update: 索引器不支持管理接口")
+	}
+
+	// 查询所有需要 LLM 处理的分片
+	needsLLM, err := s.metaStore.GetChunksNeedingLLM("", false, false, -1)
+	if err != nil {
+		return fmt.Errorf("Update: 查询需要 LLM 处理的分片失败: %w", err)
+	}
+
+	if len(needsLLM) == 0 {
+		s.logger.Info("Update: 所有分片已完成 LLM 处理，无需更新")
+		return nil
+	}
+
+	s.logger.Info("Update: 第二阶段 - 增量 LLM 处理", "待处理分片", len(needsLLM))
+
+	// 按 DocID 分组（避免重复加载同一文档的 chunks）
+	byDocID := make(map[string][]*meta.ChunkLLMStatus)
+	for _, st := range needsLLM {
+		byDocID[st.DocID] = append(byDocID[st.DocID], st)
+	}
+
+	var totalProcessed int
+
+	for docID, statuses := range byDocID {
+		// 加载该文档的所有分片
+		allChunks, err := admin.GetChunks(ctx, docID)
+		if err != nil {
+			s.logger.Warn("Update: 加载文档分片失败", "doc_id", docID, "error", err)
+			continue
+		}
+
+		// 按 chunkID 建立索引
+		chunkByID := make(map[string]*core.Chunk, len(allChunks))
+		for _, c := range allChunks {
+			chunkByID[c.ID] = c
+		}
+
+		// 筛选需要处理的分片 + 内容变更阈值检查
+		var toProcess []core.Chunk
+		for _, st := range statuses {
+			chunk, ok := chunkByID[st.ChunkID]
+			if !ok {
+				s.logger.Debug("Update: 分片不在 VectorStore 中，跳过", "chunk_id", st.ChunkID)
+				continue
+			}
+
+			// 已处理过的分片：检查是否需要重新处理
+			if st.Summarized && st.Refilled {
+				currentHash := computeChunkContentHash(chunk.Content)
+				if currentHash == st.ContentHash {
+					continue // 内容无变更
+				}
+				diff := abs(len(chunk.Content) - st.ContentLength)
+				if diff < minContentChangeForLLM {
+					s.logger.Debug("Update: 分片内容微小变更，跳过 LLM",
+						"chunk_id", st.ChunkID, "长度变化", diff)
+					continue
+				}
+				s.logger.Info("Update: 分片内容实质性变更，重新 LLM 处理",
+					"chunk_id", st.ChunkID, "长度变化", diff)
+			}
+
+			toProcess = append(toProcess, *chunk)
+		}
+
+		if len(toProcess) == 0 {
+			continue
+		}
+
+		// 调用 ProcessChunks
+		s.logger.Info("Update: 处理文档分片", "doc_id", docID, "分片数", len(toProcess))
+		processed, _, _, pErr := hyper.ProcessChunks(ctx, toProcess)
+		if pErr != nil {
+			s.logger.Warn("Update: ProcessChunks 返回错误", "error", pErr)
+		}
+
+		// 记录已处理的分片 ID 集合
+		processedIDs := make(map[string]bool, len(toProcess))
+		for _, c := range toProcess {
+			processedIDs[c.ID] = true
+		}
+
+		// 更新 chunk_llm_status
+		now := time.Now()
+		for _, pc := range processed {
+			if !processedIDs[pc.ID] {
+				continue
+			}
+			st := findStatus(statuses, pc.ID)
+			if st == nil {
+				continue
+			}
+
+			update := &meta.ChunkLLMStatus{
+				ChunkID:       pc.ID,
+				DocPath:       st.DocPath,
+				DocID:         st.DocID,
+				ContentHash:   computeChunkContentHash(pc.Content),
+				ContentLength: len(pc.Content),
+				Summarized:    true,
+				Refilled:      true,
+			}
+			if !st.Summarized {
+				update.LastSummarizedAt = &now
+			} else {
+				update.LastSummarizedAt = st.LastSummarizedAt
+			}
+			if !st.Refilled {
+				update.LastRefilledAt = &now
+			} else {
+				update.LastRefilledAt = st.LastRefilledAt
+			}
+
+			if err := s.metaStore.SaveChunkLLMStatus(update); err != nil {
+				s.logger.Warn("Update: 保存分片状态失败", "chunk_id", pc.ID, "error", err)
+			}
+		}
+		totalProcessed += len(toProcess)
+	}
+
+	s.logger.Info("Update: 完成", "已重新索引的文件 + LLM 增强分片", totalProcessed)
+	return nil
+}
+
+// findStatus 在 ChunkLLMStatus 切片中按 chunkID 查找。
+func findStatus(statuses []*meta.ChunkLLMStatus, chunkID string) *meta.ChunkLLMStatus {
+	for _, st := range statuses {
+		if st.ChunkID == chunkID {
+			return st
+		}
+	}
+	return nil
 }
 
 // ── 目录树 ────────────────────────────────────────────────────────────
@@ -745,10 +1037,12 @@ type SourceTreeNode struct {
 
 // SourceChunkNode Chunk 树节点。
 type SourceChunkNode struct {
-	Type     string            // 数据|文档|图片|代码
-	Title    string            // Chunk 标题
-	Summary  string            // Chunk 摘要
-	Children []SourceChunkNode // 通过 ParentID 连结的子块
+	Type      string            // 数据|文档|图片|代码
+	Title     string            // Chunk 标题
+	Summary   string            // Chunk 摘要
+	StartLine int               // 在源文件中的起始行号
+	EndLine   int               // 在源文件中的结束行号
+	Children  []SourceChunkNode // 通过 ParentID 连结的子块
 }
 
 // Tree 基于所有 Chunk 的 Source 属性重建文件目录树。
@@ -846,9 +1140,11 @@ func buildChunkTree(parentChunks []core.Chunk, allChunks []core.Chunk) []SourceC
 // chunkToNode 递归构建单个 Chunk 节点及其子块。
 func chunkToNode(chunk core.Chunk, childMap map[string][]core.Chunk) SourceChunkNode {
 	node := SourceChunkNode{
-		Type:    chunkTypeFromSource(chunk.Source, chunk.Language),
-		Title:   chunk.Title,
-		Summary: chunk.Summary,
+		Type:      chunkTypeFromSource(chunk.Source, chunk.Language),
+		Title:     chunk.Title,
+		Summary:   chunk.Summary,
+		StartLine: chunk.StartLine,
+		EndLine:   chunk.EndLine,
 	}
 	for _, child := range childMap[chunk.ID] {
 		node.Children = append(node.Children, chunkToNode(child, childMap))
