@@ -135,3 +135,15 @@ type GraphSearcher interface {
 	// SearchGraph 执行图查询，返回 Hit（Nodes / Edges 填充，Chunks 为空）。
 	SearchGraph(ctx context.Context, query core.Query) (*core.Hit, error)
 }
+
+// GraphNavigator 图导航扩展接口：从指定节点出发进行多跳邻居遍历。
+//
+// 仅 GraphIndexer / HyperIndexer 实现，用于 `grag nodes` 这类目录级图探索命令。
+type GraphNavigator interface {
+	// Neighbors 从 nodeID 出发遍历 depth 跳邻居，返回邻居节点与关联边。
+	// depth=1 表示直接邻居；limit 限制返回节点数量。
+	Neighbors(ctx context.Context, nodeID string, depth, limit int) ([]*core.Node, []*core.Edge, error)
+
+	// GetNode 按 ID 获取单个节点，用于补全路径起点（如 Region 节点本身）。
+	GetNode(ctx context.Context, nodeID string) (*core.Node, error)
+}

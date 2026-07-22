@@ -40,7 +40,7 @@ func NewSQLiteStore(dbPath string) (Store, error) {
 	return s, nil
 }
 
-// init 创建 documents 和 chunk_llm_status 表（若不存在）。
+// init 创建 documents、chunk_llm_status 和 usages 表（若不存在）。
 func (s *sqliteStore) init() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS documents (
@@ -71,6 +71,21 @@ func (s *sqliteStore) init() error {
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS usages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model TEXT NOT NULL DEFAULT '',
+			label TEXT NOT NULL DEFAULT '',
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			cached_tokens INTEGER NOT NULL DEFAULT 0,
+			prompt_audio_tokens INTEGER NOT NULL DEFAULT 0,
+			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_audio_tokens INTEGER NOT NULL DEFAULT 0,
+			accepted_prediction_tokens INTEGER NOT NULL DEFAULT 0,
+			rejected_prediction_tokens INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
@@ -85,6 +100,7 @@ func (s *sqliteStore) init() error {
 		"CREATE INDEX IF NOT EXISTS idx_cls_chunk_id ON chunk_llm_status(chunk_id)",
 		"CREATE INDEX IF NOT EXISTS idx_cls_summarized ON chunk_llm_status(summarized)",
 		"CREATE INDEX IF NOT EXISTS idx_cls_refilled ON chunk_llm_status(refilled)",
+		"CREATE INDEX IF NOT EXISTS idx_usages_created_at ON usages(created_at DESC)",
 	} {
 		if _, err := s.db.Exec(idx); err != nil {
 			return fmt.Errorf("创建索引失败: %w", err)
@@ -214,6 +230,83 @@ func (s *sqliteStore) DeleteDocument(absPath string) error {
 		return fmt.Errorf("DeleteDocument: 未找到记录: %s", absPath)
 	}
 	return nil
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Usage CRUD
+// ═════════════════════════════════════════════════════════════════════
+
+// SaveUsage 实现 Store 接口。插入一条 token 用量记录。
+func (s *sqliteStore) SaveUsage(usage *Usage) error {
+	if usage == nil {
+		return fmt.Errorf("SaveUsage: usage 不能为空")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO usages (model, label, prompt_tokens, completion_tokens, total_tokens, cached_tokens, prompt_audio_tokens, reasoning_tokens, completion_audio_tokens, accepted_prediction_tokens, rejected_prediction_tokens, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		usage.Model,
+		usage.Label,
+		usage.PromptTokens,
+		usage.CompletionTokens,
+		usage.TotalTokens,
+		usage.CachedTokens,
+		usage.PromptAudioTokens,
+		usage.ReasoningTokens,
+		usage.CompletionAudioTokens,
+		usage.AcceptedPredictionTokens,
+		usage.RejectedPredictionTokens,
+		usage.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("SaveUsage: 插入记录失败: %w", err)
+	}
+	return nil
+}
+
+// QueryUsages 实现 Store 接口。按时间倒序查询最近的 token 用量记录。
+func (s *sqliteStore) QueryUsages(limit int) ([]*Usage, error) {
+	query := "SELECT id, model, label, prompt_tokens, completion_tokens, total_tokens, cached_tokens, prompt_audio_tokens, reasoning_tokens, completion_audio_tokens, accepted_prediction_tokens, rejected_prediction_tokens, created_at FROM usages ORDER BY created_at DESC"
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("QueryUsages: 查询失败: %w", err)
+	}
+	defer rows.Close()
+
+	var usages []*Usage
+	for rows.Next() {
+		u, err := scanUsage(rows)
+		if err != nil {
+			return nil, err
+		}
+		usages = append(usages, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("QueryUsages: 遍历结果失败: %w", err)
+	}
+	if usages == nil {
+		return []*Usage{}, nil
+	}
+	return usages, nil
+}
+
+// scanUsage 从数据库行扫描 Usage。
+func scanUsage(row scanner) (*Usage, error) {
+	var u Usage
+	err := row.Scan(
+		&u.ID, &u.Model, &u.Label,
+		&u.PromptTokens, &u.CompletionTokens, &u.TotalTokens,
+		&u.CachedTokens, &u.PromptAudioTokens,
+		&u.ReasoningTokens, &u.CompletionAudioTokens,
+		&u.AcceptedPredictionTokens, &u.RejectedPredictionTokens,
+		&u.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("扫描 usage 记录失败: %w", err)
+	}
+	return &u, nil
 }
 
 // Close 实现 Store 接口。

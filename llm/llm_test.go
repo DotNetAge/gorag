@@ -46,7 +46,7 @@ func TestNewSummarizer_MissingConfig(t *testing.T) {
 
 // TestParseSummarizeResult 验证 Summarizer 的 LLM 响应解析。
 func TestParseSummarizeResult(t *testing.T) {
-	resp := "```json\n{\"title\":\"标题\",\"summary\":\"摘要。\"}\n```"
+	resp := "```json\n{\"title\":\"标题\",\"summary\":\"摘要。\",\"tags\":[\"Go\",\"RAG\",\"语义检索\"]}\n```"
 	res, err := parseSummarizeResult(resp)
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
@@ -56,6 +56,24 @@ func TestParseSummarizeResult(t *testing.T) {
 	}
 	if res.Summary != "摘要。" {
 		t.Errorf("summary 期望 %q，实际 %q", "摘要。", res.Summary)
+	}
+	if len(res.Tags) != 3 || res.Tags[0] != "Go" {
+		t.Errorf("tags 期望 [Go RAG 语义检索]，实际 %v", res.Tags)
+	}
+}
+
+// TestParseBatchSummarizeResult 验证批量 Summarizer 的 LLM 响应解析。
+func TestParseBatchSummarizeResult(t *testing.T) {
+	resp := `[{"chunk_id":"c1","title":"标题1","summary":"摘要1。","tags":["标签1","标签2"]}]`
+	res, err := parseBatchSummarizeResult(resp)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("期望 1 条结果，实际 %d", len(res))
+	}
+	if len(res[0].Tags) != 2 || res[0].Tags[0] != "标签1" {
+		t.Errorf("tags 期望 [标签1 标签2]，实际 %v", res[0].Tags)
 	}
 }
 

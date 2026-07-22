@@ -181,3 +181,86 @@ func TestSQLiteStore_EmptyPathError(t *testing.T) {
 		t.Error("DeleteDocument 空路径应返回错误")
 	}
 }
+
+func TestSQLiteStore_UsageCRUD(t *testing.T) {
+	dir, err := os.MkdirTemp("", "meta_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	store, err := NewSQLiteStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore 失败: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+
+	// 插入两条记录
+	usages := []*Usage{
+		{
+			Model:            "gpt-4o",
+			Label:            "Summarizer(单条)",
+			PromptTokens:     150,
+			CompletionTokens: 50,
+			TotalTokens:      200,
+			CachedTokens:     10,
+			ReasoningTokens:  5,
+			CreatedAt:        now,
+		},
+		{
+			Model:            "gpt-4o",
+			Label:            "Refiller",
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			TotalTokens:      1500,
+			CreatedAt:        now.Add(-time.Hour),
+		},
+	}
+
+	for i, u := range usages {
+		if err := store.SaveUsage(u); err != nil {
+			t.Fatalf("SaveUsage[%d] 失败: %v", i, err)
+		}
+	}
+
+	// 查询全部
+	all, err := store.QueryUsages(0)
+	if err != nil {
+		t.Fatalf("QueryUsages 失败: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("记录数 = %d, 期望 2", len(all))
+	}
+
+	// 查询限制 1 条（按时间倒序，应返回第 1 条）
+	limited, err := store.QueryUsages(1)
+	if err != nil {
+		t.Fatalf("QueryUsages(1) 失败: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Errorf("limited 记录数 = %d, 期望 1", len(limited))
+	}
+	if limited[0].Label != "Summarizer(单条)" {
+		t.Errorf("最新记录 Label = %q, 期望 %q", limited[0].Label, "Summarizer(单条)")
+	}
+	if limited[0].TotalTokens != 200 {
+		t.Errorf("TotalTokens = %d, 期望 200", limited[0].TotalTokens)
+	}
+
+	// 空表查询
+	emptyStore, err := NewSQLiteStore(filepath.Join(dir, "empty.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore 空表失败: %v", err)
+	}
+	defer emptyStore.Close()
+
+	empty, err := emptyStore.QueryUsages(0)
+	if err != nil {
+		t.Fatalf("QueryUsages 空表失败: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("空表应返回空切片，得到 %v", empty)
+	}
+}

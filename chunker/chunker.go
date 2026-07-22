@@ -109,14 +109,17 @@ func buildChunk(
 func enrichChunksMetadata(chunks []core.Chunk, fullContent, fileName string) []core.Chunk {
 	lang := deriveLanguage(fileName)
 	directory := ""
+	regionID := ""
 	if fileName != "" {
 		directory = filepath.Dir(fileName)
+		regionID = utils.GenerateID([]byte(directory))
 	}
 	for i := range chunks {
 		// 第一层属性提升为结构体字段
 		chunks[i].StartLine = byteOffsetToLine(fullContent, chunks[i].StartPos)
 		chunks[i].EndLine = byteOffsetToLine(fullContent, chunks[i].EndPos)
 		chunks[i].Language = lang
+		chunks[i].RegionID = regionID
 		// 第二层属性保留在 Metadata 中，使用 core.Meta* 常量键名
 		if directory != "" {
 			if chunks[i].Metadata == nil {

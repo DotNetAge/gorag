@@ -42,6 +42,15 @@ type Store interface {
 	// limit <= 0 时不限制数量。
 	GetChunksNeedingLLM(docPath string, summarized, refilled bool, limit int) ([]*ChunkLLMStatus, error)
 
+	// ── Token 用量记录 ──────────────────────────────────────────────
+
+	// SaveUsage 保存一次 LLM 调用的 token 用量记录。
+	SaveUsage(usage *Usage) error
+
+	// QueryUsages 查询最近的 token 用量记录，按时间倒序。
+	// limit <= 0 时返回所有记录。
+	QueryUsages(limit int) ([]*Usage, error)
+
 	// ── 资源管理 ────────────────────────────────────────────────────
 
 	// Close 关闭数据库。
@@ -79,4 +88,22 @@ type Document struct {
 	IndexedAt    *time.Time
 	ErrorMessage string
 	UpdatedAt    time.Time
+}
+
+// Usage LLM 调用 token 用量记录。
+// 字段对应 OpenAI 标准响应中 Usage 对象的全部扁平化字段。
+type Usage struct {
+	ID                       int64     // 自增主键
+	Model                    string    // 模型名（如 gpt-4o）
+	Label                    string    // 调用方标记（如 "Summarizer(单条)" / "Refiller"）
+	PromptTokens             int       // 输入 tokens 数
+	CompletionTokens         int       // 输出 tokens 数
+	TotalTokens              int       // 总 tokens 数
+	CachedTokens             int       // 缓存命中的 prompt tokens（PromptTokensDetails.CachedTokens）
+	PromptAudioTokens        int       // 输入中的音频 tokens（PromptTokensDetails.AudioTokens）
+	ReasoningTokens          int       // 推理/思考 tokens（CompletionTokensDetails.ReasoningTokens）
+	CompletionAudioTokens    int       // 输出中的音频 tokens（CompletionTokensDetails.AudioTokens）
+	AcceptedPredictionTokens int       // 投机采样接受的 tokens（CompletionTokensDetails.AcceptedPredictionTokens）
+	RejectedPredictionTokens int       // 投机采样拒绝的 tokens（CompletionTokensDetails.RejectedPredictionTokens）
+	CreatedAt                time.Time // 记录时间
 }

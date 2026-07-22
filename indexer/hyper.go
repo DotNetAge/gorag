@@ -2,10 +2,9 @@ package indexer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"path/filepath"
+	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/DotNetAge/gorag/v2/chunker"
@@ -46,13 +45,13 @@ import (
 //   - hyper.(TreeViewBuilder)→ HyperIndexer 自身实现（先取 Region→Document，再补齐 Chunk）
 //   - hyper.(GraphSearcher)  → 委托 graph
 type HyperIndexer struct {
-	chunker       chunker.Chunker           // 分块器（按 RawDoc.Type 路由，同时产出 Nodes/Edges）
-	semantic      Indexer                   // 语义线（必注入）
-	graph         Indexer                   // 关系线（可选，nil 则不启用图功能）
-	summarizer    llm.Summarizer            // 批量摘要器（可选，nil 则不摘要）
-	refiller      llm.Refiller              // 实体提取兜底（可选，nil 则不提取）
+	chunker       chunker.Chunker               // 分块器（按 RawDoc.Type 路由，同时产出 Nodes/Edges）
+	semantic      Indexer                       // 语义线（必注入）
+	graph         Indexer                       // 关系线（可选，nil 则不启用图功能）
+	summarizer    llm.Summarizer                // 批量摘要器（可选，nil 则不摘要）
+	refiller      llm.Refiller                  // 实体提取兜底（可选，nil 则不提取）
 	schemasByPath map[string][]llm.EntitySchema // Schema 注册表（key 为源目录 path）
-	hooks         hooks                     // 事件扩展 Hook 聚合
+	hooks         hooks                         // 事件扩展 Hook 聚合
 	logger        logging.Logger
 }
 
@@ -152,10 +151,10 @@ func (h *HyperIndexer) Name() string { return "hyper" }
 //  3. 路由 Chunker → chunkerImpl.Chunk(raw) → ChunkResult
 //  4. doc.SetChunks/SetNodes/SetEdges
 //     [4a] OnChunkHook：对每个 Chunk 执行敏感词过滤、补充标签
-//  4.5 [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
+//     4.5 [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
 //     [4b] OnBeforeSemanticSaveHook：批量审核、外部 API 增强
 //  5. semantic.Save(doc)（向量化 + 写入 VectorStore）
-//  5.5 [关系线加工] 若注入了 Refiller + 已注册 Schema，调用 Refiller 提取实体和关系
+//     5.5 [关系线加工] 若注入了 Refiller + 已注册 Schema，调用 Refiller 提取实体和关系
 //  6. graph.Save(doc)（实体 + CONTAINS 边 + 写入 GraphStore，若 graph 存在）
 //     [6a] OnIndexCompleteHook：通知下游、审计日志
 //
@@ -428,6 +427,11 @@ func (h *HyperIndexer) Search(ctx context.Context, q core.Query) (*core.Hit, err
 		fused.Query = q
 	}
 
+	// 4. Tag/Title/Summary 关键词重排序增强
+	// 在语义召回的基础上，对 Tags、Title、Summary 匹配查询关键词的分片给予分数加成，
+	// 提升相关性高的结果排序，同时不改变召回集合（避免过度精确导致结果过少）。
+	boostByKeywords(fused, q)
+
 	return fused, nil
 }
 
@@ -635,6 +639,46 @@ func (h *HyperIndexer) SearchGraph(ctx context.Context, q core.Query) (*core.Hit
 	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphSearcher")
 }
 
+// Neighbors 实现 GraphNavigator 接口：委托关系线执行多跳邻居遍历。
+// 若关系线未启用或未实现 GraphNavigator，返回错误。
+func (h *HyperIndexer) Neighbors(ctx context.Context, nodeID string, depth, limit int) ([]*core.Node, []*core.Edge, error) {
+	if h.graph == nil {
+		return nil, nil, fmt.Errorf("HyperIndexer: 关系线未启用，无法执行图导航")
+	}
+	if g, ok := h.graph.(GraphNavigator); ok {
+		h.logger.Debug("复合索引器: 委托图导航", "nodeID", nodeID, "depth", depth)
+		return g.Neighbors(ctx, nodeID, depth, limit)
+	}
+	return nil, nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphNavigator")
+}
+
+// GetNode 实现 GraphNavigator 接口：委托关系线按 ID 获取单个节点。
+func (h *HyperIndexer) GetNode(ctx context.Context, nodeID string) (*core.Node, error) {
+	if h.graph == nil {
+		return nil, fmt.Errorf("HyperIndexer: 关系线未启用，无法执行图导航")
+	}
+	if g, ok := h.graph.(GraphNavigator); ok {
+		h.logger.Debug("复合索引器: 委托获取节点", "nodeID", nodeID)
+		return g.GetNode(ctx, nodeID)
+	}
+	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphNavigator")
+}
+
+// CypherQuery 执行原始 Cypher 查询，委托给关系线的 GraphIndexer。
+// 仅当索引器支持图存储时可用。
+func (h *HyperIndexer) CypherQuery(ctx context.Context, q string, params map[string]any) ([]map[string]any, error) {
+	if h.graph == nil {
+		return nil, fmt.Errorf("HyperIndexer: 关系线未启用，无法执行 Cypher 查询")
+	}
+	if g, ok := h.graph.(interface {
+		CypherQuery(ctx context.Context, q string, params map[string]any) ([]map[string]any, error)
+	}); ok {
+		h.logger.Debug("复合索引器: 委托 Cypher 查询", "query", q)
+		return g.CypherQuery(ctx, q, params)
+	}
+	return nil, fmt.Errorf("HyperIndexer: 关系线不支持 Cypher 查询")
+}
+
 // ---------------------------------------------------------------------------
 // Schema 注册
 // ---------------------------------------------------------------------------
@@ -819,18 +863,87 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 }
 
 // ---------------------------------------------------------------------------
-// 内部方法
+// 查询结果重排序
 // ---------------------------------------------------------------------------
 
-// resolveRegionID 从文件路径推导 RegionID。
+// keywordBoostBase 是单条关键词命中的基础加成比例。
+const keywordBoostBase = 0.15
+
+// keywordBoostMaxMatches 是参与计算的最大命中关键词数。
+const keywordBoostMaxMatches = 3
+
+// keywordBoostMaxRatio 是最大累计加成比例（1.0 表示最多提升 100%）。
+const keywordBoostMaxRatio = 1.0
+
+// boostByKeywords 对 Hit 中的 Chunk 按查询关键词匹配度进行分数增强。
 //
-// RegionID 使用目录路径的 SHA256 哈希的前 16 位十六进制字符作为标识，
-// 同时横跨 Chunk（语义线）和 Node（关系线）。
-// 此方法通常在 AddFile 过程中由内部逻辑调用。
-func (h *HyperIndexer) resolveRegionID(filePath string) string {
-	dir := filepath.Dir(filePath)
-	sum := sha256.Sum256([]byte(dir))
-	return hex.EncodeToString(sum[:])[:16]
+// 匹配区域包括：Tags（完全匹配）、Title（子串）、Summary（子串）。
+// 每命中一个关键词，分数乘以 (1 + keywordBoostBase)；命中上限 keywordBoostMaxMatches。
+// 该方法只调整排序和分数，不剔除任何召回结果，避免过度精确导致召回不足。
+func boostByKeywords(hit *core.Hit, q core.Query) {
+	if hit == nil || q == nil || len(hit.Chunks) == 0 {
+		return
+	}
+
+	keywords := q.Keywords()
+	if len(keywords) == 0 {
+		return
+	}
+
+	for i := range hit.Chunks {
+		matchCount := countKeywordMatches(&hit.Chunks[i], keywords)
+		if matchCount > 0 {
+			if matchCount > keywordBoostMaxMatches {
+				matchCount = keywordBoostMaxMatches
+			}
+			ratio := float32(matchCount) * keywordBoostBase
+			if ratio > keywordBoostMaxRatio {
+				ratio = keywordBoostMaxRatio
+			}
+			hit.Chunks[i].Score *= (1 + ratio)
+		}
+	}
+
+	// 按增强后的分数重新排序
+	sort.Slice(hit.Chunks, func(i, j int) bool {
+		return hit.Chunks[i].Score > hit.Chunks[j].Score
+	})
+
+	// 更新 Hit 综合分数为最高 chunk 分数
+	if len(hit.Chunks) > 0 {
+		hit.Score = hit.Chunks[0].Score
+	}
+}
+
+// countKeywordMatches 统计查询关键词在 Chunk Tags/Title/Summary 中的命中数。
+// Tags 要求完全匹配（忽略大小写），Title/Summary 使用子串匹配（忽略大小写）。
+func countKeywordMatches(ch *core.ChunkHit, keywords []string) int {
+	if ch == nil || ch.Chunk == nil {
+		return 0
+	}
+	count := 0
+	for _, kw := range keywords {
+		if kw == "" {
+			continue
+		}
+		lowerKw := strings.ToLower(kw)
+		if keywordInTags(ch.Tags, lowerKw) ||
+			strings.Contains(strings.ToLower(ch.Title), lowerKw) ||
+			strings.Contains(strings.ToLower(ch.Summary), lowerKw) {
+			count++
+		}
+	}
+	return count
+}
+
+// keywordInTags 判断标签列表中是否存在与关键词完全匹配（忽略大小写）的项。
+func keywordInTags(tags []string, lowerKeyword string) bool {
+	for _, tag := range tags {
+		if strings.EqualFold(tag, lowerKeyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。

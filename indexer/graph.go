@@ -404,8 +404,8 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 		return nil
 	}
 
-	// Region 节点 ID：取 "region:" + dir 的 SHA256
-	regionID := utils.GenerateID([]byte("region:" + dir))
+	// Region 节点 ID：与 Chunk.RegionID 保持一致，取 dir 的 SHA256
+	regionID := utils.GenerateID([]byte(dir))
 
 	// 查找 Document 节点 ID（由 Chunker 创建，应在 doc.Nodes() 中）
 	var docNodeID string
@@ -425,15 +425,27 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 		return nil
 	}
 
-	// 创建/更新 Region 节点
-	regionNode := &core.Node{
-		ID:         regionID,
-		Labels:     []string{core.LabelRegion},
-		Name:       regionName,
-		Properties: map[string]any{"dir": dir},
+	// 创建/更新 Region 节点（若已存在则跳过，避免覆盖 README.md 产出的节点）
+	existing, _ := idx.graphDB.GetNode(ctx, regionID)
+	needCreate := true
+	if existing != nil {
+		for _, l := range existing.Labels {
+			if l == core.LabelRegion {
+				needCreate = false
+				break
+			}
+		}
 	}
-	if err := idx.graphDB.UpsertNodes(ctx, []*core.Node{regionNode}); err != nil {
-		return fmt.Errorf("图索引器: 写入 Region 节点失败: %w", err)
+	if needCreate {
+		regionNode := &core.Node{
+			ID:         regionID,
+			Labels:     []string{core.LabelRegion},
+			Name:       regionName,
+			Properties: map[string]any{"dir": dir},
+		}
+		if err := idx.graphDB.UpsertNodes(ctx, []*core.Node{regionNode}); err != nil {
+			return fmt.Errorf("图索引器: 写入 Region 节点失败: %w", err)
+		}
 	}
 
 	// 创建 Region→Document 的 CONTAINS 边
@@ -708,6 +720,43 @@ func (idx *GraphIndexer) regionTree(ctx context.Context, regionID string) (*core
 // 外部可通过此方法直接操作图存储（如自定义 Cypher 查询、图分析等）。
 func (idx *GraphIndexer) GraphDB() core.GraphStore {
 	return idx.graphDB
+}
+
+// Neighbors 实现 GraphNavigator 接口：从 nodeID 出发遍历 depth 跳邻居。
+// 返回邻居节点与关联边；depth=1 表示直接邻居。
+func (idx *GraphIndexer) Neighbors(ctx context.Context, nodeID string, depth, limit int) ([]*core.Node, []*core.Edge, error) {
+	if idx.graphDB == nil {
+		return nil, nil, fmt.Errorf("图索引器: graphDB 未初始化")
+	}
+	if nodeID == "" {
+		return nil, nil, fmt.Errorf("图索引器: nodeID 不能为空")
+	}
+	if depth <= 0 {
+		depth = 1
+	}
+	if depth > 3 {
+		depth = 3
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	nodes, edges, err := idx.graphDB.GetNeighbors(ctx, nodeID, depth, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("图索引器: 邻居遍历失败: %w", err)
+	}
+	return nodes, edges, nil
+}
+
+// GetNode 实现 GraphNavigator 接口：按 ID 获取单个节点。
+func (idx *GraphIndexer) GetNode(ctx context.Context, nodeID string) (*core.Node, error) {
+	if idx.graphDB == nil {
+		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
+	}
+	if nodeID == "" {
+		return nil, fmt.Errorf("图索引器: nodeID 不能为空")
+	}
+	return idx.graphDB.GetNode(ctx, nodeID)
 }
 
 // CypherQuery 执行原始的 Cypher 查询，供外部 Agent/LLM 生成高级图查询。

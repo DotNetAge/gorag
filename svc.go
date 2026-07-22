@@ -14,9 +14,11 @@ import (
 	"sync"
 	"time"
 
+	chat "github.com/DotNetAge/gochat/core"
 	"github.com/DotNetAge/gograph/pkg/api"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/llm"
 	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/store/meta"
 	"github.com/DotNetAge/gorag/v2/utils"
@@ -303,6 +305,18 @@ func (s *IndexingService) reindexChangedFiles(ctx context.Context, targetPath st
 		"failed", failedCount,
 		"success", len(files)-failedCount)
 
+	// 3. 为没有 README.md 的目录生成 Region 摘要文件
+	indexedDirs := collectIndexedDirs(files, targetPath)
+	for _, dir := range indexedDirs {
+		readmePath := filepath.Join(dir, "README.md")
+		if fileExists(readmePath) {
+			continue
+		}
+		if err := s.generateRegionReadme(ctx, dir); err != nil {
+			s.logger.Warn("生成目录 README 失败", "dir", dir, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -573,6 +587,53 @@ func (s *IndexingService) removeFileIndex(ctx context.Context, absPath string) e
 	return nil
 }
 
+// SetLLMUsageRecorder 为 Summarizer 和 Refiller 设置 token 用量记录回调。
+// 在每次成功 LLM 调用后自动将 token 用量写入 meta.db 的 usages 表。
+// 通过类型断言检测传入对象是否支持 SetUsageRecorder，不支持时静默跳过。
+func (s *IndexingService) SetLLMUsageRecorder(summarizer llm.Summarizer, refiller llm.Refiller) {
+	recorder := func(ctx context.Context, model string, usage *chat.Usage, label string) {
+		if usage == nil {
+			return
+		}
+
+		u := &meta.Usage{
+			Model:            model,
+			Label:            label,
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+			TotalTokens:      usage.TotalTokens,
+			CreatedAt:        time.Now(),
+		}
+		if usage.PromptTokensDetails != nil {
+			u.CachedTokens = usage.PromptTokensDetails.CachedTokens
+			u.PromptAudioTokens = usage.PromptTokensDetails.AudioTokens
+		}
+		if usage.CompletionTokensDetails != nil {
+			u.ReasoningTokens = usage.CompletionTokensDetails.ReasoningTokens
+			u.CompletionAudioTokens = usage.CompletionTokensDetails.AudioTokens
+			u.AcceptedPredictionTokens = usage.CompletionTokensDetails.AcceptedPredictionTokens
+			u.RejectedPredictionTokens = usage.CompletionTokensDetails.RejectedPredictionTokens
+		}
+
+		if err := s.metaStore.SaveUsage(u); err != nil {
+			s.logger.Warn("保存 token 用量记录失败", "error", err)
+		}
+	}
+
+	if s, ok := summarizer.(interface{ SetUsageRecorder(llm.UsageRecorder) }); ok {
+		s.SetUsageRecorder(recorder)
+	}
+	if r, ok := refiller.(interface{ SetUsageRecorder(llm.UsageRecorder) }); ok {
+		r.SetUsageRecorder(recorder)
+	}
+}
+
+// QueryUsages 查询最近的 token 用量记录，按时间倒序。
+// limit 限制返回条数，<= 0 时返回全部。
+func (s *IndexingService) QueryUsages(limit int) ([]*meta.Usage, error) {
+	return s.metaStore.QueryUsages(limit)
+}
+
 // Stop 停止服务，关闭所有资源。
 func (s *IndexingService) Stop() error {
 	// 关闭索引器
@@ -772,12 +833,251 @@ func queryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
 // 服务方法（与 CLI 命令一一对应）
 // =====================================================================
 
-// Query 执行搜索查询。
-func (s *IndexingService) Query(ctx context.Context, text string) (*core.Hit, error) {
+// Query 执行搜索查询，可选按 source 路径前缀过滤。
+func (s *IndexingService) Query(ctx context.Context, text string, filterPath string) (*core.Hit, error) {
 	if text == "" {
 		return nil, fmt.Errorf("查询内容不能为空")
 	}
-	return s.indexer.Search(ctx, s.indexer.NewQuery(text))
+	hit, err := s.indexer.Search(ctx, s.indexer.NewQuery(text))
+	if err != nil {
+		return nil, err
+	}
+	if filterPath != "" {
+		hit = filterHitBySourcePrefix(hit, filterPath)
+	}
+	return hit, nil
+}
+
+// QueryMulti 执行多个查询并融合结果，可选按 source 路径前缀过滤。
+// 融合规则：相同 chunk 取最高分数，按分数降序排列。
+func (s *IndexingService) QueryMulti(ctx context.Context, queries []string, filterPath string) (*core.Hit, error) {
+	if len(queries) == 0 {
+		return nil, fmt.Errorf("查询内容不能为空")
+	}
+
+	merged := make(map[string]core.ChunkHit)
+	for _, text := range queries {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		hit, err := s.indexer.Search(ctx, s.indexer.NewQuery(text))
+		if err != nil {
+			return nil, fmt.Errorf("查询 %q 失败: %w", text, err)
+		}
+		if hit == nil {
+			continue
+		}
+		for _, ch := range hit.Chunks {
+			if filterPath != "" && !sourceHasPrefix(ch.Chunk.Source, filterPath) {
+				continue
+			}
+			existing, ok := merged[ch.Chunk.ID]
+			if !ok || ch.Score > existing.Score {
+				merged[ch.Chunk.ID] = ch
+			}
+		}
+	}
+
+	chunks := make([]core.ChunkHit, 0, len(merged))
+	for _, ch := range merged {
+		chunks = append(chunks, ch)
+	}
+
+	// 按分数降序排列
+	for i := 0; i < len(chunks); i++ {
+		for j := i + 1; j < len(chunks); j++ {
+			if chunks[j].Score > chunks[i].Score {
+				chunks[i], chunks[j] = chunks[j], chunks[i]
+			}
+		}
+	}
+
+	combinedText := strings.Join(queries, " | ")
+	return &core.Hit{
+		Query:  s.indexer.NewQuery(combinedText),
+		Score:  topChunkScore(chunks),
+		Chunks: chunks,
+	}, nil
+}
+
+// filterHitBySourcePrefix 按 source 路径前缀过滤命中结果。
+func filterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
+	if hit == nil {
+		return nil
+	}
+	var filtered []core.ChunkHit
+	for _, ch := range hit.Chunks {
+		if sourceHasPrefix(ch.Chunk.Source, filterPath) {
+			filtered = append(filtered, ch)
+		}
+	}
+	hit.Chunks = filtered
+	return hit
+}
+
+// sourceHasPrefix 判断 chunk.Source 是否以指定路径开头。
+// filterPath 会先转换为绝对路径，再与 Source（绝对路径）比较。
+func sourceHasPrefix(source, filterPath string) bool {
+	if source == "" {
+		return false
+	}
+	absFilter, err := filepath.Abs(filterPath)
+	if err != nil {
+		absFilter = filterPath
+	}
+	return strings.HasPrefix(source, absFilter)
+}
+
+// topChunkScore 返回 ChunkHit 切片中的最高分。
+func topChunkScore(hits []core.ChunkHit) float32 {
+	if len(hits) == 0 {
+		return 0
+	}
+	max := hits[0].Score
+	for _, h := range hits[1:] {
+		if h.Score > max {
+			max = h.Score
+		}
+	}
+	return max
+}
+
+// ListChunks 分页列出已索引的 Chunk，可选按 source 路径前缀过滤。
+// page 从 1 开始，size 为每页数量（<=0 时使用默认值 20）。
+// 返回当前页 Chunk 列表、过滤后总数和错误。
+func (s *IndexingService) ListChunks(ctx context.Context, page, size int, filterPath string) ([]core.Chunk, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 20
+	}
+
+	admin, ok := s.indexer.(indexer.IndexerAdmin)
+	if !ok {
+		return nil, 0, fmt.Errorf("当前索引器不支持列表查询")
+	}
+
+	var filters []core.FilterCondition
+	if filterPath != "" {
+		absFilter, err := filepath.Abs(filterPath)
+		if err != nil {
+			absFilter = filterPath
+		}
+		filters = append(filters, core.FilterCondition{
+			Key:   core.VecMetaSource,
+			Type:  "prefix",
+			Value: absFilter,
+		})
+	}
+
+	offset := (page - 1) * size
+	chunks, total, err := admin.List(ctx, offset, size, filters)
+	if err != nil {
+		return nil, 0, fmt.Errorf("列出分片失败: %w", err)
+	}
+	return chunks, total, nil
+}
+
+// NodeQueryResult 是 nodes 命令的查询结果容器。
+type NodeQueryResult struct {
+	RegionID   string       `json:"region_id"`
+	RegionName string       `json:"region_name"`
+	Region     *core.Node   `json:"region,omitempty"`
+	Nodes      []*core.Node `json:"nodes"`
+	Edges      []*core.Edge `json:"edges"`
+}
+
+// Nodes 按目录查询 Region 节点及其 N 跳相邻节点。
+// dir 为空时使用当前工作目录；hops 范围 1-3，默认 1。
+func (s *IndexingService) Nodes(ctx context.Context, dir string, hops int) (*NodeQueryResult, error) {
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("获取当前工作目录失败: %w", err)
+		}
+		dir = cwd
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("解析目录路径失败: %w", err)
+	}
+
+	if hops < 1 {
+		hops = 1
+	}
+	if hops > 3 {
+		hops = 3
+	}
+
+	// RegionID 与 Chunk.RegionID 保持一致：目录路径的 SHA256
+	regionID := utils.GenerateID([]byte(absDir))
+
+	nav, ok := s.indexer.(indexer.GraphNavigator)
+	if !ok {
+		return nil, fmt.Errorf("当前索引器不支持图导航")
+	}
+
+	region, err := nav.GetNode(ctx, regionID)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Region 节点失败: %w", err)
+	}
+
+	neighborNodes, edges, err := nav.Neighbors(ctx, regionID, hops, 100)
+	if err != nil {
+		return nil, fmt.Errorf("邻居遍历失败: %w", err)
+	}
+
+	// 合并 Region 节点与邻居节点，并去重
+	nodeMap := make(map[string]*core.Node, len(neighborNodes)+1)
+	if region != nil {
+		nodeMap[region.ID] = region
+	}
+	for _, n := range neighborNodes {
+		if n != nil {
+			nodeMap[n.ID] = n
+		}
+	}
+	nodes := make([]*core.Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		nodes = append(nodes, n)
+	}
+
+	regionName := filepath.Base(absDir)
+	if region != nil && region.Name != "" {
+		regionName = region.Name
+	}
+
+	return &NodeQueryResult{
+		RegionID:   regionID,
+		RegionName: regionName,
+		Region:     region,
+		Nodes:      nodes,
+		Edges:      edges,
+	}, nil
+}
+
+// Cypher 执行原始 Cypher 查询并返回结果。
+// 仅当索引器支持图存储时可用（如 GraphIndexer / HyperIndexer）。
+func (s *IndexingService) Cypher(ctx context.Context, query string) ([]map[string]any, error) {
+	if query == "" {
+		return nil, fmt.Errorf("Cypher 查询不能为空")
+	}
+
+	type cypherer interface {
+		CypherQuery(ctx context.Context, q string, params map[string]any) ([]map[string]any, error)
+	}
+
+	c, ok := s.indexer.(cypherer)
+	if !ok {
+		return nil, fmt.Errorf("当前索引器不支持 Cypher 查询")
+	}
+
+	rows, err := c.CypherQuery(ctx, query, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Cypher 查询执行失败: %w", err)
+	}
+	return rows, nil
 }
 
 // RAGInfo RAG 库信息
@@ -1031,6 +1331,7 @@ type SourceTreeNode struct {
 	Path     string            // 完整路径
 	Size     int64             // 文件内容总大小（所有 Chunk Content 长度之和）
 	IsDir    bool              // 是否为目录
+	Summary  string            // 目录摘要（来自 README.md）
 	Chunks   []SourceChunkNode // 该文件下的顶层 Chunk（ParentID==""）
 	Children []*SourceTreeNode // 子目录
 }
@@ -1118,6 +1419,9 @@ func (s *IndexingService) Tree(ctx context.Context) (*SourceTreeNode, error) {
 		insertIntoTree(root, source, fileNode)
 	}
 
+	// 将 README.md 文件节点的摘要折叠到父目录节点
+	foldReadmeIntoDirectories(root)
+
 	return root, nil
 }
 
@@ -1197,4 +1501,180 @@ func insertIntoTree(root *SourceTreeNode, source string, fileNode *SourceTreeNod
 		}
 	}
 	current.Children = append(current.Children, fileNode)
+}
+
+// foldReadmeIntoDirectories 递归将 README.md 文件节点的摘要折叠到父目录节点，
+// 并移除 README.md 文件节点，使其不在 tree 中单独显示。
+func foldReadmeIntoDirectories(node *SourceTreeNode) {
+	if node == nil {
+		return
+	}
+
+	var filtered []*SourceTreeNode
+	for _, child := range node.Children {
+		if child.IsDir {
+			foldReadmeIntoDirectories(child)
+			filtered = append(filtered, child)
+			continue
+		}
+		if strings.EqualFold(child.Name, "README.md") {
+			node.Summary = collectReadmeSummary(child)
+			continue
+		}
+		filtered = append(filtered, child)
+	}
+	node.Children = filtered
+}
+
+// collectReadmeSummary 收集 README.md 文件节点下顶层 Chunk 的摘要，
+// 去重后拼接并截断到 200 字符。
+func collectReadmeSummary(readmeNode *SourceTreeNode) string {
+	if readmeNode == nil || len(readmeNode.Chunks) == 0 {
+		return ""
+	}
+
+	var summaries []string
+	for _, chunk := range readmeNode.Chunks {
+		if chunk.Summary == "" {
+			continue
+		}
+		if !contains(summaries, chunk.Summary) {
+			summaries = append(summaries, chunk.Summary)
+		}
+	}
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	summary := strings.Join(summaries, "；")
+	if len(summary) > 200 {
+		summary = summary[:200] + "..."
+	}
+	return summary
+}
+
+// collectIndexedDirs 从本次索引的文件路径中提取所有触及的目录，
+// 并向上回收到 targetPath 根目录，去重后按深度从深到浅排序。
+func collectIndexedDirs(files []string, targetPath string) []string {
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		return nil
+	}
+	rootDir := targetPath
+	if !info.IsDir() {
+		rootDir = filepath.Dir(targetPath)
+	}
+	rootDir = filepath.Clean(rootDir)
+
+	seen := make(map[string]bool)
+	var dirs []string
+	for _, f := range files {
+		dir := filepath.Dir(f)
+		for dir != "" && dir != "/" && dir != "." {
+			dir = filepath.Clean(dir)
+			if !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
+			if dir == rootDir {
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// 按目录深度从深到浅排序
+	for i := 0; i < len(dirs); i++ {
+		for j := i + 1; j < len(dirs); j++ {
+			if strings.Count(dirs[i], string(filepath.Separator)) < strings.Count(dirs[j], string(filepath.Separator)) {
+				dirs[i], dirs[j] = dirs[j], dirs[i]
+			}
+		}
+	}
+	return dirs
+}
+
+// generateRegionReadme 为指定目录生成摘要式 README.md 并索引。
+// 若目录下已存在 README.md 或没有可摘要内容，则生成默认摘要。
+func (s *IndexingService) generateRegionReadme(ctx context.Context, dir string) error {
+	readmePath := filepath.Join(dir, "README.md")
+	if fileExists(readmePath) {
+		return nil
+	}
+
+	admin, ok := s.indexer.(indexer.IndexerAdmin)
+	if !ok {
+		return fmt.Errorf("索引器不支持列表查询")
+	}
+
+	total, err := admin.Count(ctx)
+	if err != nil {
+		return fmt.Errorf("获取 Chunk 总数失败: %w", err)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	allChunks, _, err := admin.List(ctx, 0, total, nil)
+	if err != nil {
+		return fmt.Errorf("获取 Chunk 列表失败: %w", err)
+	}
+
+	// 去重并筛选当前目录下的顶层 Chunk
+	seen := make(map[string]bool)
+	var summaries []string
+	prefix := dir + string(filepath.Separator)
+	for _, c := range allChunks {
+		if seen[c.ID] {
+			continue
+		}
+		seen[c.ID] = true
+		if c.ParentID != "" {
+			continue
+		}
+		if !strings.HasPrefix(c.Source, prefix) {
+			continue
+		}
+		if c.Summary == "" {
+			continue
+		}
+		if !contains(summaries, c.Summary) {
+			summaries = append(summaries, c.Summary)
+		}
+	}
+
+	regionName := filepath.Base(dir)
+	var content string
+	if len(summaries) > 0 {
+		var b strings.Builder
+		b.WriteString("# ")
+		b.WriteString(regionName)
+		b.WriteString("\n\n")
+		b.WriteString(core.RegionDescriptorMarker)
+		b.WriteString("\n\n")
+		for _, summary := range summaries {
+			b.WriteString("- ")
+			b.WriteString(summary)
+			b.WriteString("\n")
+		}
+		content = b.String()
+	} else {
+		content = fmt.Sprintf("# %s\n\n%s\n\n_该目录暂无摘要。_\n", regionName, core.RegionDescriptorMarker)
+	}
+
+	if err := os.WriteFile(readmePath, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("写入 README.md 失败: %w", err)
+	}
+
+	if _, err := s.processFile(ctx, readmePath); err != nil {
+		return fmt.Errorf("索引生成的 README.md 失败: %w", err)
+	}
+
+	s.logger.Info("目录 README 生成完成", "dir", dir)
+	return nil
 }

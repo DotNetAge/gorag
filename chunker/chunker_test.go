@@ -8,6 +8,7 @@ import (
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
+	"github.com/DotNetAge/gorag/v2/utils"
 )
 
 // writeTempFile 创建临时文件并写入内容，返回绝对路径。
@@ -769,3 +770,121 @@ func TestChunkMetadata_Directory(t *testing.T) {
 
 // _ 确保 core 包被使用（测试中可能引用 core.Chunk 字段）
 var _ = core.Chunk{}
+
+// TestChunkRegionID 验证所有 Chunker 产出的 Chunk.RegionID 等于目录路径的 SHA256。
+func TestChunkRegionID(t *testing.T) {
+	content := `# 标题
+
+正文。`
+	path := writeTempFile(t, "region.md", content)
+	doc, err := document.Open(path)
+	if err != nil {
+		t.Fatalf("document.Open 失败: %v", err)
+	}
+
+	result, err := NewMarkdownChunker().Chunk(doc)
+	if err != nil {
+		t.Fatalf("MarkdownChunker 返回错误: %v", err)
+	}
+	if len(result.Chunks) == 0 {
+		t.Fatalf("期望至少 1 个 chunk，实际 0")
+	}
+
+	expectedRegionID := utils.GenerateID([]byte(filepath.Dir(path)))
+	for _, c := range result.Chunks {
+		if c.RegionID != expectedRegionID {
+			t.Errorf("chunk %q RegionID 期望 %q，实际 %q", c.Title, expectedRegionID, c.RegionID)
+		}
+	}
+}
+
+// TestMarkdownChunker_RegionDescriptor 验证 README.md 被识别为 Region 描述符。
+func TestMarkdownChunker_RegionDescriptor(t *testing.T) {
+	content := `# 项目说明
+
+这是一个 README 文件。`
+
+	dir := t.TempDir()
+	readmePath := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(readmePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入 README.md 失败: %v", err)
+	}
+
+	doc, err := document.Open(readmePath)
+	if err != nil {
+		t.Fatalf("document.Open 失败: %v", err)
+	}
+
+	result, err := NewMarkdownChunker().Chunk(doc)
+	if err != nil {
+		t.Fatalf("MarkdownChunker 返回错误: %v", err)
+	}
+	if len(result.Chunks) == 0 {
+		t.Fatalf("期望至少 1 个 chunk，实际 0")
+	}
+
+	expectedDirName := filepath.Base(dir)
+	foundRegionNode := false
+	expectedRegionID := utils.GenerateID([]byte(dir))
+
+	for _, c := range result.Chunks {
+		if c.ParentID == "" && c.Title != expectedDirName {
+			t.Errorf("README 顶层 Chunk Title 期望 %q，实际 %q", expectedDirName, c.Title)
+		}
+		if isDescriptor, ok := c.Metadata[core.MetaIsRegionDescriptor].(bool); !ok || !isDescriptor {
+			t.Errorf("README Chunk 应设置 %s=true", core.MetaIsRegionDescriptor)
+		}
+	}
+
+	for _, n := range result.Nodes {
+		if n.ID == expectedRegionID {
+			foundRegionNode = true
+			if n.Name != expectedDirName {
+				t.Errorf("Region 节点 Name 期望 %q，实际 %q", expectedDirName, n.Name)
+			}
+		}
+	}
+	if !foundRegionNode {
+		t.Errorf("未找到期望的 Region 节点 %s", expectedRegionID)
+	}
+}
+
+// TestMarkdownChunker_GeneratedRegionDescriptor 验证带生成标记的 README.md 作为单 Chunk 处理。
+func TestMarkdownChunker_GeneratedRegionDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	content := `# gorag
+
+` + core.RegionDescriptorMarker + `
+
+- 摘要一。
+- 摘要二。`
+
+	readmePath := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(readmePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入 README.md 失败: %v", err)
+	}
+
+	doc, err := document.Open(readmePath)
+	if err != nil {
+		t.Fatalf("document.Open 失败: %v", err)
+	}
+
+	result, err := NewMarkdownChunker().Chunk(doc)
+	if err != nil {
+		t.Fatalf("MarkdownChunker 返回错误: %v", err)
+	}
+	if len(result.Chunks) != 1 {
+		t.Fatalf("生成式 README 期望 1 个 chunk，实际 %d", len(result.Chunks))
+	}
+
+	chunk := result.Chunks[0]
+	if chunk.Title != filepath.Base(dir) {
+		t.Errorf("生成式 README Chunk Title 期望 %q，实际 %q", filepath.Base(dir), chunk.Title)
+	}
+	if isDescriptor, ok := chunk.Metadata[core.MetaIsRegionDescriptor].(bool); !ok || !isDescriptor {
+		t.Errorf("生成式 README Chunk 应设置 %s=true", core.MetaIsRegionDescriptor)
+	}
+	if generated, ok := chunk.Metadata[core.MetaRegionGenerated].(bool); !ok || !generated {
+		t.Errorf("生成式 README Chunk 应设置 %s=true", core.MetaRegionGenerated)
+	}
+}

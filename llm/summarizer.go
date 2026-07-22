@@ -28,9 +28,10 @@ type Summarizer interface {
 
 // gochatSummarizer 基于 gochat 的 Summarizer 默认实现。
 type gochatSummarizer struct {
-	config Config
-	client chat.Client
-	logger logging.Logger
+	config        Config
+	client        chat.Client
+	logger        logging.Logger
+	usageRecorder UsageRecorder
 }
 
 // NewSummarizer 创建基于 gochat 的 Summarizer。
@@ -58,7 +59,13 @@ func NewSummarizer(cfg Config, logger logging.Logger) (Summarizer, error) {
 	}, nil
 }
 
-// Summarize 调用 LLM 为每个 Chunk 生成更语义化的 Title 和 Summary。
+// SetUsageRecorder 设置 token 用量记录回调。
+// 在 Summarizer 每次成功调用 LLM 后自动记录用量信息。
+func (s *gochatSummarizer) SetUsageRecorder(r UsageRecorder) {
+	s.usageRecorder = r
+}
+
+// Summarize 调用 LLM 为每个 Chunk 生成更语义化的 Title、Summary 和 Tags。
 func (s *gochatSummarizer) Summarize(ctx context.Context, chunks []core.Chunk) ([]core.Chunk, error) {
 	if len(chunks) == 0 {
 		return chunks, nil
@@ -68,7 +75,7 @@ func (s *gochatSummarizer) Summarize(ctx context.Context, chunks []core.Chunk) (
 		if strings.TrimSpace(chunks[i].Content) == "" {
 			continue
 		}
-		title, summary, err := s.summarizeOne(ctx, chunks[i].Content)
+		title, summary, tags, err := s.summarizeOne(ctx, chunks[i].Content)
 		if err != nil {
 			s.logger.Warn("Summarizer 处理分块失败",
 				"chunkID", chunks[i].ID,
@@ -82,45 +89,51 @@ func (s *gochatSummarizer) Summarize(ctx context.Context, chunks []core.Chunk) (
 		if summary != "" {
 			chunks[i].Summary = summary
 		}
+		if len(tags) > 0 {
+			chunks[i].Tags = tags
+		}
 	}
 	return chunks, nil
 }
 
 // summarizeResult 是 LLM 返回的 JSON 结构。
 type summarizeResult struct {
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
+	Title   string   `json:"title"`
+	Summary string   `json:"summary"`
+	Tags    []string `json:"tags"`
 }
 
-// summarizeOne 对单段内容调用 LLM，返回 (title, summary, error)。
-func (s *gochatSummarizer) summarizeOne(ctx context.Context, content string) (string, string, error) {
+// summarizeOne 对单段内容调用 LLM，返回 (title, summary, tags, error)。
+func (s *gochatSummarizer) summarizeOne(ctx context.Context, content string) (string, string, []string, error) {
 	resp, err := timedChat(ctx, s.client, []chat.Message{
 		chat.NewSystemMessage(s.buildSystemPrompt()),
 		chat.NewUserMessage(content),
-	}, s.logger, "Summarizer(单条)")
+	}, s.logger, "Summarizer(单条)", s.usageRecorder)
 	if err != nil {
-		return "", "", fmt.Errorf("LLM 调用失败: %w", err)
+		return "", "", nil, fmt.Errorf("LLM 调用失败: %w", err)
 	}
 
 	res, err := parseSummarizeResult(resp.Content)
 	if err != nil {
-		return "", "", fmt.Errorf("解析 LLM 响应失败: %w", err)
+		return "", "", nil, fmt.Errorf("解析 LLM 响应失败: %w", err)
 	}
-	return res.Title, res.Summary, nil
+	return res.Title, res.Summary, res.Tags, nil
 }
 
 // buildSystemPrompt 构建 Summarizer 的系统提示词。
 func (s *gochatSummarizer) buildSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("你是一名精准的文档摘要助手。\n")
-	sb.WriteString("请对给定文本片段生成严格的 JSON，仅包含两个字段：\n")
+	sb.WriteString("请对给定文本片段生成严格的 JSON，仅包含三个字段：\n")
 	sb.WriteString("- \"title\": 简洁、利于搜索的标题（最多 10 个词）\n")
-	sb.WriteString("- \"summary\": 1-3 句话，准确概括关键语义\n\n")
+	sb.WriteString("- \"summary\": 1-3 句话，准确概括关键语义\n")
+	sb.WriteString("- \"tags\": 3-5 个关键词标签，用于分类和检索（字符串数组）\n\n")
 	sb.WriteString("规则：\n")
 	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
-	sb.WriteString("- 标题和摘要使用 ")
+	sb.WriteString("- 标题、摘要和标签使用 ")
 	sb.WriteString(s.config.Language)
 	sb.WriteString(" 表达。\n")
+	sb.WriteString("- 标签应简洁，避免与标题重复。\n")
 	sb.WriteString("- 如果内容很短，标题和摘要也应简短但有意义。\n")
 	sb.WriteString("- 如果输入是代码，标题优先使用函数/类名，摘要描述其行为。\n")
 	return sb.String()
@@ -141,12 +154,13 @@ func parseSummarizeResult(resp string) (summarizeResult, error) {
 // =====================================================================
 
 // batchSummarizeEntry 是批量摘要的 JSON 序列化结构。
-// 同时用于 LLM 输入（title/summary 为空）和输出（LLM 填充 title/summary）。
+// 同时用于 LLM 输入（title/summary/tags 为空）和输出（LLM 填充 title/summary/tags）。
 type batchSummarizeEntry struct {
-	ChunkID string `json:"chunk_id"`
-	Content string `json:"content"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
+	ChunkID string   `json:"chunk_id"`
+	Content string   `json:"content"`
+	Title   string   `json:"title"`
+	Summary string   `json:"summary"`
+	Tags    []string `json:"tags"`
 }
 
 // SummarizeBatch 一次 LLM 请求处理所有分片（批量模式）。
@@ -175,7 +189,7 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 	resp, err := timedChat(ctx, s.client, []chat.Message{
 		chat.NewSystemMessage(s.buildBatchSystemPrompt()),
 		chat.NewUserMessage(string(input)),
-	}, s.logger, "Summarizer(批量)")
+	}, s.logger, "Summarizer(批量)", s.usageRecorder)
 	if err != nil {
 		return chunks, fmt.Errorf("SummarizeBatch: LLM 调用失败: %w", err)
 	}
@@ -200,6 +214,9 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 			if r.Summary != "" {
 				chunks[i].Summary = r.Summary
 			}
+			if len(r.Tags) > 0 {
+				chunks[i].Tags = r.Tags
+			}
 		}
 	}
 	return chunks, nil
@@ -209,19 +226,21 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 func (s *gochatSummarizer) buildBatchSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("你是一名精准的文档摘要助手。\n")
-	sb.WriteString("给定一个 JSON 数组形式的文档分块列表，请为每条记录生成 title 和 summary。\n")
+	sb.WriteString("给定一个 JSON 数组形式的文档分块列表，请为每条记录生成 title、summary 和 tags。\n")
 	sb.WriteString("输入格式：\n")
 	sb.WriteString("[{\"chunk_id\": \"...\", \"content\": \"...\"}]\n\n")
 	sb.WriteString("输出格式（严格的 JSON 数组，内容和输入一一对应）：\n")
-	sb.WriteString("[{\"chunk_id\": \"...\", \"title\": \"...\", \"summary\": \"...\"}]\n\n")
+	sb.WriteString("[{\"chunk_id\": \"...\", \"title\": \"...\", \"summary\": \"...\", \"tags\": [\"...\"]}]\n\n")
 	sb.WriteString("字段说明：\n")
 	sb.WriteString("- \"title\": 简洁、利于搜索的标题（最多 10 个词）\n")
-	sb.WriteString("- \"summary\": 1-3 句话，准确概括关键语义\n\n")
+	sb.WriteString("- \"summary\": 1-3 句话，准确概括关键语义\n")
+	sb.WriteString("- \"tags\": 3-5 个关键词标签，用于分类和检索（字符串数组）\n\n")
 	sb.WriteString("规则：\n")
 	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
-	sb.WriteString("- 标题和摘要使用 ")
+	sb.WriteString("- 标题、摘要和标签使用 ")
 	sb.WriteString(s.config.Language)
 	sb.WriteString(" 表达。\n")
+	sb.WriteString("- 标签应简洁，避免与标题重复。\n")
 	sb.WriteString("- 确保输出数组的长度与输入数组一致，chunk_id 一一对应。\n")
 	sb.WriteString("- 如果某个分块内容很短，标题和摘要也应简短但有意义。\n")
 	sb.WriteString("- 如果输入是代码段，标题优先使用函数/类名，摘要描述其行为。\n")

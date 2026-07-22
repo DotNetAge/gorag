@@ -3,19 +3,25 @@ package core
 // Chunk 元数据键名常量。
 // 仅用于中频包内属性，高频跨包属性已提升为 Chunk 结构体字段。
 const (
-	MetaHeadingLevel  = "heading_level"   // Markdown 标题层级
-	MetaHeadingPath   = "heading_path"    // Markdown 标题路径
-	MetaSymbolType    = "symbol_type"     // 代码符号类型（function/class/method 等）
-	MetaSignature     = "signature"       // 代码符号签名
-	MetaVisibility    = "visibility"      // 代码符号可见性（exported/unexported）
-	MetaReceiver      = "receiver"        // 代码符号接收者（如 Person）
-	MetaPackage       = "package"         // 代码包名
-	MetaMimeType      = "mime_type"       // MIME 类型
-	MetaDirectory     = "directory"       // 目录路径
-	MetaThumbnailSize = "thumbnail_size"  // 图片缩略图大小
-	MetaEntityIDs     = "entity_ids"      // 关联实体 ID 列表
-	MetaIsParent      = "is_parent"       // 是否为父文档分块
+	MetaHeadingLevel       = "heading_level"        // Markdown 标题层级
+	MetaHeadingPath        = "heading_path"         // Markdown 标题路径
+	MetaSymbolType         = "symbol_type"          // 代码符号类型（function/class/method 等）
+	MetaSignature          = "signature"            // 代码符号签名
+	MetaVisibility         = "visibility"           // 代码符号可见性（exported/unexported）
+	MetaReceiver           = "receiver"             // 代码符号接收者（如 Person）
+	MetaPackage            = "package"              // 代码包名
+	MetaMimeType           = "mime_type"            // MIME 类型
+	MetaDirectory          = "directory"            // 目录路径
+	MetaThumbnailSize      = "thumbnail_size"       // 图片缩略图大小
+	MetaEntityIDs          = "entity_ids"           // 关联实体 ID 列表
+	MetaIsParent           = "is_parent"            // 是否为父文档分块
+	MetaIsRegionDescriptor = "is_region_descriptor" // 是否为 README.md 描述的 Region 分片
+	MetaRegionGenerated    = "region_generated"     // 是否由 GoRAG 自动生成
 )
+
+// RegionDescriptorMarker 是生成式 README.md 文件的内容标记。
+// MarkdownChunker 检测到该标记时，将 README.md 作为单个分片处理，不再按 heading 切分。
+const RegionDescriptorMarker = "<!-- gorag-region-descriptor generated=\"true\" -->"
 
 // Chunk 分片：可索引的最小语义单元，承载语义线。
 //

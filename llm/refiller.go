@@ -31,9 +31,10 @@ type Refiller interface {
 
 // gochatRefiller 基于 gochat 的 Refiller 默认实现。
 type gochatRefiller struct {
-	config Config
-	client chat.Client
-	logger logging.Logger
+	config        Config
+	client        chat.Client
+	logger        logging.Logger
+	usageRecorder UsageRecorder
 }
 
 // NewRefiller 创建基于 gochat 的 Refiller。
@@ -61,6 +62,12 @@ func NewRefiller(cfg Config, logger logging.Logger) (Refiller, error) {
 	}, nil
 }
 
+// SetUsageRecorder 设置 token 用量记录回调。
+// 在 Refiller 每次成功调用 LLM 后自动记录用量信息。
+func (r *gochatRefiller) SetUsageRecorder(recorder UsageRecorder) {
+	r.usageRecorder = recorder
+}
+
 // Refill 调用 LLM 从预分块文本中提取实体和关系，并回填到 ChunkResult。
 func (r *gochatRefiller) Refill(ctx context.Context, result chunker.ChunkResult, schemas []EntitySchema) (chunker.ChunkResult, error) {
 	if len(result.Chunks) == 0 {
@@ -76,7 +83,7 @@ func (r *gochatRefiller) Refill(ctx context.Context, result chunker.ChunkResult,
 	resp, err := timedChat(ctx, r.client, []chat.Message{
 		chat.NewSystemMessage(r.buildSystemPrompt(schemas)),
 		chat.NewUserMessage(r.buildUserPrompt(content)),
-	}, r.logger, "Refiller")
+	}, r.logger, "Refiller", r.usageRecorder)
 	if err != nil {
 		return result, fmt.Errorf("llm.Refiller: LLM 调用失败: %w", err)
 	}

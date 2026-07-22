@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,20 @@ var (
 	showScore    bool
 	showDocID    bool
 	contentMax   int
+	filterPath   string // source 路径前缀过滤
+
+	// chunks 列表参数
+	chunksPage   int
+	chunksSize   int
+	chunksFilter string
+	chunksJSON   bool
+
+	// nodes 图导航参数
+	nodesHops int
+	nodesJSON bool
+
+	// cypher 查询参数
+	cypherJSON bool
 
 	// 初始化参数
 	initType      string
@@ -123,6 +138,7 @@ func main() {
 	queryCmd.Flags().BoolVar(&showScore, "score", true, "显示相似度分数")
 	queryCmd.Flags().BoolVar(&showDocID, "docid", true, "显示文档ID")
 	queryCmd.Flags().IntVar(&contentMax, "max", 500, "内容最大显示长度")
+	queryCmd.Flags().StringVarP(&filterPath, "filter", "f", "", "source 路径前缀过滤（只返回 Source 以该路径开头的分片）")
 
 	// doctor 子命令
 	doctorCmd := &cobra.Command{
@@ -194,7 +210,64 @@ LLM 参数:
 		Run:  runTree,
 	}
 
-	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd)
+	// chunks 子命令
+	chunksCmd := &cobra.Command{
+		Use:   "chunks",
+		Short: "分页列出已索引的 Chunk",
+		Long: `分页列出本地知识库中的 Chunk，显示 id、title、summary、tags。
+
+支持按 source 路径前缀过滤，支持 JSON 输出。
+
+示例:
+  grag chunks                    # 第 1 页，每页 20 条
+  grag chunks -p 2 -s 10         # 第 2 页，每页 10 条
+  grag chunks -f ./docs/         # 只列出 ./docs/ 下的 Chunk
+  grag chunks --json             # JSON 输出`,
+		Args: cobra.NoArgs,
+		Run:  runChunks,
+	}
+	chunksCmd.Flags().IntVarP(&chunksPage, "page", "p", 1, "页码（从 1 开始）")
+	chunksCmd.Flags().IntVarP(&chunksSize, "size", "s", 20, "每页数量")
+	chunksCmd.Flags().StringVarP(&chunksFilter, "filter", "f", "", "source 路径前缀过滤")
+	chunksCmd.Flags().BoolVar(&chunksJSON, "json", false, "以 JSON 格式输出")
+
+	// nodes 子命令
+	nodesCmd := &cobra.Command{
+		Use:   "nodes [dir]",
+		Short: "目录级多跳图节点查询",
+		Long: `以指定目录的 Region 节点为起点，查询其 N 跳相邻的图节点与关系。
+
+不指定 dir 时使用当前工作目录。跳数范围 1-3，默认 1。
+
+示例:
+  grag nodes                   # 当前目录，1 跳
+  grag nodes ./docs/           # ./docs/ 目录，1 跳
+  grag nodes ./docs/ -n 2      # ./docs/ 目录，2 跳
+  grag nodes --json            # JSON 输出`,
+		Args: cobra.MaximumNArgs(1),
+		Run:  runNodes,
+	}
+	nodesCmd.Flags().IntVarP(&nodesHops, "hops", "n", 1, "跳数（1-3）")
+	nodesCmd.Flags().BoolVar(&nodesJSON, "json", false, "以 JSON 格式输出")
+
+	// cypher 子命令
+	cypherCmd := &cobra.Command{
+		Use:   "cypher <query>",
+		Short: "执行原始 Cypher 图查询",
+		Long: `直接对底层图存储执行 Cypher 查询并返回结果。
+
+仅支持图索引器（graph / hyper）。查询语句请用引号包裹。
+
+示例:
+  grag cypher "MATCH (n) RETURN count(n) AS cnt"
+  grag cypher "MATCH (n:Person) RETURN n.name LIMIT 10"
+  grag cypher "MATCH (n)-[r]->(m) RETURN n.name, r.type, m.name LIMIT 20" --json`,
+		Args: cobra.ExactArgs(1),
+		Run:  runCypher,
+	}
+	cypherCmd.Flags().BoolVar(&cypherJSON, "json", false, "以 JSON 格式输出")
+
+	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd, chunksCmd, nodesCmd, cypherCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -356,6 +429,9 @@ func runQuery(cmd *cobra.Command, args []string) {
 
 	searchText = args[0]
 
+	// 解析多关键字组，以 | 分隔
+	queries := splitQueryGroups(searchText)
+
 	ui.Title("查询")
 
 	svc, err := gorag.NewRAGService(ragDir)
@@ -365,12 +441,21 @@ func runQuery(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	ui.Info("查询: %s", searchText)
+	if len(queries) > 1 {
+		ui.Info("查询组: %v", queries)
+	} else {
+		ui.Info("查询: %s", searchText)
+	}
 
 	spinner := ui.NewSpinner("正在搜索...")
 	spinner.Start()
 
-	hit, err := svc.Query(context.Background(), searchText)
+	var hit *core.Hit
+	if len(queries) == 1 {
+		hit, err = svc.Query(context.Background(), queries[0], filterPath)
+	} else {
+		hit, err = svc.QueryMulti(context.Background(), queries, filterPath)
+	}
 	if err != nil {
 		spinner.Stop()
 		ui.Error("搜索失败: %v", err)
@@ -640,6 +725,222 @@ func runTree(cmd *cobra.Command, args []string) {
 	renderTree(root, "")
 }
 
+// runChunks 执行 chunks 子命令：分页列出 Chunk。
+func runChunks(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	chunks, total, err := svc.ListChunks(context.Background(), chunksPage, chunksSize, chunksFilter)
+	if err != nil {
+		ui.Error("列出分片失败: %v", err)
+		os.Exit(1)
+	}
+
+	if chunksJSON {
+		output := struct {
+			Page  int         `json:"page"`
+			Size  int         `json:"size"`
+			Total int         `json:"total"`
+			Items []chunkItem `json:"items"`
+		}{
+			Page:  chunksPage,
+			Size:  chunksSize,
+			Total: total,
+			Items: formatChunkItems(chunks),
+		}
+		data, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			ui.Error("序列化 JSON 失败: %v", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	// 终端输出
+	ui.Title("Chunk 列表")
+	ui.KeyValue("页码", fmt.Sprintf("%d", chunksPage))
+	ui.KeyValue("每页", fmt.Sprintf("%d", chunksSize))
+	ui.KeyValue("总数", fmt.Sprintf("%d", total))
+	if chunksFilter != "" {
+		ui.KeyValue("过滤", chunksFilter)
+	}
+
+	if len(chunks) == 0 {
+		ui.Info("没有更多分片")
+		return
+	}
+
+	for i, ch := range chunks {
+		fmt.Printf("\n[%d] %s\n", (chunksPage-1)*chunksSize+i+1, ch.ID)
+		fmt.Printf("Title:   %s\n", ch.Title)
+		fmt.Printf("Summary: %s\n", truncateString(ch.Summary, 120))
+		if len(ch.Tags) > 0 {
+			fmt.Printf("Tags:    %s\n", strings.Join(ch.Tags, ", "))
+		} else {
+			fmt.Printf("Tags:    -\n")
+		}
+	}
+}
+
+// chunkItem 是 chunks 命令 JSON 输出的单条结构。
+type chunkItem struct {
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Summary string   `json:"summary"`
+	Tags    []string `json:"tags"`
+}
+
+// formatChunkItems 将 core.Chunk 切片转换为 chunkItem 切片。
+func formatChunkItems(chunks []core.Chunk) []chunkItem {
+	items := make([]chunkItem, 0, len(chunks))
+	for _, ch := range chunks {
+		items = append(items, chunkItem{
+			ID:      ch.ID,
+			Title:   ch.Title,
+			Summary: ch.Summary,
+			Tags:    ch.Tags,
+		})
+	}
+	return items
+}
+
+// runNodes 执行 nodes 子命令：目录级多跳图节点查询。
+func runNodes(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	dir := ""
+	if len(args) > 0 {
+		dir = args[0]
+	}
+
+	if nodesHops < 1 || nodesHops > 3 {
+		ui.Error("跳数范围必须在 1-3 之间")
+		os.Exit(1)
+	}
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	result, err := svc.Nodes(context.Background(), dir, nodesHops)
+	if err != nil {
+		ui.Error("图节点查询失败: %v", err)
+		os.Exit(1)
+	}
+
+	if nodesJSON {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			ui.Error("序列化 JSON 失败: %v", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	ui.Title("图节点")
+	ui.KeyValue("Region", result.RegionName)
+	ui.KeyValue("RegionID", truncateString(result.RegionID, 16))
+	ui.KeyValue("跳数", fmt.Sprintf("%d", nodesHops))
+	ui.KeyValue("节点数", fmt.Sprintf("%d", len(result.Nodes)))
+	ui.KeyValue("关系数", fmt.Sprintf("%d", len(result.Edges)))
+
+	if len(result.Nodes) == 0 {
+		ui.Info("未找到节点")
+		return
+	}
+
+	for _, n := range result.Nodes {
+		label := "-"
+		if len(n.Labels) > 0 {
+			label = strings.Join(n.Labels, ", ")
+		}
+		fmt.Printf("\n[%s] %s\n", label, n.Name)
+		fmt.Printf("  ID:   %s\n", n.ID)
+		if len(n.SourceChunkIDs) > 0 {
+			fmt.Printf("  SourceChunks: %s\n", strings.Join(n.SourceChunkIDs, ", "))
+		}
+	}
+
+	if len(result.Edges) > 0 {
+		fmt.Println("\n关系:")
+		for _, e := range result.Edges {
+			fmt.Printf("  %s --[%s]--> %s\n", truncateString(e.Source, 16), e.Type, truncateString(e.Target, 16))
+		}
+	}
+}
+
+// runCypher 执行 cypher 子命令：原始 Cypher 图查询。
+func runCypher(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	query := args[0]
+	if query == "" {
+		ui.Error("Cypher 查询不能为空")
+		os.Exit(1)
+	}
+
+	svc, err := gorag.NewRAGService(ragDir)
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	rows, err := svc.Cypher(context.Background(), query)
+	if err != nil {
+		ui.Error("Cypher 查询失败: %v", err)
+		os.Exit(1)
+	}
+
+	if cypherJSON {
+		data, err := json.MarshalIndent(rows, "", "  ")
+		if err != nil {
+			ui.Error("序列化 JSON 失败: %v", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	ui.Title("Cypher 查询结果")
+	ui.KeyValue("行数", fmt.Sprintf("%d", len(rows)))
+
+	if len(rows) == 0 {
+		ui.Info("无结果")
+		return
+	}
+
+	for i, row := range rows {
+		fmt.Printf("\n--- 行 %d ---\n", i+1)
+		for k, v := range row {
+			fmt.Printf("%s: %v\n", k, v)
+		}
+	}
+}
+
 // renderTree 递归渲染目录树。
 func renderTree(node *gorag.SourceTreeNode, prefix string) {
 	if node == nil {
@@ -660,7 +961,11 @@ func renderTree(node *gorag.SourceTreeNode, prefix string) {
 		}
 
 		if child.IsDir {
-			fmt.Printf("%s%s%s/\n", prefix, branch, child.Name)
+			line := fmt.Sprintf("%s%s%s/", prefix, branch, child.Name)
+			if child.Summary != "" {
+				line = fmt.Sprintf("%s - %s", line, truncateString(child.Summary, 80))
+			}
+			fmt.Println(line)
 			renderTree(child, prefix+connector)
 		} else {
 			renderFileNode(child, prefix, branch, connector, isLast)
@@ -807,4 +1112,31 @@ func formatPos(start, end int) string {
 		return ""
 	}
 	return fmt.Sprintf("  [L%d-L%d]", start, end)
+}
+
+// truncateString 截断字符串到最大长度，超出时追加省略号。
+func truncateString(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return s
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// splitQueryGroups 将查询字符串按 | 拆分为多个关键字组，并去除首尾空格。
+func splitQueryGroups(text string) []string {
+	parts := strings.Split(text, "|")
+	var groups []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			groups = append(groups, p)
+		}
+	}
+	if len(groups) == 0 {
+		groups = append(groups, strings.TrimSpace(text))
+	}
+	return groups
 }

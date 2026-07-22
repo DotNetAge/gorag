@@ -2,10 +2,12 @@ package chunker
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
+	"github.com/DotNetAge/gorag/v2/utils"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/markdown"
 	tsmd "github.com/smacker/go-tree-sitter/markdown/tree-sitter-markdown"
@@ -61,6 +63,25 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	}
 
 	src := []byte(content)
+
+	dir := filepath.Dir(doc.FileName())
+	regionName := filepath.Base(dir)
+
+	// README.md 生成式路径：检测到 RegionDescriptorMarker 直接返回单 Chunk，不再按 heading 切分
+	if isRegionDescriptor(doc.FileName()) && strings.Contains(content, core.RegionDescriptorMarker) {
+		chunk := buildChunk(doc, 0, 0, len(content), regionName, content)
+		chunk.Metadata = map[string]any{
+			core.MetaIsRegionDescriptor: true,
+			core.MetaRegionGenerated:    true,
+		}
+		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
+		regionNode := buildRegionNode(doc, dir, []string{chunks[0].ID})
+		return ChunkResult{
+			Chunks: chunks,
+			Nodes:  []core.Node{regionNode},
+			Edges:  nil,
+		}, nil
+	}
 
 	// 1. 用 tree-sitter-markdown 解析得到 block 树
 	ctx := context.Background()
@@ -159,6 +180,19 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	// 7. 构建 heading 层级结构对应的 Nodes/Edges
 	nodes, edges := buildMarkdownGraph(doc, chunks, headings)
+
+	// README.md 普通路径：产出 Region 节点，顶层 Chunk Title 改为目录名
+	if isRegionDescriptor(doc.FileName()) {
+		applyRegionDescriptorMetadata(chunks, dir)
+		var topChunkIDs []string
+		for _, c := range chunks {
+			if c.ParentID == "" {
+				topChunkIDs = append(topChunkIDs, c.ID)
+			}
+		}
+		regionNode := buildRegionNode(doc, dir, topChunkIDs)
+		nodes = append([]core.Node{regionNode}, nodes...)
+	}
 
 	// 8. 统一填充 Summary：每个 Chunk 取内容前 2 个句子
 	for i := range chunks {
@@ -337,4 +371,39 @@ func buildChunkWithMeta(
 	}
 	c.Metadata[core.MetaHeadingLevel] = headingLevel
 	return c
+}
+
+// isRegionDescriptor 判断文件是否为 README.md（不区分大小写）。
+func isRegionDescriptor(fileName string) bool {
+	return strings.EqualFold(filepath.Base(fileName), "README.md")
+}
+
+// applyRegionDescriptorMetadata 为 README.md 分块设置 Region 元数据，
+// 并将顶层 Chunk 的 Title 改为目录名。
+func applyRegionDescriptorMetadata(chunks []core.Chunk, dir string) {
+	regionName := filepath.Base(dir)
+	for i := range chunks {
+		if chunks[i].Metadata == nil {
+			chunks[i].Metadata = map[string]any{}
+		}
+		chunks[i].Metadata[core.MetaIsRegionDescriptor] = true
+		if chunks[i].ParentID == "" {
+			chunks[i].Title = regionName
+		}
+	}
+}
+
+// buildRegionNode 构造 Region 节点。
+// RegionID 与 Chunk.RegionID 保持一致：目录路径的 SHA256。
+func buildRegionNode(doc document.RawDoc, dir string, chunkIDs []string) core.Node {
+	regionID := utils.GenerateID([]byte(dir))
+	regionName := filepath.Base(dir)
+	return core.Node{
+		ID:             regionID,
+		Labels:         []string{core.LabelRegion},
+		Name:           regionName,
+		Properties:     map[string]any{core.PropDir: dir},
+		SourceChunkIDs: chunkIDs,
+		SourceDocIDs:   []string{doc.ID()},
+	}
 }
