@@ -1,3 +1,15 @@
+# Release 自动发布工作流
+#
+# 推送 v* 标签时触发，自动执行：
+#   1. goreleaser — 构建多平台二进制、归档、deb/rpm 包、
+#      发布到 GitHub Releases、推送 Homebrew formula 至 homebrew-gorag
+#   2. publish-packages — 将 deb/rpm 同步至 gh-pages 分支，
+#      构建 APT（deb）和 YUM（rpm）仓库元数据，
+#      供用户通过 apt/yum 源安装。
+#
+# 所需 Secrets:
+#   HOMEBREW_TAP_TOKEN — 有权限 push 到 DotNetAge/homebrew-gorag 的 PAT
+
 name: Release
 
 on:
@@ -8,78 +20,149 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+# 确保同一 tag 只有一个 release 在运行
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: ''
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            ext: ''
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            ext: ''
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            ext: ''
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            ext: '.exe'
-
-    runs-on: ${{ matrix.os }}
-
+  goreleaser:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6.3.0
+        uses: actions/setup-go@v5
         with:
           go-version: '1.25.1'
           cache: true
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          OUTPUT_NAME="gorag_${VERSION}_${GOOS}_${GOARCH}${matrix.ext}"
-          
-          go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd
-          
-          echo "Built: ${OUTPUT_NAME}"
-          ls -la "${OUTPUT_NAME}"
-
-      - name: Create tarball
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -j "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.exe"
-          else
-            tar -czf "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "gorag_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          fi
-
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          tag_name: ${{ github.ref }}
-          release_name: gorag ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            gorag_v*.tar.gz
-            gorag_v*.zip
+          distribution: goreleaser
+          version: '~> 2'
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # 上传 deb/rpm 供 publish-packages 作业使用
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/*.deb
+          if-no-files-found: ignore
+
+      - name: Upload rpm artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-rpm
+          path: dist/*.rpm
+          if-no-files-found: ignore
+
+  # 构建 APT 和 YUM 仓库，推送到 gh-pages 分支
+  publish-packages:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Initialize gh-pages branch if missing
+        run: |
+          if [ ! -d pages ] || [ ! -f pages/.git/config ]; then
+            rm -rf pages
+            git init -b gh-pages pages
+            cd pages
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            echo "# gorag package repository" > README.md
+            git add README.md
+            git commit -m "chore: initialize gh-pages"
+            git push origin gh-pages
+            echo "gh-pages 分支已初始化"
+          fi
+
+      - name: Download packages from release
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install repo tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dpkg-dev createrepo-c
+
+      # ──────────────────────────── APT 仓库 ────────────────────────────
+      - name: Build APT repository
+        working-directory: pages
+        run: |
+          # 将 deb 复制到 pool/
+          mkdir -p apt/pool/main/g/gorag
+          cp ../dist/*.deb apt/pool/main/g/gorag/ 2>/dev/null || true
+
+          # 生成 Packages.gz
+          mkdir -p apt/dists/stable/main/binary-amd64 apt/dists/stable/main/binary-arm64
+          dpkg-scanpackages --arch amd64 apt/pool > apt/dists/stable/main/binary-amd64/Packages 2>/dev/null || true
+          dpkg-scanpackages --arch arm64 apt/pool > apt/dists/stable/main/binary-arm64/Packages 2>/dev/null || true
+          gzip -9 -f apt/dists/stable/main/binary-amd64/Packages || true
+          gzip -9 -f apt/dists/stable/main/binary-arm64/Packages || true
+
+          # 生成 Release 文件
+          printf 'Origin: DotNetAge\nLabel: gorag APT Repository\nSuite: stable\nCodename: stable\nArchitectures: amd64 arm64\nComponents: main\nDescription: GoRAG APT package repository\nDate: %s\n' "$(date -Ru)" > apt/dists/stable/Release
+
+          # 无需 GPG 签名（用户安装时加 [trusted=yes] 即可）
+
+          echo "APT repo 构建完成"
+          find apt -type f | head -20
+
+      # ──────────────────────────── YUM 仓库 ────────────────────────────
+      - name: Build YUM repository
+        working-directory: pages
+        run: |
+          mkdir -p yum
+          cp ../dist/*.rpm yum/ 2>/dev/null || true
+
+          if ls yum/*.rpm 2>/dev/null; then
+            createrepo_c yum/
+            echo "YUM repo 构建完成"
+          else
+            echo "没有 rpm 文件，跳过 YUM repo 构建"
+          fi
+
+      # ──────────────────────────── 部署 ────────────────────────────
+      - name: Commit and push to gh-pages
+        working-directory: pages
+        run: |
+          # 删掉临时文件
+          rm -rf ../dist
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore(packages): update APT/YUM repos for ${{ github.ref_name }}"
+            git push
+            echo "已推送到 gh-pages"
+          else
+            echo "无变更，跳过提交"
+          fi

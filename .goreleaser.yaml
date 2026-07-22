@@ -1,0 +1,110 @@
+# GoReleaser 配置文件
+# 用于自动构建、发布至 GitHub Releases、Homebrew、APT 和 YUM 仓库。
+#
+# 参考: https://goreleaser.com
+
+version: 2
+
+project_name: gorag
+
+env:
+  - GO_VERSION=1.25.1
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gorag
+    main: ./cmd
+    binary: gorag
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+nfpms:
+  - id: packages
+    package_name: gorag
+    file_name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Arch }}
+    homepage: https://github.com/DotNetAge/gorag
+    description: >-
+      GoRAG — 本地知识库检索增强生成（RAG）工具包。
+      支持语义检索、图检索与混合索引。
+    maintainer: DotNetAge <ray@rayainfo.cn>
+    license: MIT
+    vendor: DotNetAge
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/gorag/copyright
+        file_info:
+          mode: 0644
+    overrides:
+      rpm:
+        dependencies:
+          - glibc >= 2.28
+      deb:
+        dependencies:
+          - libc6 >= 2.28
+
+homebrew_casks:
+  - name: gorag
+    binaries:
+      - gorag
+    repository:
+      owner: DotNetAge
+      name: homebrew-gorag
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore(cask): update gorag to {{ .Tag }}"
+    homepage: https://github.com/DotNetAge/gorag
+    description: "GoRAG — 本地知识库检索增强生成（RAG）工具包"
+    license: "MIT"
+    url:
+      template: "https://github.com/DotNetAge/gorag/releases/download/{{ .Tag }}/gorag_{{ .Version }}_{{ .Os }}_{{ .Arch }}.tar.gz"
+    caveats: |
+      To install, run: brew install gorag
+    skip_upload: auto
+
+release:
+  github:
+    owner: DotNetAge
+    name: gorag
+  draft: false
+  prerelease: auto
+  name_template: "gorag {{ .Tag }}"
+
+changelog:
+  use: github-native

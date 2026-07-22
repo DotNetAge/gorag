@@ -1,151 +1,219 @@
 <div align="center">
-  <h1>🦖 GoRAG</h1>
-  <p><b>The Expert-Grade, High-Performance Modular RAG Framework for Go</b></p>
-  
-  [![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
+  <h1>GoRAG</h1>
+  <p><b>A Local RAG (Retrieval-Augmented Generation) Toolkit</b></p>
+
+  [![Go Version](https://img.shields.io/badge/go-1.25%2B-blue.svg)](https://golang.org)
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-  [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
-  [![Documentation](https://img.shields.io/badge/docs-gorag.rayainfo.cn-e53734.svg)](https://gorag.rayainfo.cn)
 
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
 
 ---
 
-**GoRAG** is a production-ready Retrieval-Augmented Generation (RAG) framework built for high-scale AI engineering. It features a **three-layer architecture** that serves developers at all skill levels.
+GoRAG is a local-first RAG toolkit with both CLI and Go API, supporting semantic vector search, graph-based retrieval, and hybrid indexing.
 
-## 🏗️ Three-Layer Architecture
+---
 
-```mermaid
-graph TB
-    subgraph Pattern层["Pattern Layer (Application)"]
-        P1["NativeRAG<br/>Vector Retrieval"]
-        P2["GraphRAG<br/>Knowledge Graph"]
-    end
-    
-    subgraph Pipeline层["Pipeline Layer (Assembly)"]
-        I["Indexer"]
-        R["Retriever"]
-        D["Repository"]
-    end
-    
-    subgraph Step层["Step Layer (Function)"]
-        S1["Independent Modules<br/>Rewrite/Chunk/Embed..."]
-    end
-    
-    Pattern层 --> Pipeline层
-    Pipeline层 --> Step层
+## Features
+
+- **Semantic Search**: Multi-dimension vector matching on Title / Summary / Content
+- **Graph Search**: Multi-hop neighbor traversal via knowledge graph, native Cypher support
+- **Hybrid Indexing** (Hyper): Dual pipeline orchestration of semantic + graph, fused search results
+- **LLM Enhancement**: Automatic title/summary/tag generation for chunks, entity and relation extraction
+- **Region System**: Automatic directory-to-Region mapping, auto-generated README summaries
+- **Incremental Indexing**: mtime+size+hash change detection, re-index only changed files
+- **Incremental LLM Processing**: Per-chunk status tracking, resume from breakpoint, auto-reprocess on content change
+- **Progress Tracking**: SQLite metadata store for real-time index and LLM status
+- **Multi-format Support**: PDF / DOCX / HTML / EPUB / PPTX / Markdown / CSV / XLSX / JSON / YAML / images / code
+- **Zero CGO**: Pure Go, painless cross-compilation
+
+---
+
+## Installation
+
+### Homebrew
+
+```bash
+brew install DotNetAge/homebrew-gorag/gorag
 ```
 
-| Layer | Who Uses | Responsibility |
-|-------|----------|----------------|
-| **Pattern** | Application Developers | Choose RAG mode, configure Options |
-| **Pipeline** | Advanced Developers | Assemble Indexer/Retriever/Repository |
-| **Step** | Framework Developers | Extend independent modules |
+### From source
+
+```bash
+go install github.com/DotNetAge/gorag/v2/cmd@latest
+```
+
+### Pre-built binaries
+
+Download from [GitHub Releases](https://github.com/DotNetAge/gorag/releases).
 
 ---
 
-## ✨ Key Features
+## Quick Start
 
-- 🚀 **Performance First**: Concurrent workers and streaming parsers with `O(1)` memory efficiency
-- 🏗️ **Pipeline-Based Architecture**: Every step is explicit, traceable, and pluggable
-- 🧠 **Three-Phase Enhancement**: Query enhancement → Retrieval → Result enhancement
-- 🕸️ **Advanced GraphRAG**: Native support for Neo4j, SQLite, and BoltDB
-- 🔭 **Built-in Observability**: Comprehensive distributed tracing
-- 📦 **Zero Dependencies**: Pure Go implementation with auto-download models
+### CLI
 
----
+```bash
+# 1. Initialize a RAG library in your project
+cd my-project
+grag init
 
-## 🚀 Quick Start
+# 2. Index files
+grag index .
 
-### NativeRAG (Vector Retrieval)
+# 3. Semantic search
+grag query "What is GoRAG"
 
-Best for document QA and semantic search:
+# 4. Check status
+grag status
+
+# 5. Optional: enable LLM enhancement
+export GORAG_API_KEY=sk-xxx
+grag update . --llm-url https://api.openai.com/v1 --llm-model gpt-4o-mini
+
+# 6. Graph exploration
+grag nodes ./src -n 2
+
+# 7. Directory tree
+grag tree
+```
+
+### Go API
 
 ```go
-import "github.com/DotNetAge/gorag/pkg/pattern"
+import gorag "github.com/DotNetAge/gorag/v2"
 
-// Create a NativeRAG with auto-configuration
-rag, _ := pattern.NativeRAG("my-app",
-    pattern.WithBGE("bge-small-zh-v1.5"),
-)
+svc, err := gorag.NewRAGService("./my-project.rag")
+if err != nil {
+    log.Fatal(err)
+}
+defer svc.Stop()
 
-// Index documents
-rag.IndexDirectory(ctx, "./docs", true)
+ctx := context.Background()
+svc.IndexerSvc().Index(ctx, "./docs")
 
-// Retrieve
-results, _ := rag.Retrieve(ctx, []string{"What is GoRAG?"}, 5)
-```
-
-### GraphRAG (Knowledge Graph)
-
-Best for complex relationship reasoning:
-
-```go
-rag, _ := pattern.GraphRAG("knowledge-graph",
-    pattern.WithBGE("bge-small-zh-v1.5"),
-    pattern.WithNeoGraph("neo4j://localhost:7687", "neo4j", "password", "neo4j"),
-)
-
-// Add nodes and edges
-rag.AddNode(ctx, &core.Node{ID: "person-1", Type: "Person", ...})
-rag.AddEdge(ctx, &core.Edge{Source: "person-1", Target: "company-1", ...})
-
-// Query neighbors
-neighbors, edges, _ := rag.GetNeighbors(ctx, "person-1", 1, 10)
+hit, _ := svc.Querier().Query(ctx, "RAG architecture design", "")
+result, _ := svc.Explorer().Nodes(ctx, "./docs", 2)
 ```
 
 ---
 
-## 📚 Documentation
+## CLI Reference
 
-### Getting Started
-
-- [Quick Start Guide](./QUICKSTART.md) - Pattern layer in 15 minutes
-- [NativeRAG Details](./docs/pattern/native-rag.md) - Three-phase enhancement
-- [GraphRAG Details](./docs/pattern/graph-rag.md) - Knowledge graph reasoning
-- [Options Reference](./docs/pattern/options.md) - All configuration options
-
-### Advanced Topics
-
-- [Development Guide](./DEVELOPMENT.md) - Pipeline layer development
-- [Indexer Development](./docs/pipeline/indexer.md) - Build custom indexers
-- [Retriever Development](./docs/pipeline/retriever.md) - Build custom retrievers
-
-### Step Layer
-
-- [Step Development Guide](./docs/steps/creating-steps.md) - Create new steps
+| Command                             | Description                               |
+| ----------------------------------- | ----------------------------------------- |
+| `grag init [-t type]`               | Initialize a RAG library                  |
+| `grag index [path]`                 | Index files or directories                |
+| `grag update [path] [llm-options]`  | Incremental update + LLM enhancement      |
+| `grag query <text> [-f] [-k]`       | Semantic search (multi-keyword with `\|`) |
+| `grag chunks [-p] [-s] [-f]`        | Paginated chunk listing                   |
+| `grag nodes [dir] [-n]`             | Directory-level multi-hop graph query     |
+| `grag cypher <query>`               | Run Cypher graph query                    |
+| `grag status [-s] [-f] [--summary]` | Index and LLM processing status           |
+| `grag tree`                         | Directory tree view                       |
+| `grag info`                         | Library information                       |
+| `grag doctor`                       | Configuration diagnostics                 |
+| `grag logs`                         | View logs                                 |
 
 ---
 
-## 🔭 Built-in Observability
+## Core Concepts
 
-```go
-idx, _ := indexer.DefaultAdvancedIndexer(
-    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true),
-    indexer.WithPrometheusMetrics(":8080"),
-    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),
-)
+### .rag Library
+
+Each RAG project corresponds to a `.rag` directory:
+
+```
+.rag/
+├── config.yml          # Configuration (indexer type, model path, LLM, etc.)
+├── meta.db             # SQLite metadata store (document/chunk status)
+├── vectors/            # Vector store
+├── graph/              # Graph store (graph/hyper indexer only)
+├── logs/               # Runtime logs
+└── model/              # Embedding model file
 ```
 
+### Indexer Types
+
+| Type       | Description                                |
+| ---------- | ------------------------------------------ |
+| `semantic` | Pure vector semantic indexing              |
+| `graph`    | Pure graph structure indexing              |
+| `hyper`    | Semantic + graph hybrid indexing (default) |
+
+### Chunk
+
+The smallest indexable unit with Title, Summary, Content, Tags, Source, RegionID.
+
+### Region
+
+A directory-level semantic abstraction. Each indexed directory maps to a Region node:
+- **RegionID**: SHA256 hash of the absolute directory path
+- **Auto-README**: System generates summary README.md for directories without one
+
 ---
 
-## ⚡ Technical Standards
+## Architecture
 
-- **Go 1.24+**: Latest language features
-- **Zero-CGO SQLite**: Painless cross-compilation
-- **Clean Architecture**: Strict separation of interfaces and implementations
-- **Modular Steps**: Reuse steps in any custom pipeline
+```
+┌──────────────────────────────────────────┐
+│              CLI (grag)                  │
+│   cmd/main.go + cmd/info.go             │
+└────────────────┬─────────────────────────┘
+                 │
+┌────────────────▼─────────────────────────┐
+│         IndexingService (Aggregate)       │
+│  ┌─────────────────────────────────────┐  │
+│  │  IndexerSvc · QuerySvc · GraphSvc  │  │
+│  │  AdminSvc  · RegionSvc · LLMSvc    │  │
+│  └─────────────────────────────────────┘  │
+└────────────────┬─────────────────────────┘
+                 │
+    ┌────────────┼────────────┐
+    ▼            ▼            ▼
+ Semantic    Graph       Hyper(Orchestrator)
+ Indexer    Indexer     ┌────┴────┐
+                        ▼         ▼
+                    Semantic   Graph
+                    Indexer    Indexer
+```
+
+- **SemanticIndexer**: Chunk → vectorize → write to VectorStore
+- **GraphIndexer**: Entities/relationships → write to GraphStore
+- **HyperIndexer**: Orchestrates semantic + graph pipelines, supports Summarizer / Refiller injection
 
 ---
 
-## 🤝 Contributing
+## LLM Enhancement
 
-We aim to build the most robust AI infrastructure for the Go ecosystem.
+`grag update` runs a two-phase incremental LLM pipeline:
 
-- Check our [Contributing Guidelines](CONTRIBUTING.md)
+1. **Summarizer**: Generates Title / Summary / Tags for document-class chunks
+2. **Refiller**: Extracts entities and relationships based on registered Schemas, writes to GraphStore
 
-## 📄 License
+Configuration:
 
-GoRAG is licensed under the [MIT License](LICENSE).
+```bash
+grag update . \
+  --llm-key <API_KEY> \
+  --llm-url https://api.openai.com/v1 \
+  --llm-model gpt-4o-mini \
+  --schema ./schemas
+```
+
+Environment variable: `GORAG_API_KEY`
+
+---
+
+## Documentation
+
+- [CLI Reference](./docs/v2/CLI.md) — Complete command reference
+- [Service Layer Guide](./docs/v2/Services.md) — Go API documentation
+- [Region System](./docs/v2/Region.md) — Region abstraction design
+
+---
+
+## License
+
+GoRAG is released under the [MIT License](./LICENSE).

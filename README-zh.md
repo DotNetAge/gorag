@@ -1,151 +1,224 @@
 <div align="center">
-  <h1>🦖 GoRAG</h1>
-  <p><b>工业级、高性能、模块化的 Go 语言 RAG 框架</b></p>
-  
-  [![Go Report Card](https://goreportcard.com/badge/github.com/DotNetAge/gorag)](https://goreportcard.com/report/github.com/DotNetAge/gorag)
+  <h1>GoRAG</h1>
+  <p><b>本地知识库检索增强生成（RAG）工具包</b></p>
+
+  [![Go Version](https://img.shields.io/badge/go-1.25%2B-blue.svg)](https://golang.org)
   [![Go Reference](https://pkg.go.dev/badge/github.com/DotNetAge/gorag.svg)](https://pkg.go.dev/github.com/DotNetAge/gorag)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-  [![Go Version](https://img.shields.io/badge/go-1.24%2B-blue.svg)](https://golang.org)
-  [![Documentation](https://img.shields.io/badge/docs-gorag.rayainfo.cn-e53734.svg)](https://gorag.rayainfo.cn)
 
   [**English**](./README.md) | [**中文文档**](./README-zh.md)
 </div>
 
 ---
 
-**GoRAG** 是一个生产就绪的检索增强生成（RAG）框架，采用**三层架构**设计，满足不同层次开发者的需求。
+GoRAG 是一个本地优先的 RAG（检索增强生成）工具包，提供 CLI 与 Go API 两套使用方式。支持语义向量检索、图结构检索以及两者的混合索引。
 
-## 🏗️ 三层架构
+---
 
-```mermaid
-graph TB
-    subgraph Pattern层["Pattern 层（应用层）"]
-        P1["NativeRAG<br/>向量检索专家"]
-        P2["GraphRAG<br/>图谱推理专家"]
-    end
-    
-    subgraph Pipeline层["Pipeline 层（组装层）"]
-        I["Indexer<br/>索引器"]
-        R["Retriever<br/>召回器"]
-        D["Repository<br/>数据仓库"]
-    end
-    
-    subgraph Step层["Step 层（功能层）"]
-        S1["独立功能模块<br/>查询重写/分块/嵌入..."]
-    end
-    
-    Pattern层 --> Pipeline层
-    Pipeline层 --> Step层
+## 功能特性
+
+- **语义检索**：基于向量嵌入的多维度语义匹配（Title / Summary / Content）
+- **图检索**：基于知识图谱的多跳邻居查询，支持 Cypher 原生查询
+- **混合索引**（Hyper）：语义线 + 图线双线编排，搜索结果可融合
+- **LLM 增强**：自动为分片生成标题/摘要/标签，提取实体与关系
+- **区域（Region）机制**：目录自动映射为 Region 节点，自动生成目录摘要 README
+- **增量索引**：基于 mtime+size+hash 的文件变更检测，只索引变更内容
+- **增量 LLM 处理**：按分片状态跟踪，断点续处理，内容变更自动重处理
+- **文件进度跟踪**：SQLite 元数据存储，实时查看索引与 LLM 处理状态
+- **多格式支持**：PDF / DOCX / HTML / EPUB / PPTX / Markdown / CSV / XLSX / JSON / YAML / 图片 / 代码等
+- **零 CGO**：纯 Go 实现，无痛交叉编译
+
+---
+
+## 安装
+
+### Homebrew
+
+```bash
+brew install DotNetAge/homebrew-gorag/gorag
 ```
 
-| 层次 | 谁使用 | 职责 |
-|------|--------|------|
-| **Pattern 层** | 一般开发者 | 选择 RAG 模式，配置 Options |
-| **Pipeline 层** | 高级开发者 | 组装 Indexer/Retriever/Repository |
-| **Step 层** | 底层开发者 | 扩展独立功能模块 |
+### 从源码
+
+```bash
+go install github.com/DotNetAge/gorag/v2/cmd@latest
+```
+
+### 下载预编译二进制
+
+从 [GitHub Releases](https://github.com/DotNetAge/gorag/releases) 下载对应平台的归档包。
 
 ---
 
-## ✨ 核心特性
+## 快速开始
 
-- 🚀 **性能优先**：并发处理和流式解析，O(1) 内存效率
-- 🏗️ **Pipeline 架构**：每个步骤明确、可追踪、可插拔
-- 🧠 **三阶段增强**：查询增强 → 检索 → 结果增强
-- 🕸️ **高级 GraphRAG**：原生支持 Neo4j、SQLite、BoltDB
-- 🔭 **内置可观测性**：全面的分布式追踪
-- 📦 **零依赖**：纯 Go 实现，模型自动下载
+### 使用 CLI
 
----
+```bash
+# 1. 在项目目录中初始化 RAG 库（默认 hyper 混合索引）
+cd my-project
+grag init
 
-## 🚀 快速开始
+# 2. 索引文件
+grag index .
 
-### NativeRAG（向量检索）
+# 3. 语义检索
+grag query "GoRAG 是什么"
 
-适合文档问答和语义搜索：
+# 4. 查看库状态
+grag status
+
+# 5. 可选：启用 LLM 摘要与实体抽取
+export GORAG_API_KEY=sk-xxx
+grag update . --llm-url https://api.openai.com/v1 --llm-model gpt-4o-mini
+
+# 6. 目录级图探索
+grag nodes ./src -n 2
+
+# 7. 查看目录树
+grag tree
+```
+
+### 使用 Go API
 
 ```go
-import "github.com/DotNetAge/gorag/pkg/pattern"
+import gorag "github.com/DotNetAge/gorag/v2"
 
-// 创建 NativeRAG（自动配置）
-rag, _ := pattern.NativeRAG("my-app",
-    pattern.WithBGE("bge-small-zh-v1.5"),
-)
+// 创建服务
+svc, err := gorag.NewRAGService("./my-project.rag")
+if err != nil {
+    log.Fatal(err)
+}
+defer svc.Stop()
 
-// 索引文档
-rag.IndexDirectory(ctx, "./docs", true)
+// 索引目录
+ctx := context.Background()
+svc.IndexerSvc().Index(ctx, "./docs")
 
-// 检索
-results, _ := rag.Retrieve(ctx, []string{"GoRAG 是什么？"}, 5)
-```
+// 语义检索
+hit, _ := svc.Querier().Query(ctx, "RAG 架构设计", "")
 
-### GraphRAG（知识图谱）
-
-适合复杂关系推理：
-
-```go
-rag, _ := pattern.GraphRAG("knowledge-graph",
-    pattern.WithBGE("bge-small-zh-v1.5"),
-    pattern.WithNeoGraph("neo4j://localhost:7687", "neo4j", "password", "neo4j"),
-)
-
-// 添加节点和边
-rag.AddNode(ctx, &core.Node{ID: "person-1", Type: "Person", ...})
-rag.AddEdge(ctx, &core.Edge{Source: "person-1", Target: "company-1", ...})
-
-// 查询邻居
-neighbors, edges, _ := rag.GetNeighbors(ctx, "person-1", 1, 10)
+// 图探索
+result, _ := svc.Explorer().Nodes(ctx, "./docs", 2)
 ```
 
 ---
 
-## 📚 文档
+## CLI 命令总览
 
-### 入门指南
-
-- [快速入门](./QUICKSTART.md) - 15 分钟掌握 Pattern 层
-- [NativeRAG 详解](./docs/pattern/native-rag.md) - 三阶段增强架构
-- [GraphRAG 详解](./docs/pattern/graph-rag.md) - 知识图谱推理
-- [配置选项手册](./docs/pattern/options.md) - 所有配置选项
-
-### 进阶主题
-
-- [开发指南](./DEVELOPMENT.md) - Pipeline 层开发
-- [Indexer 开发](./docs/pipeline/indexer.md) - 构建自定义索引器
-- [Retriever 开发](./docs/pipeline/retriever.md) - 构建自定义检索器
-
-### Step 层
-
-- [Step 开发指南](./docs/steps/creating-steps.md) - 创建新步骤
+| 命令                                | 说明                             |
+| ----------------------------------- | -------------------------------- |
+| `grag init [-t type]`               | 初始化 RAG 库                    |
+| `grag index [path]`                 | 索引文件或目录                   |
+| `grag update [path] [llm-options]`  | 增量更新 + LLM 增强              |
+| `grag query <text> [-f] [-k]`       | 语义检索（多关键词用 `\|` 分隔） |
+| `grag chunks [-p] [-s] [-f]`        | 分页列出 Chunk                   |
+| `grag nodes [dir] [-n]`             | 目录级多跳图查询                 |
+| `grag cypher <query>`               | 执行 Cypher 图查询               |
+| `grag status [-s] [-f] [--summary]` | 查看索引与 LLM 处理进度          |
+| `grag tree`                         | 查看目录树                       |
+| `grag info`                         | 查看库信息                       |
+| `grag doctor`                       | 诊断配置                         |
+| `grag logs`                         | 查看日志                         |
 
 ---
 
-## 🔭 内置可观测性
+## 核心概念
 
-```go
-idx, _ := indexer.DefaultAdvancedIndexer(
-    indexer.WithZapLogger("./logs/rag.log", 100, 30, 7, true),
-    indexer.WithPrometheusMetrics(":8080"),
-    indexer.WithOpenTelemetryTracer(ctx, "jaeger:4317", "RAG"),
-)
+### .rag 库
+
+每个 RAG 项目对应一个 `.rag` 目录，内部包含：
+
+```
+.rag/
+├── config.yml          # 配置（索引器类型、模型路径、LLM 等）
+├── meta.db             # SQLite 元数据存储（文档/分片状态）
+├── vectors/            # 向量存储
+├── graph/              # 图存储（仅 graph/hyper 索引器）
+├── logs/               # 运行日志
+└── model/              # Embedding 模型文件
 ```
 
+### 索引器类型
+
+| 类型       | 说明                      |
+| ---------- | ------------------------- |
+| `semantic` | 纯向量语义索引            |
+| `graph`    | 纯图结构索引              |
+| `hyper`    | 语义 + 图混合索引（默认） |
+
+### Chunk
+
+最小索引单元，包含 Title、Summary、Content、Tags、Source、RegionID 等属性。
+
+### Region（区域）
+
+目录级语义抽象，每个被索引的目录自动映射为一个 Region 节点：
+- **RegionID**：目录绝对路径的 SHA256 哈希
+- **README 自动生成**：索引阶段结束后为无 README.md 的目录自动生成摘要
+
 ---
 
-## ⚡ 技术标准
+## 架构设计
 
-- **Go 1.24+**：最新语言特性
-- **Zero-CGO SQLite**：无痛交叉编译
-- **清晰架构**：接口与实现严格分离
-- **模块化 Steps**：可在任何自定义 Pipeline 中复用
+```
+┌──────────────────────────────────────────┐
+│              CLI (grag)                  │
+│   cmd/main.go + cmd/info.go             │
+└────────────────┬─────────────────────────┘
+                 │
+┌────────────────▼─────────────────────────┐
+│         IndexingService (聚合根)          │
+│  ┌─────────────────────────────────────┐  │
+│  │  IndexerSvc · QuerySvc · GraphSvc  │  │
+│  │  AdminSvc  · RegionSvc · LLMSvc    │  │
+│  └─────────────────────────────────────┘  │
+└────────────────┬─────────────────────────┘
+                 │
+    ┌────────────┼────────────┐
+    ▼            ▼            ▼
+ Semantic    Graph       Hyper(编排)
+ Indexer    Indexer     ┌────┴────┐
+                        ▼         ▼
+                    Semantic   Graph
+                    Indexer    Indexer
+```
+
+- **SemanticIndexer**：分块 → 向量化 → 写入 VectorStore
+- **GraphIndexer**：实体/关系 → 写入 GraphStore
+- **HyperIndexer**：编排语义线与关系线，支持 Summarizer / Refiller 注入
 
 ---
 
-## 🤝 贡献
+## LLM 增强
 
-我们致力于为 Go 生态系统构建最强大的 AI 基础设施。
+`grag update` 命令支持两阶段增量 LLM 处理：
 
-- 查看 [贡献指南](CONTRIBUTING.md)
+1. **Summarizer**：为文档类分片生成 Title / Summary / Tags
+2. **Refiller**：基于注册的 Schema 提取实体和关系，写入 GraphStore
 
-## 📄 许可证
+需要配置 LLM：
 
-GoRAG 基于 [MIT 许可证](LICENSE) 发布。
+```bash
+grag update . \
+  --llm-key <API_KEY> \
+  --llm-url https://api.openai.com/v1 \
+  --llm-model gpt-4o-mini \
+  --schema ./schemas
+```
+
+环境变量：`GORAG_API_KEY`
+
+---
+
+## 文档
+
+- [CLI 使用说明](./docs/v2/CLI.md) — 完整命令参考
+- [服务层说明](./docs/v2/Services.md) — Go API 指南
+- [Region 机制详解](./docs/v2/Region.md) — 区域抽象设计
+
+---
+
+## 许可证
+
+GoRAG 基于 [MIT 许可证](./LICENSE) 发布。
