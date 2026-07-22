@@ -43,7 +43,6 @@ var (
 
 	// 初始化参数
 	initType      string
-	initName      string
 	initModel     string
 	initModelID   string
 	initModelFile string
@@ -96,7 +95,6 @@ func main() {
 		Run:  runInit,
 	}
 	initCmd.Flags().StringVarP(&initType, "type", "t", "hyper", "索引器类型: semantic, graph, hyper")
-	initCmd.Flags().StringVarP(&initName, "name", "n", "", "RAG 库命名")
 	initCmd.Flags().StringVarP(&initModel, "model", "m", "", "本地模型文件路径")
 	initCmd.Flags().StringVarP(&initModelID, "model-id", "i", "", "HuggingFace 模型 ID")
 	initCmd.Flags().StringVarP(&initModelFile, "model-file", "f", "", "模型文件名")
@@ -411,7 +409,7 @@ func runIndex(cmd *cobra.Command, args []string) {
 
 	// 执行索引（快路径：无 LLM）
 	consoleLogger.Info("开始批量索引", "target", absTarget)
-	if err := svc.Index(context.Background(), absTarget); err != nil {
+	if err := svc.IndexerSvc().Index(context.Background(), absTarget); err != nil {
 		ui.Error("索引失败: %v", err)
 		os.Exit(1)
 	}
@@ -452,9 +450,9 @@ func runQuery(cmd *cobra.Command, args []string) {
 
 	var hit *core.Hit
 	if len(queries) == 1 {
-		hit, err = svc.Query(context.Background(), queries[0], filterPath)
+		hit, err = svc.Querier().Query(context.Background(), queries[0], filterPath)
 	} else {
-		hit, err = svc.QueryMulti(context.Background(), queries, filterPath)
+		hit, err = svc.Querier().QueryMulti(context.Background(), queries, filterPath)
 	}
 	if err != nil {
 		spinner.Stop()
@@ -495,7 +493,7 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	checks := svc.Doctor()
+	checks := svc.Admin().Doctor()
 
 	allOK := true
 	for _, c := range checks {
@@ -534,7 +532,7 @@ func runLogs(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	data, err := svc.Logs()
+	data, err := svc.Admin().Logs()
 	if err != nil {
 		ui.Error("%v", err)
 		os.Exit(1)
@@ -557,7 +555,8 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		updateTarget = args[0]
 	}
 
-	absTarget, err := filepath.Abs(updateTarget)
+	var absTarget string
+	absTarget, err = filepath.Abs(updateTarget)
 	if err != nil {
 		ui.Error("无法解析路径: %v", err)
 		os.Exit(1)
@@ -568,7 +567,12 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	ui.KeyValue("目标", absTarget)
 
 	// 1. 加载配置
-	cfg, _ := gorag.LoadConfig(ragDir)
+	var cfg *gorag.Config
+	cfg, err = gorag.LoadConfig(ragDir)
+	if err != nil {
+		ui.Error("加载配置失败: %v", err)
+		os.Exit(1)
+	}
 
 	// 2. 持久化 LLM 配置到 .rag 库
 	hasLLMFlag := false
@@ -576,7 +580,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 
 	if updateLLMKey != "" {
 		hasLLMFlag = true
-		if err := gorag.WriteAPIKey(ragDir, updateLLMKey); err != nil {
+		if err = gorag.WriteAPIKey(ragDir, updateLLMKey); err != nil {
 			ui.Warning("写入 API Key 失败: %v", err)
 		}
 	}
@@ -599,7 +603,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 			configUpdated = true
 		}
 		if configUpdated {
-			if err := gorag.SaveConfig(ragDir, cfg); err != nil {
+			if err = gorag.SaveConfig(ragDir, cfg); err != nil {
 				ui.Warning("保存 LLM 配置失败: %v", err)
 			}
 		}
@@ -608,7 +612,8 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	// 3. 创建日志器和索引服务
 	consoleLogger := logging.DefaultConsoleLogger()
 
-	svc, err := gorag.NewRAGService(ragDir, gorag.WithLogger(consoleLogger))
+	var svc *gorag.IndexingService
+	svc, err = gorag.NewRAGService(ragDir, gorag.WithLogger(consoleLogger))
 	if err != nil {
 		ui.Error("打开 RAG 库失败: %v", err)
 		os.Exit(1)
@@ -620,7 +625,9 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	if updateLLMKey != "" {
 		apiKey = updateLLMKey
 	} else {
-		if k, err := gorag.ResolveAPIKey(ragDir); err == nil {
+		var k string
+		k, err = gorag.ResolveAPIKey(ragDir)
+		if err == nil {
 			apiKey = k
 		}
 	}
@@ -684,7 +691,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	spinner := ui.NewSpinner("正在处理...")
 	spinner.Start()
 
-	if err := svc.Update(context.Background(), absTarget); err != nil {
+	if err = svc.IndexerSvc().Update(context.Background(), absTarget); err != nil {
 		spinner.Stop()
 		ui.Error("更新失败: %v", err)
 		os.Exit(1)
@@ -710,7 +717,7 @@ func runTree(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	root, err := svc.Tree(context.Background())
+	root, err := svc.Admin().Tree(context.Background())
 	if err != nil {
 		ui.Error("构建目录树失败: %v", err)
 		os.Exit(1)
@@ -740,7 +747,7 @@ func runChunks(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	chunks, total, err := svc.ListChunks(context.Background(), chunksPage, chunksSize, chunksFilter)
+	chunks, total, err := svc.Querier().ListChunks(context.Background(), chunksPage, chunksSize, chunksFilter)
 	if err != nil {
 		ui.Error("列出分片失败: %v", err)
 		os.Exit(1)
@@ -840,7 +847,7 @@ func runNodes(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	result, err := svc.Nodes(context.Background(), dir, nodesHops)
+	result, err := svc.Explorer().Nodes(context.Background(), dir, nodesHops)
 	if err != nil {
 		ui.Error("图节点查询失败: %v", err)
 		os.Exit(1)
@@ -909,7 +916,7 @@ func runCypher(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	rows, err := svc.Cypher(context.Background(), query)
+	rows, err := svc.Explorer().Cypher(context.Background(), query)
 	if err != nil {
 		ui.Error("Cypher 查询失败: %v", err)
 		os.Exit(1)
@@ -1044,7 +1051,7 @@ func formatChunkLine(title, summary string, startLine, endLine int) string {
 func sortTreeChildren(children []*gorag.SourceTreeNode) []*gorag.SourceTreeNode {
 	sorted := make([]*gorag.SourceTreeNode, len(children))
 	copy(sorted, children)
-	for i := 0; i < len(sorted); i++ {
+	for i := range len(sorted) {
 		for j := i + 1; j < len(sorted); j++ {
 			less := false
 			if sorted[i].IsDir && !sorted[j].IsDir {

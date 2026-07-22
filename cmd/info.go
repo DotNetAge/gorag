@@ -30,7 +30,7 @@ func runInfo(cmd *cobra.Command, args []string) {
 	}
 	defer svc.Stop()
 
-	info, err := svc.Info()
+	info, err := svc.Admin().Info()
 	if err != nil {
 		ui.Error("获取信息失败: %v", err)
 		os.Exit(1)

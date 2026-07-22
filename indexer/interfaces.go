@@ -147,3 +147,21 @@ type GraphNavigator interface {
 	// GetNode 按 ID 获取单个节点，用于补全路径起点（如 Region 节点本身）。
 	GetNode(ctx context.Context, nodeID string) (*core.Node, error)
 }
+
+// RegionGraphView 是 GraphIndexer 返回的目录级图视图。
+type RegionGraphView struct {
+	RegionID   string
+	RegionName string
+	Region     *core.Node
+	Nodes      []*core.Node
+	Edges      []*core.Edge
+}
+
+// GraphExplorer 图探索扩展接口：以目录为起点查询 Region 及其多跳邻居。
+//
+// GraphIndexer 直接实现；HyperIndexer 委托给内部 graph。
+type GraphExplorer interface {
+	// ExploreRegion 从指定目录的 Region 节点出发，遍历 depth 跳邻居。
+	// dir 应为绝对路径；limit 限制返回节点数量。
+	ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error)
+}

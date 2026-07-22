@@ -29,7 +29,8 @@ import (
 	"github.com/DotNetAge/gorag/v2/utils"
 )
 
-// minContentLength 是图索引最小内容长度（按字符数，非 token）。
+// minContentLength 是图索引最小内容长度阈值。
+// AddFile 先按文件大小（字节数）预检，再按内容 rune 数精确检查；
 // 短于此长度的文本直接静默丢弃，避免浪费 I/O 与存储。
 const minContentLength = 20
 
@@ -766,6 +767,88 @@ func (idx *GraphIndexer) CypherQuery(ctx context.Context, q string, params map[s
 		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
 	}
 	return idx.graphDB.Query(ctx, q, params)
+}
+
+// ExploreRegion 实现 GraphExplorer 接口：从指定目录的 Region 节点出发，遍历 depth 跳邻居。
+//
+// 流程：
+//  1. 计算 regionID = GenerateID([]byte(dir))
+//  2. 获取 Region 节点
+//  3. 调用 Neighbors 遍历 depth 跳邻居
+//  4. 合并 Region 节点与邻居节点并去重
+func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error) {
+	if idx.graphDB == nil {
+		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
+	}
+	if dir == "" {
+		return nil, fmt.Errorf("图索引器: 目录路径不能为空")
+	}
+
+	regionID := utils.GenerateID([]byte(dir))
+	region, err := idx.GetNode(ctx, regionID)
+	if err != nil {
+		return nil, fmt.Errorf("图索引器: 获取 Region 节点失败: %w", err)
+	}
+	if region == nil {
+		// Region 节点不存在时返回空视图，而非错误
+		return &RegionGraphView{
+			RegionID:   regionID,
+			RegionName: filepath.Base(dir),
+			Region:     nil,
+			Nodes:      []*core.Node{},
+			Edges:      []*core.Edge{},
+		}, nil
+	}
+
+	if depth <= 0 {
+		depth = 1
+	}
+	if depth > 3 {
+		depth = 3
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	neighborNodes, edges, err := idx.Neighbors(ctx, regionID, depth, limit)
+	if err != nil {
+		return nil, fmt.Errorf("图索引器: 邻居遍历失败: %w", err)
+	}
+
+	// 合并 Region 节点与邻居节点，并去重
+	nodeMap := make(map[string]*core.Node, len(neighborNodes)+1)
+	if region != nil {
+		nodeMap[region.ID] = region
+	}
+	for _, n := range neighborNodes {
+		if n != nil {
+			nodeMap[n.ID] = n
+		}
+	}
+	nodes := make([]*core.Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		nodes = append(nodes, n)
+	}
+
+	regionName := filepath.Base(dir)
+	if region != nil && region.Name != "" {
+		regionName = region.Name
+	}
+
+	idx.logger.Debug("图索引器: 目录级图探索完成",
+		"dir", dir,
+		"region_id", regionID,
+		"depth", depth,
+		"nodes", len(nodes),
+		"edges", len(edges))
+
+	return &RegionGraphView{
+		RegionID:   regionID,
+		RegionName: regionName,
+		Region:     region,
+		Nodes:      nodes,
+		Edges:      edges,
+	}, nil
 }
 
 // CountByRegion 返回指定路径下（source_file 前缀匹配）的 Document 节点总数。

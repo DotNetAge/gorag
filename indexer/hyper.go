@@ -307,7 +307,9 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 			schemas = append(schemas, ss...)
 		}
 		if len(schemas) > 0 {
-			refilled, rErr := h.refiller.Refill(ctx, result, schemas)
+			// Refiller 应基于 Summarizer 更新后的分片，而非原始 result
+			refillInput := chunker.ChunkResult{Chunks: doc.Chunks()}
+			refilled, rErr := h.refiller.Refill(ctx, refillInput, schemas)
 			if rErr != nil {
 				h.logger.Warn("复合索引器: Refiller 调用失败（不阻塞语义线）",
 					"file", filePath, "error", rErr.Error())
@@ -664,6 +666,18 @@ func (h *HyperIndexer) GetNode(ctx context.Context, nodeID string) (*core.Node, 
 	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphNavigator")
 }
 
+// ExploreRegion 实现 GraphExplorer 接口：委托关系线执行目录级图探索。
+func (h *HyperIndexer) ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error) {
+	if h.graph == nil {
+		return nil, fmt.Errorf("HyperIndexer: 关系线未启用，无法执行图探索")
+	}
+	if g, ok := h.graph.(GraphExplorer); ok {
+		h.logger.Debug("复合索引器: 委托目录级图探索", "dir", dir, "depth", depth)
+		return g.ExploreRegion(ctx, dir, depth, limit)
+	}
+	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphExplorer")
+}
+
 // CypherQuery 执行原始 Cypher 查询，委托给关系线的 GraphIndexer。
 // 仅当索引器支持图存储时可用。
 func (h *HyperIndexer) CypherQuery(ctx context.Context, q string, params map[string]any) ([]map[string]any, error) {
@@ -828,7 +842,8 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 			schemas = append(schemas, ss...)
 		}
 		if len(schemas) > 0 {
-			result := chunker.ChunkResult{Chunks: chunks}
+			// Refiller 应基于摘要后的 processedChunks，而非原始 chunks
+			result := chunker.ChunkResult{Chunks: processedChunks}
 			refilled, rErr := h.refiller.Refill(ctx, result, schemas)
 			if rErr != nil {
 				h.logger.Warn("复合索引器: ProcessChunks Refiller 失败", "error", rErr)
@@ -909,10 +924,7 @@ func boostByKeywords(hit *core.Hit, q core.Query) {
 		return hit.Chunks[i].Score > hit.Chunks[j].Score
 	})
 
-	// 更新 Hit 综合分数为最高 chunk 分数
-	if len(hit.Chunks) > 0 {
-		hit.Score = hit.Chunks[0].Score
-	}
+	// 保持融合后的综合分数语义不变，不因 chunk 重排而覆盖原 Score
 }
 
 // countKeywordMatches 统计查询关键词在 Chunk Tags/Title/Summary 中的命中数。

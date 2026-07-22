@@ -71,9 +71,9 @@ func TestBoostByKeywords(t *testing.T) {
 		t.Errorf("c2 增强后分数应高于 c1，c2=%f, c1=%f", hit.Chunks[0].Score, hit.Chunks[1].Score)
 	}
 
-	// Hit.Score 应更新为最高分片分数
-	if hit.Score != hit.Chunks[0].Score {
-		t.Errorf("Hit.Score 应更新为最高分片分数，实际 %f", hit.Score)
+	// Hit.Score 应保持融合后的综合分数不变，不因 chunk 重排而被覆盖
+	if hit.Score != 0.5 {
+		t.Errorf("Hit.Score 应保持原始融合分数 0.5，实际 %f", hit.Score)
 	}
 }
 

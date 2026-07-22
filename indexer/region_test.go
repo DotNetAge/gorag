@@ -344,3 +344,48 @@ func TestGraphIndexer_CypherQuery(t *testing.T) {
 		t.Errorf("节点数应为 2，实际 %v", rows[0]["cnt"])
 	}
 }
+
+// TestGraphIndexer_ExploreRegion 验证目录级图探索。
+func TestGraphIndexer_ExploreRegion(t *testing.T) {
+	ctx := context.Background()
+	store := newMockGraphStore()
+	idx, err := New(store)
+	if err != nil {
+		t.Fatalf("创建 GraphIndexer 失败: %v", err)
+	}
+
+	explorer, ok := idx.(GraphExplorer)
+	if !ok {
+		t.Fatalf("GraphIndexer 未实现 GraphExplorer")
+	}
+
+	dir := "/home/user/docs"
+	regionID := utils.GenerateID([]byte(dir))
+	store.nodes[regionID] = &core.Node{ID: regionID, Labels: []string{core.LabelRegion}, Name: "docs"}
+	store.nodes["doc"] = &core.Node{ID: "doc", Labels: []string{"Document"}, Name: "intro.md"}
+	store.nodes["entity"] = &core.Node{ID: "entity", Labels: []string{"Person"}, Name: "张三"}
+	store.edges["e1"] = &core.Edge{ID: "e1", Type: "CONTAINS", Source: regionID, Target: "doc"}
+	store.edges["e2"] = &core.Edge{ID: "e2", Type: "HAS", Source: "doc", Target: "entity"}
+
+	view, err := explorer.ExploreRegion(ctx, dir, 2, 100)
+	if err != nil {
+		t.Fatalf("ExploreRegion 失败: %v", err)
+	}
+
+	if view.RegionID != regionID {
+		t.Errorf("RegionID 期望 %q，实际 %q", regionID, view.RegionID)
+	}
+	if view.RegionName != "docs" {
+		t.Errorf("RegionName 期望 %q，实际 %q", "docs", view.RegionName)
+	}
+
+	// Region + doc + entity = 3 个节点
+	if len(view.Nodes) != 3 {
+		t.Errorf("2 跳探索应返回 3 个节点，实际 %d", len(view.Nodes))
+	}
+
+	// e1 + e2 = 2 条边
+	if len(view.Edges) != 2 {
+		t.Errorf("2 跳探索应返回 2 条边，实际 %d", len(view.Edges))
+	}
+}
