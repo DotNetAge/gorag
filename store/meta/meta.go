@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -214,6 +216,116 @@ func (s *sqliteStore) ListDocuments(status string) ([]*Document, error) {
 		return nil, fmt.Errorf("ListDocuments: 迭代失败: %w", err)
 	}
 	return docs, nil
+}
+
+// CountDocumentsByStatus 实现 Store 接口。
+func (s *sqliteStore) CountDocumentsByStatus() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM documents GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("CountDocumentsByStatus: 查询失败: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("CountDocumentsByStatus: 扫描失败: %w", err)
+		}
+		counts[status] = count
+	}
+	return counts, rows.Err()
+}
+
+// ListDocumentsWithProgress 实现 Store 接口。
+func (s *sqliteStore) ListDocumentsWithProgress(status, filterPath string) ([]*DocumentProgress, error) {
+	query := `SELECT
+		d.absolute_path, d.file_name, d.extension, d.size_bytes, d.modified_at,
+		d.status, d.error_message, d.indexed_at,
+		COUNT(cls.chunk_id) AS total_chunks,
+		COALESCE(SUM(cls.summarized), 0) AS summarized_count,
+		COALESCE(SUM(cls.refilled), 0) AS refilled_count
+		FROM documents d
+		LEFT JOIN chunk_llm_status cls ON d.absolute_path = cls.doc_path`
+
+	var conditions []string
+	var args []any
+
+	if status != "" {
+		conditions = append(conditions, "d.status = ?")
+		args = append(args, status)
+	}
+	if filterPath != "" {
+		// 确保 filterPath 以路径分隔符结尾，避免部分匹配
+		fp := filterPath
+		if !strings.HasSuffix(fp, string(filepath.Separator)) {
+			fp += string(filepath.Separator)
+		}
+		conditions = append(conditions, "d.absolute_path LIKE ?")
+		args = append(args, fp+"%")
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query += " GROUP BY d.absolute_path ORDER BY d.absolute_path"
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ListDocumentsWithProgress: 查询失败: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*DocumentProgress
+	for rows.Next() {
+		var (
+			absPath    string
+			fileName   string
+			ext        string
+			sizeBytes  int64
+			modifiedAt sql.NullTime
+			statusVal  string
+			errMsg     string
+			indexedAt  sql.NullTime
+			total      int
+			summarized int
+			refilled   int
+		)
+		if err := rows.Scan(&absPath, &fileName, &ext, &sizeBytes, &modifiedAt,
+			&statusVal, &errMsg, &indexedAt,
+			&total, &summarized, &refilled); err != nil {
+			return nil, fmt.Errorf("ListDocumentsWithProgress: 扫描失败: %w", err)
+		}
+
+		prog := &DocumentProgress{
+			AbsolutePath:    absPath,
+			FileName:        fileName,
+			Extension:       ext,
+			SizeBytes:       sizeBytes,
+			IndexStatus:     statusVal,
+			ErrorMessage:    errMsg,
+			TotalChunks:     total,
+			SummarizedCount: summarized,
+			RefilledCount:   refilled,
+			LLMStatus:       DeriveLLMStatus(total, summarized, refilled),
+		}
+		if modifiedAt.Valid {
+			prog.ModifiedAt = modifiedAt.Time
+		}
+		if indexedAt.Valid {
+			prog.IndexedAt = &indexedAt.Time
+		}
+		results = append(results, prog)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListDocumentsWithProgress: 迭代失败: %w", err)
+	}
+	if results == nil {
+		return []*DocumentProgress{}, nil
+	}
+	return results, nil
 }
 
 // DeleteDocument 实现 Store 接口。

@@ -9,6 +9,7 @@ import (
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/store/meta"
 )
 
 // RAGInfo RAG 库信息
@@ -111,6 +112,25 @@ func (s *AdminService) Doctor() []CheckResult {
 		{Name: "图库目录", OK: dirExists(filepath.Join(s.svc.dataDir, "graphs"))},
 		{Name: "meta.db", OK: fileExists(filepath.Join(s.svc.dataDir, "meta.db"))},
 	}
+}
+
+// FileStatuses 查询所有文件的索引与 LLM 处理进度。
+// status 为空时返回全部状态；filterPath 非空时按绝对路径前缀过滤。
+func (s *AdminService) FileStatuses(ctx context.Context, status, filterPath string) ([]*meta.DocumentProgress, error) {
+	var absFilter string
+	if filterPath != "" {
+		var err error
+		absFilter, err = filepath.Abs(filterPath)
+		if err != nil {
+			absFilter = filterPath
+		}
+	}
+	return s.svc.metaStore.ListDocumentsWithProgress(status, absFilter)
+}
+
+// StatusSummary 返回各索引状态的文档数量统计。
+func (s *AdminService) StatusSummary(ctx context.Context) (map[string]int, error) {
+	return s.svc.metaStore.CountDocumentsByStatus()
 }
 
 // Logs 返回 RAG 库的日志内容。

@@ -17,6 +17,13 @@ type Store interface {
 	// ListDocuments 按状态过滤文档列表。
 	ListDocuments(status string) ([]*Document, error)
 
+	// ListDocumentsWithProgress 查询文档列表及其 Chunk LLM 处理进度汇总。
+	// status 为空时返回所有状态；filterPath 非空时按绝对路径前缀过滤。
+	ListDocumentsWithProgress(status, filterPath string) ([]*DocumentProgress, error)
+
+	// CountDocumentsByStatus 按索引状态统计文档数量。
+	CountDocumentsByStatus() (map[string]int, error)
+
 	// DeleteDocument 按绝对路径删除文档元数据。
 	DeleteDocument(absPath string) error
 
@@ -74,6 +81,15 @@ type ChunkLLMStatus struct {
 	UpdatedAt       time.Time  // 更新时间
 }
 
+// 文档索引状态常量
+const (
+	DocStatusPending        = "pending"          // 待索引（已扫描但未被 worker 拾取）
+	DocStatusIndexing       = "indexing"          // 索引进行中（worker 正在处理）
+	DocStatusIndexed        = "indexed"           // 索引完成
+	DocStatusFailed         = "failed"            // 索引失败
+	DocStatusPartialDeleted = "partial_deleted"   // 部分删除
+)
+
 // Document 文档元数据。
 type Document struct {
 	ID           int64
@@ -83,11 +99,48 @@ type Document struct {
 	SizeBytes    int64
 	ModifiedAt   time.Time
 	ContentHash  string
-	Status       string // indexed / failed / partial_deleted
+	Status       string // pending / indexing / indexed / failed / partial_deleted
 	ChunkIDs     []string
 	IndexedAt    *time.Time
 	ErrorMessage string
 	UpdatedAt    time.Time
+}
+
+// DocumentProgress 文档维度索引与 LLM 处理进度汇总。
+type DocumentProgress struct {
+	AbsolutePath    string     // 绝对路径
+	FileName        string     // 文件名
+	Extension       string     // 扩展名
+	SizeBytes       int64      // 文件大小
+	ModifiedAt      time.Time  // 修改时间
+	IndexStatus     string     // 文档索引状态
+	ErrorMessage    string     // 错误信息
+	IndexedAt       *time.Time // 索引完成时间
+	TotalChunks     int        // Chunk 总数
+	SummarizedCount int        // 已完成摘要的 Chunk 数
+	RefilledCount   int        // 已完成实体提取的 Chunk 数
+	LLMStatus       string     // 派生 LLM 状态: none / partial / done
+}
+
+// LLM 派生状态常量
+const (
+	LLMStatusNone    = "none"    // 所有 Chunk 均未处理
+	LLMStatusPartial = "partial" // 部分 Chunk 已处理
+	LLMStatusDone    = "done"    // 所有 Chunk 已处理（summarized=true && refilled=true）
+)
+
+// DeriveLLMStatus 根据 Chunk 汇总统计计算派生 LLM 处理状态。
+func DeriveLLMStatus(total, summarized, refilled int) string {
+	if total == 0 {
+		return LLMStatusNone
+	}
+	if summarized >= total && refilled >= total {
+		return LLMStatusDone
+	}
+	if summarized > 0 || refilled > 0 {
+		return LLMStatusPartial
+	}
+	return LLMStatusNone
 }
 
 // Usage LLM 调用 token 用量记录。

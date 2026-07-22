@@ -52,6 +52,12 @@ var (
 	updateLLMURL   string
 	updateLLMModel string
 	updateSchema   string
+
+	// status 命令参数
+	statusFilter  string
+	statusJSON    bool
+	statusSummary bool
+	statusVal     string
 )
 
 var ui = NewUI()
@@ -265,7 +271,29 @@ LLM 参数:
 	}
 	cypherCmd.Flags().BoolVar(&cypherJSON, "json", false, "以 JSON 格式输出")
 
-	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd, chunksCmd, nodesCmd, cypherCmd)
+	// status 子命令
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "查看文件索引与 LLM 处理进度",
+		Long: `查看本地知识库中所有文件的索引状态与 LLM 处理进度。
+
+显示每个文件的索引状态（pending/indexing/indexed/failed）和 LLM 摘要/实体提取进度。
+
+示例:
+  grag status                     # 全部文件状态
+  grag status -f ./src            # 按目录过滤
+  grag status -s pending          # 只显示待索引文件
+  grag status --summary           # 仅汇总统计
+  grag status --json              # JSON 输出`,
+		Args: cobra.NoArgs,
+		Run:  runStatus,
+	}
+	statusCmd.Flags().StringVarP(&statusFilter, "filter", "f", "", "按绝对路径前缀过滤")
+	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "以 JSON 格式输出")
+	statusCmd.Flags().BoolVar(&statusSummary, "summary", false, "仅显示汇总统计")
+	statusCmd.Flags().StringVarP(&statusVal, "status", "s", "", "按索引状态过滤 (pending/indexing/indexed/failed)")
+
+	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd, chunksCmd, nodesCmd, cypherCmd, statusCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -820,6 +848,137 @@ func formatChunkItems(chunks []core.Chunk) []chunkItem {
 		})
 	}
 	return items
+}
+
+// runStatus 执行 status 子命令：查看文件索引与 LLM 处理进度。
+func runStatus(cmd *cobra.Command, args []string) {
+	ragDir, err := findRAGInCWD()
+	if err != nil {
+		ui.Error("%v", err)
+		os.Exit(1)
+	}
+
+	consoleLogger := logging.DefaultConsoleLogger()
+	svc, err := gorag.NewRAGService(ragDir, gorag.WithLogger(consoleLogger))
+	if err != nil {
+		ui.Error("打开 RAG 库失败: %v", err)
+		os.Exit(1)
+	}
+	defer svc.Stop()
+
+	ctx := context.Background()
+
+	// --summary 模式：仅显示汇总统计
+	if statusSummary {
+		counts, err := svc.Admin().StatusSummary(ctx)
+		if err != nil {
+			ui.Error("查询状态统计失败: %v", err)
+			os.Exit(1)
+		}
+
+		if statusJSON {
+			data, _ := json.MarshalIndent(counts, "", "  ")
+			fmt.Println(string(data))
+			return
+		}
+
+		ui.Title("文件状态汇总")
+		if len(counts) == 0 {
+			ui.Info("本地知识库中暂时没有任何数据")
+			return
+		}
+		for _, st := range []string{"pending", "indexing", "indexed", "failed", "partial_deleted"} {
+			if count, ok := counts[st]; ok {
+				ui.KeyValue(statusLabel(st), fmt.Sprintf("%d", count))
+			}
+		}
+		return
+	}
+
+	// 查询文件进度列表
+	progress, err := svc.Admin().FileStatuses(ctx, statusVal, statusFilter)
+	if err != nil {
+		ui.Error("查询文件状态失败: %v", err)
+		os.Exit(1)
+	}
+
+	if statusJSON {
+		data, _ := json.MarshalIndent(progress, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	ui.Title("文件索引与 LLM 处理进度")
+	ui.KeyValue("文件数", fmt.Sprintf("%d", len(progress)))
+
+	if len(progress) == 0 {
+		ui.Info("本地知识库中暂时没有任何数据")
+		return
+	}
+
+	ui.Section("")
+	for _, p := range progress {
+		llmIcon := llmStatusIcon(p.LLMStatus)
+		fmt.Printf("  %s %s\n", statusIcon(p.IndexStatus), p.AbsolutePath)
+		fmt.Printf("    状态: %s  |  LLM: %s (%d/%d 摘要, %d/%d 实体)\n",
+			statusLabel(p.IndexStatus),
+			llmIcon,
+			p.SummarizedCount, p.TotalChunks,
+			p.RefilledCount, p.TotalChunks)
+		if p.ErrorMessage != "" {
+			fmt.Printf("    错误: %s\n", p.ErrorMessage)
+		}
+	}
+}
+
+// statusIcon 返回索引状态图标。
+func statusIcon(status string) string {
+	switch status {
+	case "pending":
+		return "○"
+	case "indexing":
+		return "◎"
+	case "indexed":
+		return "●"
+	case "failed":
+		return "✗"
+	case "partial_deleted":
+		return "◐"
+	default:
+		return "○"
+	}
+}
+
+// statusLabel 返回索引状态中文标签。
+func statusLabel(status string) string {
+	switch status {
+	case "pending":
+		return "待索引"
+	case "indexing":
+		return "索引中"
+	case "indexed":
+		return "已索引"
+	case "failed":
+		return "失败"
+	case "partial_deleted":
+		return "部分删除"
+	default:
+		return status
+	}
+}
+
+// llmStatusIcon 返回 LLM 处理状态图标。
+func llmStatusIcon(status string) string {
+	switch status {
+	case "none":
+		return "○"
+	case "partial":
+		return "◐"
+	case "done":
+		return "●"
+	default:
+		return "○"
+	}
 }
 
 // runNodes 执行 nodes 子命令：目录级多跳图节点查询。

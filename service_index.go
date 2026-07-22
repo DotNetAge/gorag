@@ -234,6 +234,29 @@ func (s *IndexerService) reindexChangedFiles(ctx context.Context, targetPath str
 
 	s.svc.logger.Info("开始重新索引变更的文件", "target", targetPath, "files", len(files))
 
+	// 2a. 预写 pending 状态：扫描到的新文件标记为「待索引」
+	for _, file := range files {
+		existing, err := s.svc.metaStore.GetDocumentByPath(file)
+		if err != nil || existing == nil {
+			// 新文件 → 写入 pending
+			info, statErr := os.Stat(file)
+			if statErr != nil {
+				continue
+			}
+			_ = s.svc.metaStore.SaveDocument(&meta.Document{
+				AbsolutePath: file,
+				FileName:     info.Name(),
+				Extension:    filepath.Ext(file),
+				SizeBytes:    info.Size(),
+				ModifiedAt:   info.ModTime(),
+				Status:       meta.DocStatusPending,
+			})
+		} else if existing.Status == meta.DocStatusPending || existing.Status == meta.DocStatusIndexing {
+			// 上次异常中断留下的 pending/indexing → 保留
+			continue
+		}
+	}
+
 	// 2. 使用 worker pool 并发索引
 	workerCount := 4
 	jobs := make(chan string, len(files))
@@ -332,7 +355,7 @@ func (s *IndexerService) processFile(ctx context.Context, absPath string) ([]*co
 
 	// 1. 两级预检：先查 mtime+size，不匹配才算 hash
 	existing, _ := s.svc.metaStore.GetDocumentByPath(absPath)
-	if existing != nil && existing.Status == "indexed" {
+	if existing != nil && existing.Status == meta.DocStatusIndexed {
 		if existing.ModifiedAt.Equal(info.ModTime()) && existing.SizeBytes == info.Size() {
 			s.svc.logger.Info("文件未变更（mtime+size 命中），跳过", "path", absPath)
 			return nil, nil
@@ -346,9 +369,20 @@ func (s *IndexerService) processFile(ctx context.Context, absPath string) ([]*co
 		return nil, fmt.Errorf("计算文件 hash 失败: %w", err)
 	}
 
-	if existing != nil && existing.ContentHash == contentHash && existing.Status == "indexed" {
+	if existing != nil && existing.ContentHash == contentHash && existing.Status == meta.DocStatusIndexed {
 		s.svc.logger.Info("文件未变更（hash 命中），跳过", "path", absPath)
 		return nil, nil
+	}
+
+	// 标记为「索引进行中」
+	if err := s.svc.metaStore.SaveDocument(&meta.Document{
+		AbsolutePath: absPath,
+		ContentHash:  contentHash,
+		SizeBytes:    info.Size(),
+		ModifiedAt:   info.ModTime(),
+		Status:       meta.DocStatusIndexing,
+	}); err != nil {
+		s.svc.logger.Warn("标记 indexing 状态失败，继续执行", "path", absPath, "error", err)
 	}
 
 	// 3. 先清理旧数据
@@ -377,7 +411,7 @@ func (s *IndexerService) processFile(ctx context.Context, absPath string) ([]*co
 		SizeBytes:    info.Size(),
 		ModifiedAt:   info.ModTime(),
 		ContentHash:  contentHash,
-		Status:       "indexed",
+		Status:       meta.DocStatusIndexed,
 		ChunkIDs:     chunkIDs,
 		IndexedAt:    timePtr(time.Now()),
 	}); err != nil {
@@ -407,7 +441,7 @@ func (s *IndexerService) recordFailure(absPath, contentHash string, err error) {
 	if saveErr := s.svc.metaStore.SaveDocument(&meta.Document{
 		AbsolutePath: absPath,
 		ContentHash:  contentHash,
-		Status:       "failed",
+		Status:       meta.DocStatusFailed,
 		ErrorMessage: err.Error(),
 	}); saveErr != nil {
 		s.svc.logger.Warn("保存失败记录到 meta.db 失败", "path", absPath, "error", saveErr)
@@ -446,7 +480,7 @@ func (s *IndexerService) removeFileIndex(ctx context.Context, absPath string) er
 		return s.svc.metaStore.SaveDocument(&meta.Document{
 			AbsolutePath: doc.AbsolutePath,
 			ContentHash:  doc.ContentHash,
-			Status:       "partial_deleted",
+			Status:       meta.DocStatusPartialDeleted,
 			ChunkIDs:     failedChunks,
 			ErrorMessage: fmt.Sprintf("部分 chunk 删除失败：%d/%d", len(failedChunks), len(doc.ChunkIDs)),
 		})
