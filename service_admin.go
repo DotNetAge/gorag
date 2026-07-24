@@ -14,41 +14,41 @@ import (
 
 // RAGInfo RAG 库信息
 type RAGInfo struct {
-	Config      *Config
-	ConfigYAML  string
-	AbsPath     string
-	Sizes       map[string]int64
-	VectorCount int
-	GraphNodes  int64
-	GraphEdges  int64
+	Config      *Config        `json:"config"`
+	ConfigYAML  string         `json:"config_yaml"`
+	AbsPath     string         `json:"abs_path"`
+	Sizes       map[string]int64 `json:"sizes"`
+	VectorCount int            `json:"vector_count"`
+	GraphNodes  int64          `json:"graph_nodes"`
+	GraphEdges  int64          `json:"graph_edges"`
 }
 
 // CheckResult 诊断项结果
 type CheckResult struct {
-	Name string
-	OK   bool
-	Hint string
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+	Hint string `json:"hint"`
 }
 
 // SourceTreeNode 目录树节点，对应一个文件或目录。
 type SourceTreeNode struct {
-	Name     string            // 文件/目录名
-	Path     string            // 完整路径
-	Size     int64             // 文件内容总大小（所有 Chunk Content 长度之和）
-	IsDir    bool              // 是否为目录
-	Summary  string            // 目录摘要（来自 README.md）
-	Chunks   []SourceChunkNode // 该文件下的顶层 Chunk（ParentID==""）
-	Children []*SourceTreeNode // 子目录
+	Name     string            `json:"name"`     // 文件/目录名
+	Path     string            `json:"path"`     // 完整路径
+	Size     int64             `json:"size"`     // 文件内容总大小（所有 Chunk Content 长度之和）
+	IsDir    bool              `json:"is_dir"`   // 是否为目录
+	Summary  string            `json:"summary"`  // 目录摘要（来自 README.md）
+	Chunks   []SourceChunkNode `json:"chunks"`   // 该文件下的顶层 Chunk（ParentID==""）
+	Children []*SourceTreeNode `json:"children"` // 子目录
 }
 
 // SourceChunkNode Chunk 树节点。
 type SourceChunkNode struct {
-	Type      string            // 数据|文档|图片|代码
-	Title     string            // Chunk 标题
-	Summary   string            // Chunk 摘要
-	StartLine int               // 在源文件中的起始行号
-	EndLine   int               // 在源文件中的结束行号
-	Children  []SourceChunkNode // 通过 ParentID 连结的子块
+	Type      string            `json:"type"`      // 数据|文档|图片|代码
+	Title     string            `json:"title"`     // Chunk 标题
+	Summary   string            `json:"summary"`   // Chunk 摘要
+	StartLine int               `json:"start_line"` // 在源文件中的起始行号
+	EndLine   int               `json:"end_line"`  // 在源文件中的结束行号
+	Children  []SourceChunkNode `json:"children"`  // 通过 ParentID 连结的子块
 }
 
 // maxTreeChunks 是 tree 命令单次最多加载的 Chunk 数量，防止大库内存爆炸。
@@ -289,9 +289,18 @@ func insertIntoTree(root *SourceTreeNode, source string, fileNode *SourceTreeNod
 
 	parts := strings.Split(dir, string(filepath.Separator))
 	current := root
+	// 累积路径，为目录节点提供完整的绝对路径
+	accumPath := ""
+	firstPart := true
 	for _, part := range parts {
 		if part == "" {
 			continue
+		}
+		if firstPart {
+			accumPath = "/" + part
+			firstPart = false
+		} else {
+			accumPath = accumPath + "/" + part
 		}
 		found := false
 		for _, child := range current.Children {
@@ -302,7 +311,7 @@ func insertIntoTree(root *SourceTreeNode, source string, fileNode *SourceTreeNod
 			}
 		}
 		if !found {
-			dirNode := &SourceTreeNode{Name: part, IsDir: true}
+			dirNode := &SourceTreeNode{Name: part, Path: accumPath, IsDir: true}
 			current.Children = append(current.Children, dirNode)
 			current = dirNode
 		}

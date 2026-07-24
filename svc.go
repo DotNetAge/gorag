@@ -208,3 +208,8 @@ func (s *IndexingService) LLM() *LLMService {
 	}
 	return s.llmSvc
 }
+
+// DataDir 返回索引数据目录（.rag 库所在路径）。
+func (s *IndexingService) DataDir() string {
+	return s.dataDir
+}

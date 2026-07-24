@@ -766,24 +766,49 @@ func (s *semanticIndexer) NewQuery(terms string) core.Query {
 }
 
 // List 实现 IndexerAdmin 接口：分页浏览已索引的 Chunk。
+//
+// 多维度向量索引会为同一 Chunk 写入 Content/Title/Summary 三个向量，
+// 其中从属向量（:title / :summary）不携带 metadata，仅服务于搜索召回。
+// List 面向「浏览 Chunk」语义，因此只返回主向量（Content 维度）：
+//   - 先获取全部匹配向量（VectorStore.List 内部已将全部点加载到内存，此处不额外增加开销）
+//   - 过滤掉从属维度向量
+//   - 在内存中按主向量分页
+//
+// 这样返回的 total 与分页都与 Chunk 语义一致，避免出现空内容的维度占位项。
 func (s *semanticIndexer) List(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]core.Chunk, int, error) {
-	vectors, total, err := s.db.List(ctx, offset, limit, filters)
+	all, _, err := s.db.List(ctx, 0, 1<<30, filters)
 	if err != nil {
 		s.logger.Error("语义索引器: List 查询失败", err,
 			"offset", offset, "limit", limit)
 		return nil, 0, fmt.Errorf("List: 查询失败: %w", err)
 	}
-	if len(vectors) == 0 {
-		return []core.Chunk{}, total, nil
-	}
 
-	chunks := make([]core.Chunk, 0, len(vectors))
-	for _, vec := range vectors {
+	main := make([]*core.Vector, 0, len(all))
+	for _, vec := range all {
 		if vec == nil {
 			continue
 		}
-		ch := vectorToChunk(vec)
-		chunks = append(chunks, *ch)
+		if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
+			continue
+		}
+		main = append(main, vec)
+	}
+	total := len(main)
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := min(offset+limit, total)
+	if offset >= total || end <= offset {
+		return []core.Chunk{}, total, nil
+	}
+
+	chunks := make([]core.Chunk, 0, end-offset)
+	for _, vec := range main[offset:end] {
+		chunks = append(chunks, *vectorToChunk(vec))
 	}
 	s.logger.Debug("语义索引器: List 完成",
 		"offset", offset, "limit", limit, "total", total, "returned", len(chunks))
@@ -817,8 +842,26 @@ func (s *semanticIndexer) GetChunks(ctx context.Context, docID string) ([]*core.
 }
 
 // Count 实现 IndexerAdmin 接口：返回已索引的 Chunk 总数。
+//
+// 只统计主向量（Content 维度），排除从属维度向量（:title / :summary），
+// 与 List 的 total 语义保持一致。VectorStore.Count 返回的是向量总数（含维度），
+// 会偏高约 3 倍，因此这里改用 List 后过滤的方式得到准确的 Chunk 数。
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
-	return s.db.Count(ctx)
+	all, _, err := s.db.List(ctx, 0, 1<<30, nil)
+	if err != nil {
+		return 0, fmt.Errorf("Count: 查询失败: %w", err)
+	}
+	count := 0
+	for _, vec := range all {
+		if vec == nil {
+			continue
+		}
+		if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 // Clear 实现 IndexerAdmin 接口：清空索引。

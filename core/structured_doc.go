@@ -81,3 +81,12 @@ func NewStructuredDocFromParts(nodes []Node, edges []Edge) StructuredDoc {
 		edges: edges,
 	}
 }
+
+// NewStructuredDocFromChunks 从分片直接创建结构化文档容器。
+// 用于非文件来源（如对话记忆）的分片存储场景：调用方已持有构造好的 Chunk，
+// 无需经过 RawDoc/Chunker 流程，直接交给 IndexerStore.Save 写入向量存储。
+func NewStructuredDocFromChunks(chunks []Chunk) StructuredDoc {
+	return &baseStructuredDoc{
+		chunks: chunks,
+	}
+}

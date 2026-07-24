@@ -108,18 +108,18 @@ type Document struct {
 
 // DocumentProgress 文档维度索引与 LLM 处理进度汇总。
 type DocumentProgress struct {
-	AbsolutePath    string     // 绝对路径
-	FileName        string     // 文件名
-	Extension       string     // 扩展名
-	SizeBytes       int64      // 文件大小
-	ModifiedAt      time.Time  // 修改时间
-	IndexStatus     string     // 文档索引状态
-	ErrorMessage    string     // 错误信息
-	IndexedAt       *time.Time // 索引完成时间
-	TotalChunks     int        // Chunk 总数
-	SummarizedCount int        // 已完成摘要的 Chunk 数
-	RefilledCount   int        // 已完成实体提取的 Chunk 数
-	LLMStatus       string     // 派生 LLM 状态: none / partial / done
+	AbsolutePath    string     `json:"absolute_path"`     // 绝对路径
+	FileName        string     `json:"file_name"`         // 文件名
+	Extension       string     `json:"extension"`         // 扩展名
+	SizeBytes       int64      `json:"size_bytes"`        // 文件大小
+	ModifiedAt      time.Time  `json:"modified_at"`       // 修改时间
+	IndexStatus     string     `json:"index_status"`      // 文档索引状态
+	ErrorMessage    string     `json:"error_message"`     // 错误信息
+	IndexedAt       *time.Time `json:"indexed_at"`        // 索引完成时间
+	TotalChunks     int        `json:"total_chunks"`      // Chunk 总数
+	SummarizedCount int        `json:"summarized_count"`  // 已完成摘要的 Chunk 数
+	RefilledCount   int        `json:"refilled_count"`    // 已完成实体提取的 Chunk 数
+	LLMStatus       string     `json:"llm_status"`        // 派生 LLM 状态: none / partial / done
 }
 
 // LLM 派生状态常量

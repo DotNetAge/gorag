@@ -34,12 +34,12 @@ const (
 // 分层结构 = storage + embedding + llm + indexer + query。
 // api_key 不写入 config.yml，独立存于 .rag/.api_key（权限 600）。
 type Config struct {
-	Version  int           `yaml:"version"`           // 配置版本号
-	Storage  StorageConfig `yaml:"storage"`           // 存储路径配置
-	Embedding EmbeddingConfig `yaml:"embedding"`       // 向量模型配置
-	LLM      LLMConfig     `yaml:"llm"`               // LLM 配置（不含 APIKey）
-	Indexer  IndexerConfig `yaml:"indexer"`           // 索引器配置
-	Query    QueryConfig   `yaml:"query"`             // 查询配置
+	Version   int             `yaml:"version"`   // 配置版本号
+	Storage   StorageConfig   `yaml:"storage"`   // 存储路径配置
+	Embedding EmbeddingConfig `yaml:"embedding"` // 向量模型配置
+	LLM       LLMConfig       `yaml:"llm"`       // LLM 配置（不含 APIKey）
+	Indexer   IndexerConfig   `yaml:"indexer"`   // 索引器配置
+	Query     QueryConfig     `yaml:"query"`     // 查询配置
 }
 
 // StorageConfig 存储路径配置
@@ -52,18 +52,19 @@ type StorageConfig struct {
 
 // EmbeddingConfig 向量模型配置
 type EmbeddingConfig struct {
-	ModelFile  string `yaml:"model_file"`  // ONNX 模型文件路径
-	Dimension  int    `yaml:"dimension"`   // 向量维度
+	ModelFile string `yaml:"model_file"` // ONNX 模型文件路径
+	Dimension int    `yaml:"dimension"`  // 向量维度
 }
 
-// LLMConfig LLM 配置（APIKey 不在此处，存于 .rag/.api_key）
+// LLMConfig LLM 配置
 type LLMConfig struct {
 	BaseURL        string `yaml:"base_url"`
 	Model          string `yaml:"model"`
-	Language       string `yaml:"language"`         // 内容语言（如 Chinese）
-	MaxTokens      int    `yaml:"max_tokens"`       // 模型最大输出 token
-	ContextLength  int    `yaml:"context_length"`   // 模型上下文长度
-	ThinkingBudget int    `yaml:"thinking_budget"`  // 思考模式 token 预算（0=默认）
+	APIKey         string `yaml:"api_key,omitempty"`      // API Key
+	Language       string `yaml:"language"`               // 内容语言（如 Chinese）
+	MaxTokens      int    `yaml:"max_tokens"`             // 模型最大输出 token
+	ContextLength  int    `yaml:"context_length"`         // 模型上下文长度
+	ThinkingBudget int    `yaml:"thinking_budget"`        // 思考模式 token 预算（0=默认）
 	APIKeyFile     string `yaml:"api_key_file,omitempty"` // 外部 API Key 文件路径（可选）
 }
 
@@ -215,7 +216,7 @@ logs/
 # 依赖和构建产物
 node_modules/
 vendor/
-dist/
+dist*/
 build/
 target/
 .next/
@@ -224,11 +225,20 @@ target/
 __pycache__/
 **.pyc
 
+# 样式文件
+*.less
+*.css
+*.scss
+*.sass
+
 # 备份和临时文件
 .backup/
 .DS_Store
 *.swp
 *.swo
+
+*.vlog
+*.sst
 `
 
 // Open 打开已存在的 .rag 库。
@@ -495,6 +505,3 @@ func CheckModel(modelId, modelFile string) (string, error) {
 
 	return onnxFile, nil
 }
-
-
-

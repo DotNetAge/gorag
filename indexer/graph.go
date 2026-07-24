@@ -769,13 +769,14 @@ func (idx *GraphIndexer) CypherQuery(ctx context.Context, q string, params map[s
 	return idx.graphDB.Query(ctx, q, params)
 }
 
-// ExploreRegion 实现 GraphExplorer 接口：从指定目录的 Region 节点出发，遍历 depth 跳邻居。
+// ExploreRegion 实现 GraphExplorer 接口：探索指定目录的图结构。
 //
 // 流程：
-//  1. 计算 regionID = GenerateID([]byte(dir))
-//  2. 获取 Region 节点
-//  3. 调用 Neighbors 遍历 depth 跳邻居
-//  4. 合并 Region 节点与邻居节点并去重
+//  1. 通过目录路径生成 Region 节点 ID，获取 Region 节点
+//  2. 从 Region 节点出发，遍历 depth 跳邻居
+//  3. 通过 Cypher 查询所有 source_file 以 dir 为前缀的 Document 节点，
+//     从这些 Document 出发获取 entity 子节点（解决子目录 Region 独立导致的实体不可达问题）
+//  4. 合并全部节点与边并去重
 func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error) {
 	if idx.graphDB == nil {
 		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
@@ -785,20 +786,7 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 	}
 
 	regionID := utils.GenerateID([]byte(dir))
-	region, err := idx.GetNode(ctx, regionID)
-	if err != nil {
-		return nil, fmt.Errorf("图索引器: 获取 Region 节点失败: %w", err)
-	}
-	if region == nil {
-		// Region 节点不存在时返回空视图，而非错误
-		return &RegionGraphView{
-			RegionID:   regionID,
-			RegionName: filepath.Base(dir),
-			Region:     nil,
-			Nodes:      []*core.Node{},
-			Edges:      []*core.Edge{},
-		}, nil
-	}
+	region, _ := idx.GetNode(ctx, regionID)
 
 	if depth <= 0 {
 		depth = 1
@@ -810,24 +798,89 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 		limit = 100
 	}
 
-	neighborNodes, edges, err := idx.Neighbors(ctx, regionID, depth, limit)
-	if err != nil {
-		return nil, fmt.Errorf("图索引器: 邻居遍历失败: %w", err)
-	}
+	// ── 节点与边的去重容器 ──
+	nodeMap := make(map[string]*core.Node)
+	edgeMap := make(map[string]*core.Edge)
 
-	// 合并 Region 节点与邻居节点，并去重
-	nodeMap := make(map[string]*core.Node, len(neighborNodes)+1)
+	// Step 1: Region 节点
 	if region != nil {
 		nodeMap[region.ID] = region
 	}
-	for _, n := range neighborNodes {
-		if n != nil {
-			nodeMap[n.ID] = n
+
+	// Step 2: 从 Region 出发的邻居遍历（原逻辑）
+	if region != nil {
+		neighborNodes, neighborEdges, neighErr := idx.Neighbors(ctx, regionID, depth, limit)
+		if neighErr != nil {
+			idx.logger.Warn("图索引器: Region 邻居遍历失败", "dir", dir, "error", neighErr)
+		} else {
+			for _, n := range neighborNodes {
+				if n != nil {
+					nodeMap[n.ID] = n
+				}
+			}
+			for _, e := range neighborEdges {
+				if e != nil {
+					edgeMap[e.ID] = e
+				}
+			}
 		}
 	}
+
+	// Step 3: 从 source_file 前缀匹配的 Document 出发，捕获子目录实体的节点与边
+	// 解决子目录有独立 Region、根 Region 不可达的问题
+	docRows, queryErr := idx.graphDB.Query(ctx,
+		`MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN d`,
+		map[string]any{"path": dir})
+
+	if queryErr != nil {
+		idx.logger.Warn("图索引器: Document 前缀查询失败，仅返回 Region 遍历结果", "dir", dir, "error", queryErr)
+	} else {
+		for _, row := range docRows {
+			dMap, ok := row["d"].(map[string]any)
+			if !ok {
+				continue
+			}
+			docID, ok := dMap["id"].(string)
+			if !ok {
+				continue
+			}
+
+			// 跳过已在 nodeMap 中的 Document（Region 遍历已覆盖）
+			if _, exists := nodeMap[docID]; exists {
+				continue
+			}
+
+			// 获取 Document 节点自身
+			docNode, getErr := idx.graphDB.GetNode(ctx, docID)
+			if getErr == nil && docNode != nil {
+				nodeMap[docNode.ID] = docNode
+			}
+
+			// 从 Document 出发遍历 entity 子节点
+			entityNodes, entityEdges, neighErr := idx.graphDB.GetNeighbors(ctx, docID, depth, limit)
+			if neighErr == nil {
+				for _, n := range entityNodes {
+					if n != nil {
+						nodeMap[n.ID] = n
+					}
+				}
+				for _, e := range entityEdges {
+					if e != nil {
+						edgeMap[e.ID] = e
+					}
+				}
+			}
+		}
+	}
+
+	// ── 构建最终结果 ──
 	nodes := make([]*core.Node, 0, len(nodeMap))
 	for _, n := range nodeMap {
 		nodes = append(nodes, n)
+	}
+	edges := make([]*core.Edge, 0, len(edgeMap))
+	for _, e := range edgeMap {
+		edges = append(edges, e)
 	}
 
 	regionName := filepath.Base(dir)

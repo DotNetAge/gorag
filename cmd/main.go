@@ -96,7 +96,7 @@ func main() {
   2. 使用 -m/--model 指定本地模型文件路径
 
 示例:
-  grag init -t hyper -i Xenova/bge-base-zh-v1.5 -f onnx/model.onnx`,
+  grag init -t hyper -i Xenova/chinese-clip-vit-base-patch16 -f onnx/model.onnx`,
 		Args: cobra.NoArgs,
 		Run:  runInit,
 	}
@@ -293,7 +293,7 @@ LLM 参数:
 	statusCmd.Flags().BoolVar(&statusSummary, "summary", false, "仅显示汇总统计")
 	statusCmd.Flags().StringVarP(&statusVal, "status", "s", "", "按索引状态过滤 (pending/indexing/indexed/failed)")
 
-	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd, chunksCmd, nodesCmd, cypherCmd, statusCmd)
+	rootCmd.AddCommand(initCmd, indexCmd, queryCmd, infoCmd, doctorCmd, logsCmd, updateCmd, treeCmd, chunksCmd, nodesCmd, cypherCmd, statusCmd, serveCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -345,7 +345,7 @@ func runInit(cmd *cobra.Command, args []string) {
 	// 确定默认模型
 	if initType == "hyper" || initType == "semantic" {
 		if initModel == "" && initModelID == "" {
-			initModelID = "Xenova/bge-base-zh-v1.5"
+			initModelID = "Xenova/chinese-clip-vit-base-patch16"
 			initModelFile = "onnx/model.onnx"
 		}
 	}

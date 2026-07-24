@@ -56,3 +56,4 @@ bin/
 *.jar
 *.aar
 docs/
+.rag/

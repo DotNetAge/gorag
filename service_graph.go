@@ -17,6 +17,8 @@ type NodeQueryResult struct {
 	Region     *core.Node   `json:"region,omitempty"`
 	Nodes      []*core.Node `json:"nodes"`
 	Edges      []*core.Edge `json:"edges"`
+	DocCount   int          `json:"doc_count"`    // 该目录下已索引的 Document 节点数
+	HasGraph   bool         `json:"has_graph"`    // 是否有实体图谱数据（非仅 Document）
 }
 
 // GraphService 负责图探索与原始 Cypher 查询。
@@ -57,12 +59,45 @@ func (s *GraphService) Nodes(ctx context.Context, dir string, hops int) (*NodeQu
 		return nil, err
 	}
 
+	// 统计该目录下的 Document 节点数（用于区分「未索引」和「有文档但无实体」）
+	var docCount int
+	if counter, ok := s.svc.indexer.(interface {
+		CountByRegion(ctx context.Context, path string) (int, error)
+	}); ok {
+		if c, err := counter.CountByRegion(ctx, absDir); err == nil {
+			docCount = c
+		}
+	}
+
+	// 判断是否包含实体节点（非 Document/Region 的节点）
+	hasGraph := false
+	if len(view.Nodes) > 0 {
+		for _, n := range view.Nodes {
+			if n == nil {
+				continue
+			}
+			isEntity := true
+			for _, l := range n.Labels {
+				if l == "Document" || l == "Region" {
+					isEntity = false
+					break
+				}
+			}
+			if isEntity {
+				hasGraph = true
+				break
+			}
+		}
+	}
+
 	return &NodeQueryResult{
 		RegionID:   view.RegionID,
 		RegionName: view.RegionName,
 		Region:     view.Region,
 		Nodes:      view.Nodes,
 		Edges:      view.Edges,
+		DocCount:   docCount,
+		HasGraph:   hasGraph,
 	}, nil
 }
 

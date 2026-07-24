@@ -7,9 +7,9 @@ require (
 	github.com/DotNetAge/gograph v0.2.6
 	github.com/DotNetAge/govector v0.1.8
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
-	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ego/gse v1.0.2
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/richardlehane/mscfb v1.0.7
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
