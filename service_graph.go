@@ -123,3 +123,61 @@ func (s *GraphService) Cypher(ctx context.Context, query string) ([]map[string]a
 	}
 	return rows, nil
 }
+
+// FileNodes 以文件 Document 为中心查询实体和关系。
+// filePath 为绝对路径；返回节点与边，不含 Region 信息。
+func (s *GraphService) FileNodes(ctx context.Context, filePath string, hops int) (*NodeQueryResult, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("文件路径不能为空")
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("解析文件路径失败: %w", err)
+	}
+
+	if hops < 1 {
+		hops = 1
+	}
+	if hops > 3 {
+		hops = 3
+	}
+
+	explorer, ok := s.svc.indexer.(indexer.FileExplorer)
+	if !ok {
+		return nil, fmt.Errorf("当前索引器不支持文件级图探索")
+	}
+
+	view, err := explorer.ExploreFile(ctx, absPath, hops, 100)
+	if err != nil {
+		return nil, err
+	}
+
+	// 判断是否包含实体节点（非 Document 的节点）
+	hasGraph := false
+	if len(view.Nodes) > 0 {
+		for _, n := range view.Nodes {
+			if n == nil {
+				continue
+			}
+			isEntity := true
+			for _, l := range n.Labels {
+				if l == "Document" || l == "Region" {
+					isEntity = false
+					break
+				}
+			}
+			if isEntity {
+				hasGraph = true
+				break
+			}
+		}
+	}
+
+	return &NodeQueryResult{
+		Nodes:    view.Nodes,
+		Edges:    view.Edges,
+		HasGraph: hasGraph,
+		DocCount: len(view.Nodes), // 近似，仅作参考
+	}, nil
+}

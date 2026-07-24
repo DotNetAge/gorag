@@ -21,6 +21,15 @@ import (
 // logger 是 webapi 包全局使用的结构化日志实例。
 var logger = goragLog.DefaultConsoleLogger()
 
+// Server 是 WebAPI 服务的顶层结构体，持有 RAG 服务实例和 WebSocket Hub，
+// 所有 HTTP 处理器作为 Server 的方法实现，避免全局变量。
+type Server struct {
+	svc    *gorag.IndexingService
+	hub    *Hub
+	runner *processRunner
+	ragDir string
+}
+
 // Start 启动 HTTP 服务，阻塞直到收到中断信号。
 func Start(port, ragDir string) error {
 	if port == "" {
@@ -43,17 +52,19 @@ func Start(port, ragDir string) error {
 		}
 	}
 
-	// 初始化 WebSocket Hub（必须在启动后台任务之前）
-	wsHub := NewHub()
-	globalRunner.SetHub(wsHub)
+	s := &Server{ragDir: ragDir}
 
-	// 初始化全局单例 RAG 服务（所有 handler 共享同一实例）
+	// 初始化 WebSocket Hub（必须在启动后台任务之前）
+	s.hub = NewHub()
+	s.runner = &processRunner{hub: s.hub}
+
+	// 初始化 RAG 服务（所有 handler 共享同一实例）
 	if ragDir != "" {
 		svc, err := gorag.NewRAGService(ragDir)
 		if err != nil {
 			logger.Error("初始化 RAG 服务失败", err, "ragDir", ragDir)
 		} else {
-			SetGlobalService(svc)
+			s.svc = svc
 			logger.Info("RAG 服务已初始化", "知识库", ragDir)
 
 			// 自动续跑中断的索引任务
@@ -69,7 +80,6 @@ func Start(port, ragDir string) error {
 			} else if updateErr != nil {
 				logger.Error("检查未完成 Update 任务失败", updateErr)
 			} else if pending > 0 || indexing > 0 || (needsUpdate && hasLLM) {
-				// 仅当 LLM 已配置时才续跑 Update；否则即使 needsUpdate 也只跑 Index
 				dirs := loadIndexDirs(ragDir)
 				if len(dirs) > 0 {
 					if hasLLM {
@@ -77,7 +87,7 @@ func Start(port, ragDir string) error {
 					} else {
 						logger.Info("未配置 LLM，仅执行 Index 阶段")
 					}
-					globalRunner.start(dirs, llmCfg)
+					s.runner.start(s.svc, dirs, llmCfg)
 				} else {
 					logger.Warn("未配置索引目录，跳过自动续跑")
 				}
@@ -90,38 +100,39 @@ func Start(port, ragDir string) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/init", handleInit)
-	mux.HandleFunc("/api/config", handleConfig)
-	mux.HandleFunc("/api/delete", withRAG(handleDelete))
-	mux.HandleFunc("/api/index-dirs", handleIndexDirs)
-	mux.HandleFunc("/api/index", withRAG(handleIndex))
-	mux.HandleFunc("/api/query", withRAG(handleQuery))
-	mux.HandleFunc("/api/info", withRAG(handleInfo))
-	mux.HandleFunc("/api/doctor", withRAG(handleDoctor))
-	mux.HandleFunc("/api/logs", withRAG(handleLogs))
-	mux.HandleFunc("/api/update", withRAG(handleUpdate))
-	mux.HandleFunc("/api/tree", withRAG(handleTree))
-	mux.HandleFunc("/api/chunks", withRAG(handleChunks))
-	mux.HandleFunc("/api/nodes", withRAG(handleNodes))
-	mux.HandleFunc("/api/cypher", withRAG(handleCypher))
-	mux.HandleFunc("/api/status", withRAG(handleStatus))
-	mux.HandleFunc("/api/llm-check", withRAG(handleLLMCheck))
-	mux.HandleFunc("/api/process", handleProcessStart)
-	mux.HandleFunc("/api/process-progress", handleProcessProgress)
-	mux.HandleFunc("/api/fs-home", handleFSHome)
-	mux.HandleFunc("/api/fs-list", handleFSList)
-	mux.HandleFunc("/api/schema-list", handleSchemaList)
-	mux.HandleFunc("/api/schema-content", handleSchemaContent)
-	mux.HandleFunc("/api/dir-schemas", handleDirSchemas)
-	mux.HandleFunc("/api/schema-custom", handleSchemaCustom)
-	mux.HandleFunc("/api/read-file", handleReadFile)
-	mux.HandleFunc("/api/save-file", handleSaveFile)
-	mux.HandleFunc("/api/fs-mkdir", handleFSMkdir)
-	mux.HandleFunc("/api/fs-remove", handleFSRemove)
-	mux.HandleFunc("/api/fs-move", handleFSMove)
-	mux.HandleFunc("/api/file", handleServeFile)
+	mux.HandleFunc("/api/init", s.handleInit)
+	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/delete", s.handleDelete)
+	mux.HandleFunc("/api/index-dirs", s.handleIndexDirs)
+	mux.HandleFunc("/api/index", s.handleIndex)
+	mux.HandleFunc("/api/query", s.handleQuery)
+	mux.HandleFunc("/api/info", s.handleInfo)
+	mux.HandleFunc("/api/doctor", s.handleDoctor)
+	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/update", s.handleUpdate)
+	mux.HandleFunc("/api/tree", s.handleTree)
+	mux.HandleFunc("/api/chunks", s.handleChunks)
+	mux.HandleFunc("/api/nodes", s.handleNodes)
+	mux.HandleFunc("/api/file-nodes", s.handleFileNodes)
+	mux.HandleFunc("/api/cypher", s.handleCypher)
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/llm-check", s.handleLLMCheck)
+	mux.HandleFunc("/api/process", s.handleProcessStart)
+	mux.HandleFunc("/api/process-progress", s.handleProcessProgress)
+	mux.HandleFunc("/api/fs-home", s.handleFSHome)
+	mux.HandleFunc("/api/fs-list", s.handleFSList)
+	mux.HandleFunc("/api/schema-list", s.handleSchemaList)
+	mux.HandleFunc("/api/schema-content", s.handleSchemaContent)
+	mux.HandleFunc("/api/dir-schemas", s.handleDirSchemas)
+	mux.HandleFunc("/api/schema-custom", s.handleSchemaCustom)
+	mux.HandleFunc("/api/read-file", s.handleReadFile)
+	mux.HandleFunc("/api/save-file", s.handleSaveFile)
+	mux.HandleFunc("/api/fs-mkdir", s.handleFSMkdir)
+	mux.HandleFunc("/api/fs-remove", s.handleFSRemove)
+	mux.HandleFunc("/api/fs-move", s.handleFSMove)
+	mux.HandleFunc("/api/file", s.handleServeFile)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWS(wsHub, w, r)
+		ServeWS(s.hub, w, r)
 	})
 	mux.HandleFunc("/health", handleHealth)
 
@@ -150,9 +161,9 @@ func Start(port, ragDir string) error {
 	<-quit
 	logger.Info("正在关闭服务")
 
-	// 关闭全局 RAG 服务
-	if globalSvc != nil {
-		if err := globalSvc.Stop(); err != nil {
+	// 关闭 RAG 服务
+	if s.svc != nil {
+		if err := s.svc.Stop(); err != nil {
 			logger.Error("关闭 RAG 服务时出错", err)
 		}
 	}
@@ -167,7 +178,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// CORS 头
+		// CORS 头（内部服务器使用，全开放即可）
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -260,6 +271,11 @@ type nodesRequest struct {
 	Hops int    `json:"hops"`
 }
 
+type fileNodesRequest struct {
+	File string `json:"file"`
+	Hops int    `json:"hops"`
+}
+
 type cypherRequest struct {
 	Query string `json:"query"`
 }
@@ -276,6 +292,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, apiResponse{Success: false, Error: msg})
 }
 
+func writeSuccess(w http.ResponseWriter, data interface{}) {
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Data: data})
+}
+
 // loadLLMConfigFromFile 从 .rag/config.yml 加载 LLM 配置。
 // config.yml 不存在或无 LLM 配置时返回空配置（跳过 Update 阶段）。
 func loadLLMConfigFromFile(ragDir string) Config {
@@ -288,8 +308,4 @@ func loadLLMConfigFromFile(ragDir string) Config {
 		APIKey:  goragCfg.LLM.APIKey,
 		Model:   goragCfg.LLM.Model,
 	}
-}
-
-func writeSuccess(w http.ResponseWriter, data interface{}) {
-	writeJSON(w, http.StatusOK, apiResponse{Success: true, Data: data})
 }

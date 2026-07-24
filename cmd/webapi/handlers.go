@@ -20,27 +20,7 @@ import (
 	"github.com/DotNetAge/gorag/v2/utils"
 )
 
-// ── 全局单例 ────────────────────────────────────────────────────────
 
-// globalSvc 是全局唯一的 RAG 服务实例，所有 handler 共享同一个实例。
-// 在 Server.Start 中初始化，Server 关闭时 Stop。
-var globalSvc *gorag.IndexingService
-
-// SetGlobalService 设置全局 RAG 服务实例（由 Server.Start 调用）。
-func SetGlobalService(svc *gorag.IndexingService) {
-	globalSvc = svc
-}
-
-// withRAG 注入全局 RAG 服务实例到处理器。
-func withRAG(next func(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if globalSvc == nil {
-			writeError(w, http.StatusBadRequest, "请先初始化 RAG 库")
-			return
-		}
-		next(w, r, globalSvc)
-	}
-}
 
 // resolveRAGDir 确定 .rag 库目录。
 func resolveRAGDir(ragDir string) (string, error) {
@@ -79,7 +59,7 @@ type configRequest struct {
 	Model   string `json:"model"`
 }
 
-func handleConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	ragDir, err := resolveRAGDir("")
 	if err != nil {
 		// 没有 RAG 库时，GET 返回空配置，POST 返回错误
@@ -137,7 +117,8 @@ type deleteRequest struct {
 	Path string `json:"path"`
 }
 
-func handleDelete(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -193,7 +174,7 @@ type indexDirsResponse struct {
 	RunDir string   `json:"run_dir"`
 }
 
-func handleIndexDirs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleIndexDirs(w http.ResponseWriter, r *http.Request) {
 	ragDir, err := resolveRAGDir("")
 	if err != nil {
 		if r.Method == http.MethodGet {
@@ -363,14 +344,6 @@ type processRunner struct {
 	progress ProcessProgress
 	hub      *Hub // 非空时每次更新后自动广播 WebSocket 通知
 }
-
-var globalRunner = &processRunner{}
-
-// SetHub 设置 processRunner 的 WebSocket Hub，用于实时推送进度。
-func (r *processRunner) SetHub(h *Hub) {
-	r.hub = h
-}
-
 func (r *processRunner) load() ProcessProgress {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -388,9 +361,7 @@ func (r *processRunner) update(fn func(p *ProcessProgress)) {
 }
 
 // start 在后台启动顺序 Index → Update 流程。
-// 使用全局唯一的 RAG 服务实例（globalSvc），避免多实例竞争同一 .rag 目录的锁。
-func (r *processRunner) start(dirs []string, llmCfg Config) {
-	svc := globalSvc
+func (r *processRunner) start(svc *gorag.IndexingService, dirs []string, llmCfg Config) {
 	if svc == nil {
 		r.update(func(p *ProcessProgress) {
 			p.Running = false
@@ -629,13 +600,13 @@ type processStartRequest struct {
 	LLM  Config   `json:"llm"`
 }
 
-func handleProcessStart(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProcessStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
 	}
 
-	if globalRunner.load().Running {
+	if s.runner.load().Running {
 		writeError(w, http.StatusConflict, "已有正在执行的索引任务")
 		return
 	}
@@ -651,18 +622,18 @@ func handleProcessStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	globalRunner.start(req.Dirs, req.LLM)
+	s.runner.start(s.svc, req.Dirs, req.LLM)
 	writeSuccess(w, map[string]string{"message": "后台处理已启动"})
 }
 
-func handleProcessProgress(w http.ResponseWriter, r *http.Request) {
-	prog := globalRunner.load()
+func (s *Server) handleProcessProgress(w http.ResponseWriter, r *http.Request) {
+	prog := s.runner.load()
 	writeSuccess(w, prog)
 }
 
 // ── init ──────────────────────────────────────────────────────────
 
-func handleInit(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleInit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -722,7 +693,8 @@ func handleInit(w http.ResponseWriter, r *http.Request) {
 
 // ── index ─────────────────────────────────────────────────────────
 
-func handleIndex(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -762,7 +734,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServ
 
 // ── query ─────────────────────────────────────────────────────────
 
-func handleQuery(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -827,7 +800,8 @@ func handleQuery(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServ
 
 // ── info ──────────────────────────────────────────────────────────
 
-func handleInfo(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	info, err := svc.Admin().Info()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("获取信息失败: %v", err))
@@ -838,14 +812,16 @@ func handleInfo(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServi
 
 // ── doctor ────────────────────────────────────────────────────────
 
-func handleDoctor(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	checks := svc.Admin().Doctor()
 	writeSuccess(w, checks)
 }
 
 // ── logs ──────────────────────────────────────────────────────────
 
-func handleLogs(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	data, err := svc.Admin().Logs()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v", err))
@@ -859,7 +835,8 @@ func handleLogs(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServi
 
 // ── update ────────────────────────────────────────────────────────
 
-func handleUpdate(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -881,6 +858,35 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingSer
 		return
 	}
 
+	ctx := context.Background()
+
+	// 如果提供了 LLM 配置，注入到 HyperIndexer
+	if req.LLMURL != "" && req.LLMModel != "" {
+		llmCfg := Config{
+			BaseURL: req.LLMURL,
+			APIKey:  req.LLMKey,
+			Model:   req.LLMModel,
+		}
+		if err := injectLLMConfig(svc, llmCfg); err != nil {
+			logger.Warn("注入 LLM 配置失败", "error", err)
+		}
+
+		// 加载 schemas 配置
+		if req.SchemaDir != "" {
+			schemas, sErr := llm.LoadEntitySchemasFromDir(req.SchemaDir)
+			if sErr == nil && len(schemas) > 0 {
+				if hyper, ok := svc.Indexer().(*indexer.HyperIndexer); ok {
+					hyper.AddSchemas(req.SchemaDir, schemas)
+				}
+			}
+		}
+	}
+
+	if err := svc.IndexerSvc().Update(ctx, absTarget); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("增量更新失败: %v", err))
+		return
+	}
+
 	writeSuccess(w, map[string]string{
 		"message": "增量更新完成",
 		"target":  absTarget,
@@ -889,7 +895,8 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingSer
 
 // ── tree ──────────────────────────────────────────────────────────
 
-func handleTree(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	root, err := svc.Admin().Tree(context.Background())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("构建目录树失败: %v", err))
@@ -900,7 +907,8 @@ func handleTree(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServi
 
 // ── chunks ────────────────────────────────────────────────────────
 
-func handleChunks(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleChunks(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	page := 1
 	size := 20
 	filter := ""
@@ -929,7 +937,8 @@ func handleChunks(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingSer
 
 // ── nodes ─────────────────────────────────────────────────────────
 
-func handleNodes(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -958,9 +967,47 @@ func handleNodes(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingServ
 	writeSuccess(w, result)
 }
 
+// ── file-nodes ────────────────────────────────────────────────────
+
+func (s *Server) handleFileNodes(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
+
+	var req fileNodesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("请求体解析失败: %v", err))
+		return
+	}
+
+	if req.File == "" {
+		writeError(w, http.StatusBadRequest, "文件路径不能为空")
+		return
+	}
+
+	hops := req.Hops
+	if hops < 1 {
+		hops = 1
+	}
+	if hops > 3 {
+		hops = 3
+	}
+
+	result, err := svc.Explorer().FileNodes(context.Background(), req.File, hops)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("文件级图查询失败: %v", err))
+		return
+	}
+
+	writeSuccess(w, result)
+}
+
 // ── cypher ────────────────────────────────────────────────────────
 
-func handleCypher(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleCypher(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
 		return
@@ -988,7 +1035,8 @@ func handleCypher(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingSer
 
 // ── llm-check ────────────────────────────────────────────────────
 
-func handleLLMCheck(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleLLMCheck(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	ragDir := svc.DataDir()
 
 	// 从 config.yml 读取 LLM 配置
@@ -1006,7 +1054,8 @@ func handleLLMCheck(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingS
 
 // ── status ────────────────────────────────────────────────────────
 
-func handleStatus(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingService) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
 	filter := r.URL.Query().Get("filter")
 	status := r.URL.Query().Get("status")
 	summary := r.URL.Query().Get("summary") == "true"
@@ -1034,7 +1083,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request, svc *gorag.IndexingSer
 
 // ── fs-home ───────────────────────────────────────────────────────
 
-func handleFSHome(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFSHome(w http.ResponseWriter, r *http.Request) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("获取用户主目录失败: %v", err))
@@ -1054,7 +1103,7 @@ type fsEntry struct {
 	ModTime string `json:"mod_time"`
 }
 
-func handleFSList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeError(w, http.StatusBadRequest, "path 参数不能为空")

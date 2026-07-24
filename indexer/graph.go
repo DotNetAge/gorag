@@ -904,6 +904,102 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 	}, nil
 }
 
+// ExploreFile 以文件 Document 为中心探索实体和关系。
+//
+// 流程：
+//  1. 通过 Cypher 查询 exact match source_file 的 Document 节点
+//  2. 从 Document 出发遍历 depth 跳邻居实体
+//  3. 返回实体节点与关系边
+//
+// filePath 应为绝对路径；depth 默认 2 即可包含实体间关系。
+func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth, limit int) (*RegionGraphView, error) {
+	if idx.graphDB == nil {
+		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("图索引器: 文件路径不能为空")
+	}
+
+	if depth <= 0 {
+		depth = 2
+	}
+	if depth > 3 {
+		depth = 3
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	nodeMap := make(map[string]*core.Node)
+	edgeMap := make(map[string]*core.Edge)
+
+	// Step 1: 精确匹配 source_file 的 Document 节点
+	docRows, err := idx.graphDB.Query(ctx,
+		`MATCH (d:Document) WHERE d.source_file = $path RETURN d`,
+		map[string]any{"path": filePath})
+	if err != nil {
+		idx.logger.Error("图索引器: Document 精确查询失败", err, "file", filePath)
+		return nil, fmt.Errorf("图索引器: 查询文件 Document 节点失败: %w", err)
+	}
+
+	if len(docRows) == 0 {
+		idx.logger.Debug("图索引器: 未找到该文件的 Document 节点", "file", filePath)
+		return &RegionGraphView{Nodes: nil, Edges: nil}, nil
+	}
+
+	for _, row := range docRows {
+		dMap, ok := row["d"].(map[string]any)
+		if !ok {
+			continue
+		}
+		docID, ok := dMap["id"].(string)
+		if !ok || docID == "" {
+			continue
+		}
+
+		// Step 2: 获取 Document 节点自身
+		docNode, getErr := idx.graphDB.GetNode(ctx, docID)
+		if getErr == nil && docNode != nil {
+			nodeMap[docNode.ID] = docNode
+		}
+
+		// Step 3: 从 Document 出发遍历 entity 子节点（depth=2 包含实体间关系）
+		entityNodes, entityEdges, neighErr := idx.graphDB.GetNeighbors(ctx, docID, depth, limit)
+		if neighErr == nil {
+			for _, n := range entityNodes {
+				if n != nil {
+					nodeMap[n.ID] = n
+				}
+			}
+			for _, e := range entityEdges {
+				if e != nil {
+					edgeMap[e.ID] = e
+				}
+			}
+		}
+	}
+
+	nodes := make([]*core.Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		nodes = append(nodes, n)
+	}
+	edges := make([]*core.Edge, 0, len(edgeMap))
+	for _, e := range edgeMap {
+		edges = append(edges, e)
+	}
+
+	idx.logger.Debug("图索引器: 文件级图探索完成",
+		"file", filePath,
+		"depth", depth,
+		"nodes", len(nodes),
+		"edges", len(edges))
+
+	return &RegionGraphView{
+		Nodes: nodes,
+		Edges: edges,
+	}, nil
+}
+
 // CountByRegion 返回指定路径下（source_file 前缀匹配）的 Document 节点总数。
 // Document 节点的 source_file 属性由 Save 方法在写入时填充。
 func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, error) {

@@ -165,3 +165,12 @@ type GraphExplorer interface {
 	// dir 应为绝对路径；limit 限制返回节点数量。
 	ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error)
 }
+
+// FileExplorer 文件级图探索扩展接口：以文件 Document 为中心查询实体和关系。
+//
+// GraphIndexer 直接实现；HyperIndexer 委托给内部 graph。
+type FileExplorer interface {
+	// ExploreFile 以文件 Document 为中心探索实体和关系。
+	// filePath 应为绝对路径；depth 默认 2 即可包含实体间关系。
+	ExploreFile(ctx context.Context, filePath string, depth, limit int) (*RegionGraphView, error)
+}

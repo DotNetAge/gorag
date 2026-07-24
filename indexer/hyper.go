@@ -678,6 +678,18 @@ func (h *HyperIndexer) ExploreRegion(ctx context.Context, dir string, depth, lim
 	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 GraphExplorer")
 }
 
+// ExploreFile 实现 FileExplorer 接口：委托关系线执行文件级图探索。
+func (h *HyperIndexer) ExploreFile(ctx context.Context, filePath string, depth, limit int) (*RegionGraphView, error) {
+	if h.graph == nil {
+		return nil, fmt.Errorf("HyperIndexer: 关系线未启用，无法执行文件级图探索")
+	}
+	if f, ok := h.graph.(FileExplorer); ok {
+		h.logger.Debug("复合索引器: 委托文件级图探索", "file", filePath, "depth", depth)
+		return f.ExploreFile(ctx, filePath, depth, limit)
+	}
+	return nil, fmt.Errorf("HyperIndexer: 关系线未实现 FileExplorer")
+}
+
 // CypherQuery 执行原始 Cypher 查询，委托给关系线的 GraphIndexer。
 // 仅当索引器支持图存储时可用。
 func (h *HyperIndexer) CypherQuery(ctx context.Context, q string, params map[string]any) ([]map[string]any, error) {

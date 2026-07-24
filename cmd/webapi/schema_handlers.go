@@ -12,7 +12,7 @@ import (
 
 // handleSchemaList 返回嵌入的 schema 分类列表。
 // GET /api/schema-list
-func handleSchemaList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSchemaList(w http.ResponseWriter, r *http.Request) {
 	categories, err := gorag.SchemaCategoryList()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("获取 schema 列表失败: %v", err))
@@ -23,7 +23,7 @@ func handleSchemaList(w http.ResponseWriter, r *http.Request) {
 
 // handleSchemaContent 返回指定 schema 的 JSON 内容。
 // GET /api/schema-content?category=enterprise&name=Contract
-func handleSchemaContent(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSchemaContent(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	name := r.URL.Query().Get("name")
 	if category == "" || name == "" {
@@ -57,12 +57,12 @@ type dirSchemasRequest struct {
 // handleDirSchemas 获取或保存指定目录的 schema 配置。
 // GET  /api/dir-schemas?dir=xxx  → 返回当前选定的 schema 列表
 // POST /api/dir-schemas          → 保存选定的 schema 配置
-func handleDirSchemas(w http.ResponseWriter, r *http.Request) {
-	if globalSvc == nil {
+func (s *Server) handleDirSchemas(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
 		writeError(w, http.StatusBadRequest, "请先初始化 RAG 库")
 		return
 	}
-	ragDir := globalSvc.DataDir()
+	ragDir := s.svc.DataDir()
 
 	switch r.Method {
 	case http.MethodGet:
@@ -109,12 +109,12 @@ type schemaCustomRequest struct {
 // handleSchemaCustom 获取或保存自定义 schema。
 // GET  /api/schema-custom?category=xxx&name=yyy&dir=zzz  → 返回 schema JSON
 // POST /api/schema-custom                                    → 保存自定义 schema
-func handleSchemaCustom(w http.ResponseWriter, r *http.Request) {
-	if globalSvc == nil {
+func (s *Server) handleSchemaCustom(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
 		writeError(w, http.StatusBadRequest, "请先初始化 RAG 库")
 		return
 	}
-	ragDir := globalSvc.DataDir()
+	ragDir := s.svc.DataDir()
 
 	switch r.Method {
 	case http.MethodGet:
