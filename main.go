@@ -239,6 +239,14 @@ __pycache__/
 
 *.vlog
 *.sst
+go.mod
+go.sum
+LICENSE
+.editorconfig
+.goreleaser.yml
+.github/
+.vscode/
+.claude/
 `
 
 // Open 打开已存在的 .rag 库。

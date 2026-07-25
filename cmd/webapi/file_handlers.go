@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -33,11 +34,6 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.isPathInAllowedDirs(req.Path) {
-		writeError(w, http.StatusForbidden, "无权访问该路径")
-		return
-	}
-
 	data, err := os.ReadFile(req.Path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("读取文件失败: %v", err))
@@ -56,11 +52,6 @@ func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeError(w, http.StatusBadRequest, "缺少 path 参数")
-		return
-	}
-
-	if !s.isPathInAllowedDirs(path) {
-		writeError(w, http.StatusForbidden, "无权访问该路径")
 		return
 	}
 
@@ -120,11 +111,6 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Path == "" {
 		writeError(w, http.StatusBadRequest, "缺少 path 参数")
-		return
-	}
-
-	if !s.isPathInAllowedDirs(req.Path) {
-		writeError(w, http.StatusForbidden, "无权访问该路径")
 		return
 	}
 
@@ -188,11 +174,6 @@ func (s *Server) handleFSRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.isPathInAllowedDirs(req.Path) {
-		writeError(w, http.StatusForbidden, "无权访问该路径")
-		return
-	}
-
 	if err := os.RemoveAll(req.Path); err != nil {
 		writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
 		return
@@ -237,11 +218,6 @@ func (s *Server) handleFSMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.isPathInAllowedDirs(req.Source) || !s.isPathInAllowedDirs(req.Target) {
-		writeError(w, http.StatusForbidden, "无权访问该路径")
-		return
-	}
-
 	if err := os.Rename(req.Source, req.Target); err != nil {
 		writeError(w, http.StatusInternalServerError, "移动/重命名失败: "+err.Error())
 		return
@@ -278,35 +254,188 @@ func (s *Server) handleFSMove(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]string{"message": "已移动"})
 }
 
-// ── 路径访问控制 ──────────────────────────────────────────────────
+// handleOpenFile 使用本地默认程序打开文件。
+// POST /api/open-file
+func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
 
-// allowedDirs 构建允许访问的目录白名单（ragDir + 所有索引目录）。
-// 返回 nil 表示白名单未初始化。
-func (s *Server) allowedDirs() []string {
-	if s.svc == nil {
-		return nil
+	var req struct {
+		Path string `json:"path"`
 	}
-	ragDir := s.svc.DataDir()
-	if ragDir == "" {
-		return nil
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败: "+err.Error())
+		return
 	}
-	dirs := []string{ragDir}
-	indexDirs := loadIndexDirs(ragDir)
-	dirs = append(dirs, indexDirs...)
-	return dirs
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "缺少 path 参数")
+		return
+	}
+
+	cmd := exec.Command("open", req.Path)
+	if err := cmd.Start(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("打开文件失败: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]string{"message": "文件已通过本地程序打开"})
 }
 
-// isPathInAllowedDirs 检查路径是否在白名单目录范围内。
-func (s *Server) isPathInAllowedDirs(targetPath string) bool {
-	dirs := s.allowedDirs()
-	if dirs == nil {
-		// 白名单未初始化，允许通过（避免服务启动瞬间误拦截）
-		return true
+// defaultRagignoreContent .ragignore 默认内容
+const defaultRagignoreContent = `# 敏感信息
+.api_key
+
+# 运行时锁文件
+.lock
+
+# 版本控制
+.git/
+.svn/
+.hg/
+
+# 数据库（体积大，不入版本控制）
+vectors/
+graphs/
+meta.db
+meta.db-wal
+meta.db-shm
+
+# 日志
+logs/
+
+# 依赖和构建产物
+node_modules/
+vendor/
+dist*/
+build/
+target/
+.next/
+.turbo/
+.cache/
+__pycache__/
+**.pyc
+
+# 样式文件
+*.less
+*.css
+*.scss
+*.sass
+
+# 备份和临时文件
+.backup/
+.DS_Store
+*.swp
+*.swo
+
+*.vlog
+*.sst
+go.mod
+go.sum
+LICENSE
+.editorconfig
+.goreleaser.yml
+.github/
+.vscode/
+.claude/
+`
+
+// handleCreateRagignore 在指定目录中创建 .ragignore 文件并写入默认内容。
+// POST /api/ragignore
+func (s *Server) handleCreateRagignore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
 	}
-	for _, dir := range dirs {
-		if strings.HasPrefix(targetPath, dir+string(filepath.Separator)) || targetPath == dir {
-			return true
+
+	var req struct {
+		Dir string `json:"dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败: "+err.Error())
+		return
+	}
+	if req.Dir == "" {
+		writeError(w, http.StatusBadRequest, "缺少 dir 参数")
+		return
+	}
+
+	ragignorePath := filepath.Join(req.Dir, ".ragignore")
+	if err := os.WriteFile(ragignorePath, []byte(defaultRagignoreContent), 0644); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("创建 .ragignore 失败: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]string{"message": ".ragignore 已创建", "path": ragignorePath})
+}
+
+// handleAppendRagignore 将指定路径追加到所在目录的 .ragignore 中。
+// 若 .ragignore 不存在则自动创建。
+// POST /api/ragignore-append
+func (s *Server) handleAppendRagignore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败: "+err.Error())
+		return
+	}
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "缺少 path 参数")
+		return
+	}
+
+	parentDir := filepath.Dir(req.Path)
+	base := filepath.Base(req.Path)
+
+	// 如果是目录，加 / 后缀以匹配 gitignore 惯例
+	info, stErr := os.Stat(req.Path)
+	if stErr == nil && info.IsDir() {
+		base += "/"
+	}
+
+	ragignorePath := filepath.Join(parentDir, ".ragignore")
+
+	var existing []byte
+	if _, err := os.Stat(ragignorePath); os.IsNotExist(err) {
+		// 文件不存在，创建新文件
+		existing = []byte("# 排除规则\n" + base + "\n")
+	} else {
+		existing, err = os.ReadFile(ragignorePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("读取 .ragignore 失败: %v", err))
+			return
 		}
+		// 检查是否已包含该规则
+		lines := strings.Split(string(existing), "\n")
+		alreadyExists := false
+		for _, line := range lines {
+			if strings.TrimSpace(line) == base {
+				alreadyExists = true
+				break
+			}
+		}
+		if alreadyExists {
+			writeSuccess(w, map[string]string{"message": "该路径已在排除规则中", "path": ragignorePath})
+			return
+		}
+		// 追加
+		if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
+			existing = append(existing, '\n')
+		}
+		existing = append(existing, []byte(base+"\n")...)
 	}
-	return false
+
+	if err := os.WriteFile(ragignorePath, existing, 0644); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("写入 .ragignore 失败: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]string{"message": "已添加到排除规则", "path": ragignorePath})
 }

@@ -404,6 +404,12 @@ func (s *sqliteStore) QueryUsages(limit int) ([]*Usage, error) {
 	return usages, nil
 }
 
+// QueryTotalUsageStats 实现 Store 接口。聚合查询总 tokens 和最新模型名。
+func (s *sqliteStore) QueryTotalUsageStats() (totalTokens int64, model string, err error) {
+	err = s.db.QueryRow("SELECT COALESCE(SUM(total_tokens), 0), COALESCE((SELECT model FROM usages ORDER BY id DESC LIMIT 1), '') FROM usages").Scan(&totalTokens, &model)
+	return
+}
+
 // scanUsage 从数据库行扫描 Usage。
 func scanUsage(row scanner) (*Usage, error) {
 	var u Usage

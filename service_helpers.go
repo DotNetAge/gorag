@@ -28,25 +28,70 @@ var textExts = []string{
 }
 
 // scanDir 扫描目录下的所有文本文件，跳过 .ragignore 匹配的目录。
-func scanDir(dir string, ragignore []string) ([]string, error) {
+//
+// 支持层级 .ragignore：每个目录可放置自己的 .ragignore，规则叠加生效。
+// basePatterns 来自 .rag 库目录的全局规则，作为根目录的默认规则。每个子目录的
+// 本地 .ragignore 规则会附加到父目录规则之上，子目录规则不影响平级目录。
+func scanDir(dir string, basePatterns []string) ([]string, error) {
+	// patternCache 缓存每个目录的合并后规则
+	patternCache := map[string][]string{}
+	patternCache[dir] = basePatterns
+
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			// 跳过 .rag 子目录（避免索引库索引自己）
-			if strings.HasSuffix(path, ".rag") {
-				return filepath.SkipDir
+		if !d.IsDir() {
+			// 获取父目录的规则检查文件是否应被跳过
+			parent := filepath.Dir(path)
+			if patterns, ok := patternCache[parent]; ok {
+				rel, relErr := filepath.Rel(dir, path)
+				if relErr == nil {
+					if matchRagignoreEntry(d.Name(), rel, patterns) {
+						return nil
+					}
+				}
 			}
-			// 跳过 .ragignore 匹配的目录
-			if matchRagignoreDir(path, dir, ragignore) {
-				return filepath.SkipDir
+			if isTextFile(path) {
+				files = append(files, path)
 			}
 			return nil
 		}
-		if isTextFile(path) {
-			files = append(files, path)
+
+		// ── 以下为目录处理 ──
+
+		// 跳过 .rag 子目录（避免索引库索引自己）
+		if strings.HasSuffix(path, ".rag") {
+			return filepath.SkipDir
+		}
+
+		// 确定当前目录应使用的规则集
+		var curPatterns []string
+		if path == dir {
+			curPatterns = basePatterns
+		} else {
+			parent := filepath.Dir(path)
+			if p, ok := patternCache[parent]; ok {
+				curPatterns = p
+			} else {
+				curPatterns = basePatterns
+			}
+			// 用父目录规则判断当前目录是否应被跳过
+			if matchRagignoreDir(path, dir, curPatterns) {
+				return filepath.SkipDir
+			}
+		}
+
+		// 检查当前目录是否有本地 .ragignore，若有则合并后缓存供子目录使用
+		localPatterns := loadRagignore(path)
+		if len(localPatterns) > 0 {
+			merged := make([]string, len(curPatterns)+len(localPatterns))
+			copy(merged, curPatterns)
+			copy(merged[len(curPatterns):], localPatterns)
+			patternCache[path] = merged
+		} else {
+			patternCache[path] = curPatterns
 		}
 		return nil
 	})
@@ -71,19 +116,14 @@ func loadRagignore(ragDir string) []string {
 	return patterns
 }
 
-// matchRagignoreDir 判断目录是否匹配任一 .ragignore 规则。
-// 规则支持目录匹配（尾随 /）和文件名匹配。
-func matchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
-	rel, err := filepath.Rel(scanRoot, dirPath)
-	if err != nil {
-		return false
-	}
-	dirName := filepath.Base(dirPath)
+// matchRagignoreEntry 判断名称/相对路径是否匹配任一 .ragignore 规则。
+// 支持 **.xxx、*.xxx、路径前缀/包含、以及 filepath.Match 通配符。
+func matchRagignoreEntry(name, rel string, patterns []string) bool {
 	for _, pattern := range patterns {
 		// 通配符规则：**.pyc → 检查是否以 .pyc 结尾
 		if strings.HasPrefix(pattern, "**.") {
 			suffix := strings.TrimPrefix(pattern, "**")
-			if strings.HasSuffix(dirName, suffix) {
+			if strings.HasSuffix(name, suffix) {
 				return true
 			}
 			if strings.HasSuffix(rel, suffix) {
@@ -94,18 +134,43 @@ func matchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
 		// *.swp, *.swo 等通配符
 		if strings.HasPrefix(pattern, "*.") {
 			suffix := strings.TrimPrefix(pattern, "*")
-			if strings.HasSuffix(dirName, suffix) {
+			if strings.HasSuffix(name, suffix) {
 				return true
 			}
 			continue
 		}
+		// 路径前缀/包含匹配
 		cleanPattern := strings.TrimSuffix(pattern, "/")
-		// 路径中的任意一级匹配
 		if strings.HasPrefix(rel, cleanPattern) || strings.Contains("/"+rel+"/", "/"+cleanPattern+"/") {
 			return true
 		}
+		// filepath.Match 通配（支持 .gitignore 风格精确匹配）
+		if matched, _ := filepath.Match(pattern, name); matched {
+			return true
+		}
+		// 目录模式（尾随/）尝试匹配 name+"/"
+		if strings.HasSuffix(pattern, "/") {
+			if matched, _ := filepath.Match(pattern, name+"/"); matched {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// matchRagignoreDir 判断目录是否匹配任一 .ragignore 规则。
+// 规则支持目录匹配（尾随 /）和文件名匹配。
+func matchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
+	rel, err := filepath.Rel(scanRoot, dirPath)
+	if err != nil {
+		return false
+	}
+	return matchRagignoreEntry(filepath.Base(dirPath), rel, patterns)
+}
+
+// MatchRagignoreEntry 是 matchRagignoreEntry 的导出版本，供 webapi 等外部包使用。
+func MatchRagignoreEntry(name, rel string, patterns []string) bool {
+	return matchRagignoreEntry(name, rel, patterns)
 }
 
 // isTextFile 判断是否为可索引的文本文件

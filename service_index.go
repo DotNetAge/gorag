@@ -652,6 +652,11 @@ func (s *IndexerService) NeedsUpdate(ctx context.Context) (bool, error) {
 	return len(needsLLM) > 0, nil
 }
 
+// UsageStats 返回 token 用量统计（总 tokens + 最新模型名）。
+func (s *IndexerService) UsageStats() (totalTokens int64, model string, err error) {
+	return s.svc.metaStore.QueryTotalUsageStats()
+}
+
 // findStatus 在 ChunkLLMStatus 切片中按 chunkID 查找。
 func findStatus(statuses []*meta.ChunkLLMStatus, chunkID string) *meta.ChunkLLMStatus {
 	for _, st := range statuses {

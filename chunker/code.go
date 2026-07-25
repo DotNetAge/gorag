@@ -12,6 +12,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/bash"
 	"github.com/smacker/go-tree-sitter/c"
+	"github.com/DotNetAge/gorag/v2/chunker/vue"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/golang"
@@ -273,6 +274,17 @@ func init() {
 		defCapture:  "def",
 		nameCapture: "name",
 	}
+	// ---- Vue ----
+	codeLangRegistry[".vue"] = languageSpec{
+		lang: vue.GetLanguage(),
+		query: `
+			(template_element) @def
+			(script_element) @def
+			(style_element) @def
+		`,
+		defCapture:  "def",
+		nameCapture: "",
+	}
 	// ---- Lua ----
 	codeLangRegistry[".lua"] = languageSpec{
 		lang: lua.GetLanguage(),
@@ -458,7 +470,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		pre := strings.TrimSpace(content[:firstStart])
 		if pre != "" {
 			title := deriveTitle(doc.FileName()) + " (header)"
-			chunks = append(chunks, buildChunk(doc, len(chunks), 0, firstStart, title, pre))
+			chunks = append(chunks, buildChunk(doc, len(chunks), 0, len(pre), title, pre))
 		}
 	}
 
@@ -505,7 +517,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		}
 		parent := parentStack[len(parentStack)-1]
 
-		chunk := buildChunk(doc, len(chunks), start, end, title, body)
+		chunk := buildChunk(doc, len(chunks), start, start+len(body), title, body)
 		chunk.Summary = sym.summary
 		if chunk.Metadata == nil {
 			chunk.Metadata = map[string]any{}

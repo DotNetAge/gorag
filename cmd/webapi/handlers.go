@@ -20,8 +20,6 @@ import (
 	"github.com/DotNetAge/gorag/v2/utils"
 )
 
-
-
 // resolveRAGDir 确定 .rag 库目录。
 func resolveRAGDir(ragDir string) (string, error) {
 	if ragDir != "" {
@@ -344,6 +342,7 @@ type processRunner struct {
 	progress ProcessProgress
 	hub      *Hub // 非空时每次更新后自动广播 WebSocket 通知
 }
+
 func (r *processRunner) load() ProcessProgress {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1052,6 +1051,21 @@ func (s *Server) handleLLMCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── usage ────────────────────────────────────────────────────────
+
+func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
+	svc := s.svc
+	totalTokens, model, err := svc.IndexerSvc().UsageStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询用量统计失败: %v", err))
+		return
+	}
+	writeSuccess(w, map[string]interface{}{
+		"total_tokens": totalTokens,
+		"model":        model,
+	})
+}
+
 // ── status ────────────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -1095,12 +1109,13 @@ func (s *Server) handleFSHome(w http.ResponseWriter, r *http.Request) {
 // ── fs-list ───────────────────────────────────────────────────────
 
 type fsEntry struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Size    int64  `json:"size"`
-	IsDir   bool   `json:"is_dir"`
-	Mode    string `json:"mode"`
-	ModTime string `json:"mod_time"`
+	Name              string `json:"name"`
+	Path              string `json:"path"`
+	Size              int64  `json:"size"`
+	IsDir             bool   `json:"is_dir"`
+	Mode              string `json:"mode"`
+	ModTime           string `json:"mod_time"`
+	RagignoreExcluded bool   `json:"ragignore_excluded"`
 }
 
 func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
@@ -1116,23 +1131,55 @@ func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 加载该目录下的 .ragignore 规则
+	ragignorePatterns := loadDirRagignore(path)
+
 	result := make([]fsEntry, 0, len(entries))
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
+
+		excluded := false
+		name := e.Name()
+		if name == ".ragignore" {
+			// .ragignore 文件自身永远可视
+			excluded = false
+		} else if len(ragignorePatterns) > 0 {
+			// 复用 gorag 的匹配逻辑：用 basename 作为 name，basename 作为 rel（单层目录无相对路径）
+			excluded = gorag.MatchRagignoreEntry(name, name, ragignorePatterns)
+		}
+
 		result = append(result, fsEntry{
-			Name:    e.Name(),
-			Path:    filepath.Join(path, e.Name()),
-			Size:    info.Size(),
-			IsDir:   e.IsDir(),
-			Mode:    info.Mode().Perm().String(),
-			ModTime: info.ModTime().Format("2006-01-02 15:04:05"),
+			Name:              name,
+			Path:              filepath.Join(path, name),
+			Size:              info.Size(),
+			IsDir:             e.IsDir(),
+			Mode:              info.Mode().Perm().String(),
+			ModTime:           info.ModTime().Format("2006-01-02 15:04:05"),
+			RagignoreExcluded: excluded,
 		})
 	}
 
 	writeSuccess(w, result)
+}
+
+// loadDirRagignore 读取指定目录下的 .ragignore 规则。
+func loadDirRagignore(dir string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, ".ragignore"))
+	if err != nil {
+		return nil
+	}
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+	return patterns
 }
 
 // splitQueryGroups 将查询字符串按 | 拆分为多个关键字组，并去除首尾空格。

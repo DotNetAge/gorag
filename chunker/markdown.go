@@ -150,7 +150,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		pre := strings.TrimSpace(content[:firstStart])
 		if pre != "" {
 			title := deriveTitle(doc.FileName())
-			chunks = append(chunks, buildChunk(doc, len(chunks), 0, firstStart, title, pre))
+			chunks = append(chunks, buildChunk(doc, len(chunks), 0, len(pre), title, pre))
 		}
 	}
 
@@ -172,7 +172,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 			title = deriveTitle(doc.FileName())
 		}
 
-		chunks = append(chunks, buildChunkWithMeta(doc, len(chunks), start, end, title, body, h.level))
+		chunks = append(chunks, buildChunkWithMeta(doc, len(chunks), start, start+len(body), title, body, h.level))
 	}
 
 	// 6. 根据 heading 层级回填每个 Chunk 的 ParentID，形成分块树

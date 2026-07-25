@@ -364,7 +364,7 @@ func (s *datumWalkState) emitChunk(path string, node *sitter.Node) {
 		s.doc,
 		len(s.chunks),
 		int(node.StartByte()),
-		int(node.EndByte()),
+		int(node.StartByte())+len(body),
 		title,
 		body,
 	))
@@ -405,7 +405,7 @@ func (s *datumWalkState) flushMisc() {
 		s.doc,
 		len(s.chunks),
 		s.miscStart,
-		s.miscEnd,
+		s.miscStart+len(body),
 		title,
 		body,
 	))
@@ -428,7 +428,7 @@ func (d *DatumChunker) chunkByLines(doc document.RawDoc, content, dataKind strin
 		}
 		title := fmt.Sprintf("%s 行 %d-%d", dataKind, bufStartLine, endLine-1)
 		body := strings.TrimRight(buf.String(), "\n")
-		chunks = append(chunks, buildChunk(doc, len(chunks), startByte, endByte, title, body))
+		chunks = append(chunks, buildChunk(doc, len(chunks), startByte, startByte+len(body), title, body))
 		buf.Reset()
 		bufStartLine = endLine
 		startByte = endByte

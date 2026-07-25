@@ -117,6 +117,7 @@ func Start(port, ragDir string) error {
 	mux.HandleFunc("/api/cypher", s.handleCypher)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/llm-check", s.handleLLMCheck)
+	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/process", s.handleProcessStart)
 	mux.HandleFunc("/api/process-progress", s.handleProcessProgress)
 	mux.HandleFunc("/api/fs-home", s.handleFSHome)
@@ -130,6 +131,9 @@ func Start(port, ragDir string) error {
 	mux.HandleFunc("/api/fs-mkdir", s.handleFSMkdir)
 	mux.HandleFunc("/api/fs-remove", s.handleFSRemove)
 	mux.HandleFunc("/api/fs-move", s.handleFSMove)
+	mux.HandleFunc("/api/open-file", s.handleOpenFile)
+	mux.HandleFunc("/api/ragignore", s.handleCreateRagignore)
+	mux.HandleFunc("/api/ragignore-append", s.handleAppendRagignore)
 	mux.HandleFunc("/api/file", s.handleServeFile)
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ServeWS(s.hub, w, r)

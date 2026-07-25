@@ -58,6 +58,10 @@ type Store interface {
 	// limit <= 0 时返回所有记录。
 	QueryUsages(limit int) ([]*Usage, error)
 
+	// QueryTotalUsageStats 查询聚合后的 token 用量统计。
+	// 返回所有记录的总 tokens 数以及最近一次用量中的模型名。
+	QueryTotalUsageStats() (totalTokens int64, model string, err error)
+
 	// ── 资源管理 ────────────────────────────────────────────────────
 
 	// Close 关闭数据库。
