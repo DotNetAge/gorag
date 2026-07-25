@@ -126,6 +126,7 @@ func Start(port, ragDir string) error {
 	mux.HandleFunc("/api/schema-content", s.handleSchemaContent)
 	mux.HandleFunc("/api/dir-schemas", s.handleDirSchemas)
 	mux.HandleFunc("/api/schema-custom", s.handleSchemaCustom)
+	mux.HandleFunc("/api/schema-status", s.handleSchemaStatus)
 	mux.HandleFunc("/api/read-file", s.handleReadFile)
 	mux.HandleFunc("/api/save-file", s.handleSaveFile)
 	mux.HandleFunc("/api/fs-mkdir", s.handleFSMkdir)

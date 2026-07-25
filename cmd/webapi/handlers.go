@@ -1045,9 +1045,15 @@ func (s *Server) handleLLMCheck(w http.ResponseWriter, r *http.Request) {
 	// 检查是否有分片需要 LLM 处理
 	needsUpdate, _ := svc.IndexerSvc().NeedsUpdate(r.Context())
 
+	model := ""
+	if configured {
+		model = cfg.LLM.Model
+	}
+
 	writeSuccess(w, map[string]interface{}{
 		"configured":   configured,
 		"needs_update": needsUpdate,
+		"model":        model,
 	})
 }
 

@@ -4,9 +4,71 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	gorag "github.com/DotNetAge/gorag/v2"
 )
+
+// ── Schema 状态查询 ────────────────────────────────────────────────
+
+// handleSchemaStatus 批量检查目录路径（及其祖先）是否设置了 schema。
+// POST /api/schema-status
+// 请求体: { "paths": ["/a", "/a/b", "/a/b/c"] }
+// 返回:   { "result": { "/a": true, "/a/b": true, "/a/b/c": false } }
+func (s *Server) handleSchemaStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 方法")
+		return
+	}
+
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("请求体解析失败: %v", err))
+		return
+	}
+
+	ragDir := s.svc.DataDir()
+	result := make(map[string]bool, len(req.Paths))
+	for _, p := range req.Paths {
+		result[p] = hasSchemaInAncestors(ragDir, p)
+	}
+	writeSuccess(w, map[string]interface{}{"result": result})
+}
+
+// hasSchemaInAncestors 检查指定路径或其任何祖先目录是否拥有 schema 配置。
+func hasSchemaInAncestors(ragDir, dir string) bool {
+	current := dir
+	for {
+		schemaDir := gorag.DirSchemaDir(ragDir, current)
+		if dirHasJSONFiles(schemaDir) {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current || parent == "." || parent == "/" {
+			break
+		}
+		current = parent
+	}
+	return false
+}
+
+// dirHasJSONFiles 检查目录中是否存在任何 .json 文件。
+func dirHasJSONFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			return true
+		}
+	}
+	return false
+}
 
 // ── Schema API 处理器 ──────────────────────────────────────────────
 
