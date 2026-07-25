@@ -4,16 +4,14 @@ go 1.25.1
 
 require (
 	github.com/DotNetAge/gochat v0.2.7
-	github.com/DotNetAge/gograph v0.2.6
+	github.com/DotNetAge/gograph v0.4.0
 	github.com/DotNetAge/govector v0.1.8
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/go-ego/gse v1.0.2
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/richardlehane/mscfb v1.0.7
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
-	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tealeg/xlsx v1.0.5
 	github.com/unidoc/unipdf/v3 v3.69.0
@@ -47,7 +45,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/renameio v1.0.1 // indirect
-	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -65,7 +62,6 @@ require (
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/unidoc/freetype v0.2.5 // indirect
 	github.com/unidoc/pkcs7 v0.3.0 // indirect
 	github.com/unidoc/timestamp v0.0.0-20200412005513-91597fd3793a // indirect

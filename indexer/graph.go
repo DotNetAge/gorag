@@ -318,10 +318,13 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 	if raw := doc.Raw(); raw != nil {
 		sourceFile = raw.FileName()
 	}
+	idx.logger.Debug("图索引器: Save 文件路径", "source_file", sourceFile)
+	fmt.Fprintf(os.Stderr, "[DEBUG] Save source_file=%s\n", sourceFile)
 
 	// 1. 从 doc.Nodes() 读取，转换为 []*core.Node，调用 graphDB.UpsertNodes
 	rawNodes := doc.Nodes()
 	if len(rawNodes) > 0 {
+		documentCount := 0
 		nodes := make([]*core.Node, 0, len(rawNodes))
 		for i := range rawNodes {
 			n := rawNodes[i] // 复制一份，取地址
@@ -333,6 +336,7 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 							n.Properties = map[string]any{}
 						}
 						n.Properties[core.PropSourceFile] = sourceFile
+						documentCount++
 						break
 					}
 				}
@@ -347,7 +351,9 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		idx.statsMu.Lock()
 		idx.entitiesCreated += len(nodes)
 		idx.statsMu.Unlock()
-		idx.logger.Debug("图索引器: 节点写入完成", "nodes", len(nodes))
+		idx.logger.Debug("图索引器: 节点写入完成",
+			"nodes", len(nodes),
+			"document_with_source_file", documentCount)
 	}
 
 	// 2. 从 doc.Edges() 读取，转换为 []*core.Edge，调用 graphDB.UpsertEdges
@@ -786,7 +792,22 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 	}
 
 	regionID := utils.GenerateID([]byte(dir))
-	region, _ := idx.GetNode(ctx, regionID)
+	idx.logger.Debug("图索引器: ExploreRegion 入口参数",
+		"dir", dir,
+		"region_id", regionID)
+
+	region, getErr := idx.GetNode(ctx, regionID)
+	if getErr != nil {
+		idx.logger.Warn("图索引器: 获取 Region 节点失败", "dir", dir, "error", getErr)
+	}
+	if region != nil {
+		idx.logger.Debug("图索引器: Region 节点已存在",
+			"region_id", regionID,
+			"region_name", region.Name,
+			"labels", region.Labels)
+	} else {
+		idx.logger.Debug("图索引器: Region 节点不存在", "dir", dir)
+	}
 
 	if depth <= 0 {
 		depth = 1
@@ -828,13 +849,24 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 
 	// Step 3: 从 source_file 前缀匹配的 Document 出发，捕获子目录实体的节点与边
 	// 解决子目录有独立 Region、根 Region 不可达的问题
+	idx.logger.Debug("图索引器: 执行 Document 前缀查询",
+		"dir", dir,
+		"query", "MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN d",
+		"params_path", dir)
+
 	docRows, queryErr := idx.graphDB.Query(ctx,
 		`MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN d`,
 		map[string]any{"path": dir})
 
 	if queryErr != nil {
-		idx.logger.Warn("图索引器: Document 前缀查询失败，仅返回 Region 遍历结果", "dir", dir, "error", queryErr)
+		idx.logger.Warn("图索引器: Document 前缀查询失败，仅返回 Region 遍历结果",
+			"dir", dir, "error", queryErr)
 	} else {
+		idx.logger.Debug("图索引器: Document 前缀查询结果", "rows", len(docRows))
+		fmt.Fprintf(os.Stderr, "[DEBUG] ExploreRegion docRows count=%d\n", len(docRows))
+		if len(docRows) == 0 {
+			idx.logger.Debug("图索引器: 无匹配 Document 节点，可能原因：", "建议", "1) source_file 属性未写入 2) 路径前缀不匹配 3) 节点实际数量")
+		}
 		for _, row := range docRows {
 			dMap, ok := row["d"].(map[string]any)
 			if !ok {
@@ -1016,14 +1048,34 @@ func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, e
 		return 0, fmt.Errorf("图索引器: CountByRegion 查询失败: %w", err)
 	}
 	if len(rows) == 0 {
+		idx.logger.Debug("图索引器: CountByRegion 无结果", "path", path)
 		return 0, nil
 	}
-	if cnt, ok := rows[0]["cnt"].(int64); ok {
-		idx.logger.Debug("图索引器: CountByRegion 完成",
-			"path", path, "count", cnt)
-		return int(cnt), nil
+
+	row := rows[0]
+	fmt.Fprintf(os.Stderr, "[DEBUG] CountByRegion row=%+v cnt_type=%T\n", row, row["cnt"])
+
+	// 尝试多种数值类型
+	switch v := row["cnt"].(type) {
+	case int64:
+		idx.logger.Debug("图索引器: CountByRegion 完成", "path", path, "count", v)
+		return int(v), nil
+	case float64:
+		idx.logger.Debug("图索引器: CountByRegion 完成(float64)", "path", path, "count", v)
+		return int(v), nil
+	case int:
+		idx.logger.Debug("图索引器: CountByRegion 完成(int)", "path", path, "count", v)
+		return v, nil
+	case int32:
+		idx.logger.Debug("图索引器: CountByRegion 完成(int32)", "path", path, "count", v)
+		return int(v), nil
+	default:
+		idx.logger.Warn("图索引器: CountByRegion 类型异常",
+			"path", path,
+			"type", fmt.Sprintf("%T", rows[0]["cnt"]),
+			"value", fmt.Sprintf("%v", rows[0]["cnt"]))
+		return 0, nil
 	}
-	return 0, nil
 }
 
 // EntityStats 返回自上次 ResetEntityStats 以来累计创建的实体和关系数量。

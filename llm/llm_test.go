@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/DotNetAge/gorag/v2/chunker"
@@ -246,7 +245,9 @@ func TestLoadEntitySchema(t *testing.T) {
 		"description": "组织内的员工",
 		"properties": {
 			"name": {"type": "string", "description": "员工全名"},
-			"email": {"type": "string", "format": "email", "description": "员工邮箱"}
+			"email": {"type": "string", "format": "email", "description": "员工邮箱"},
+			"level": {"type": "string", "enum": ["初级", "中级", "高级"], "description": "员工职级"},
+			"tags": {"type": "array", "items": {"type": "string"}, "description": "员工标签"}
 		},
 		"required": ["name", "email"]
 	}`
@@ -261,11 +262,58 @@ func TestLoadEntitySchema(t *testing.T) {
 	if schema.Type != "Employee" {
 		t.Errorf("Type 期望 Employee，实际 %q", schema.Type)
 	}
-	if !strings.Contains(schema.Prompt, "组织内的员工") {
-		t.Errorf("Prompt 应包含 description: %q", schema.Prompt)
+	if schema.Description != "组织内的员工" {
+		t.Errorf("Description 期望 %q，实际 %q", "组织内的员工", schema.Description)
 	}
-	if schema.JSONSchema == "" {
-		t.Errorf("JSONSchema 不应为空")
+	if len(schema.Properties) != 4 {
+		t.Fatalf("Properties 期望 4 个，实际 %d", len(schema.Properties))
+	}
+
+	// 验证 name 属性
+	nameProp, ok := schema.Properties["name"]
+	if !ok {
+		t.Fatal("Properties 缺少 name")
+	}
+	if nameProp.Type != "string" {
+		t.Errorf("name.type 期望 string，实际 %q", nameProp.Type)
+	}
+	if nameProp.Description != "员工全名" {
+		t.Errorf("name.description 期望 %q，实际 %q", "员工全名", nameProp.Description)
+	}
+
+	// 验证 email 属性（含 format）
+	emailProp, ok := schema.Properties["email"]
+	if !ok {
+		t.Fatal("Properties 缺少 email")
+	}
+	if emailProp.Format != "email" {
+		t.Errorf("email.format 期望 email，实际 %q", emailProp.Format)
+	}
+
+	// 验证 level 属性（含 enum）
+	levelProp, ok := schema.Properties["level"]
+	if !ok {
+		t.Fatal("Properties 缺少 level")
+	}
+	if len(levelProp.Enum) != 3 || levelProp.Enum[0] != "初级" {
+		t.Errorf("level.enum 期望 [初级, 中级, 高级]，实际 %v", levelProp.Enum)
+	}
+
+	// 验证 tags 属性（含数组元素类型）
+	tagsProp, ok := schema.Properties["tags"]
+	if !ok {
+		t.Fatal("Properties 缺少 tags")
+	}
+	if tagsProp.Type != "array" {
+		t.Errorf("tags.type 期望 array，实际 %q", tagsProp.Type)
+	}
+	if tagsProp.Items == nil || tagsProp.Items.Type != "string" {
+		t.Errorf("tags.items.type 期望 string，实际 %v", tagsProp.Items)
+	}
+
+	// 验证 Required
+	if len(schema.Required) != 2 || schema.Required[0] != "name" {
+		t.Errorf("Required 期望 [name, email]，实际 %v", schema.Required)
 	}
 }
 
@@ -413,8 +461,12 @@ func envLLMConfig() *Config {
 	}
 }
 
-// TestRefill_WithRealLLM 使用真实 LLM 验证实体提取全流程，
-// 确保 LLM 返回的关系不会引用不存在的实体。
+// TestRefill_WithRealLLM 使用真实 LLM 验证实体提取全流程。
+//
+// 测试策略：
+//   - 使用 Concept / Event / Method 三组实体 Schema
+//   - 构造包含明确概念、方法、事件描述的 chunks
+//   - 验证 LLM 能按 schema 定义正确提取实体类型、属性、关系
 //
 // 运行条件：GORAG_API_KEY、GORAG_BASE_URL、GORAG_MODEL 三个环境变量必须设置。
 func TestRefill_WithRealLLM(t *testing.T) {
@@ -423,36 +475,73 @@ func TestRefill_WithRealLLM(t *testing.T) {
 		t.Skip("跳过集成测试：未设置 GORAG_API_KEY / GORAG_BASE_URL / GORAG_MODEL")
 	}
 
-	r, err := NewRefiller(*cfg, logging.DefaultNoopLogger())
+	// ── 1. 准备 Schema 文件 ──────────────────────────────────────
+	schemaDir := t.TempDir()
+	writeSchemaFile(t, schemaDir+"/Concept.json", `{
+		"type": "object",
+		"description": "核心概念、理论、原则、范式",
+		"properties": {
+			"name": {"type": "string", "description": "概念名称"},
+			"description": {"type": "string", "description": "概念的定义或解释"},
+			"category": {"type": "string", "description": "该概念所属的更广泛类别"}
+		},
+		"required": ["name", "description"]
+	}`)
+	writeSchemaFile(t, schemaDir+"/Method.json", `{
+		"type": "object",
+		"description": "方法论、流程、技术、工作流",
+		"properties": {
+			"name": {"type": "string", "description": "方法名称"},
+			"description": {"type": "string", "description": "方法的描述"},
+			"difficulty": {"type": "string", "description": "难度级别：初级、中级或高级"}
+		},
+		"required": ["name"]
+	}`)
+	writeSchemaFile(t, schemaDir+"/Event.json", `{
+		"type": "object",
+		"description": "里程碑、会议、事件、历史事件",
+		"properties": {
+			"name": {"type": "string", "description": "事件名称或标题"},
+			"date": {"type": "string", "description": "事件日期，格式为 YYYY-MM-DD"},
+			"description": {"type": "string", "description": "事件期间发生内容的描述"},
+			"type": {"type": "string", "description": "事件类型：里程碑、会议、发布、大会、研讨会等"}
+		},
+		"required": ["name"]
+	}`)
+
+	schemas, err := LoadEntitySchemasFromDir(schemaDir)
 	if err != nil {
-		t.Fatalf("创建 Refiller 失败: %v", err)
+		t.Fatalf("加载 schema 失败: %v", err)
+	}
+	if len(schemas) != 3 {
+		t.Fatalf("期望 3 个 schema，实际 %d", len(schemas))
 	}
 
-	// 构建带真实内容的 ChunkResult
+	// ── 2. 构造分块（内容来自 memory.md 但做针对性裁剪）────────────
 	input := chunker.ChunkResult{
 		Chunks: []core.Chunk{
 			{
 				ID:      "c1",
-				Title:   "项目概述",
-				Content: "这是一个基于 Go 语言开发的 RAG 检索增强生成系统。系统支持语义检索和图检索两种索引方式。",
+				Title:   "RAG 记忆机制的概念",
+				Content: "RAG记忆机制是一种核心概念，指在RAG系统中引入持久化记忆能力，使系统能够记住之前的交互历史。它属于RAG系统的重要扩展机制。核心概念包括短期记忆、长期记忆和检索记忆。记忆机制的价值在于实现连贯对话、个性化服务和效率提升。",
 			},
 			{
 				ID:      "c2",
-				Title:   "架构设计",
-				Content: "系统采用分层架构，包含文档解析层、分块层、向量化层和存储层。向量化使用 Embedder 将文本转为向量。",
+				Title:   "记忆机制的实现方法",
+				Content: "实现记忆机制有多种方法。会话记忆方法通过设置最大对话轮数，以滑动窗口的方式保留最近K轮对话。记忆检索方法通过将查询和响应存储到向量存储中来实现。记忆管理策略包括定期清理、重要性筛选和压缩存储等具体方法。对于简单问答场景，适合使用短期记忆方法。",
+			},
+			{
+				ID:      "c3",
+				Title:   "2025年RAG技术发展趋势",
+				Content: "根据2025年的技术趋势分析，记忆机制是RAG发展的重要方向。2025年1月，腾讯发布了一份关于2025年RAG技术总结的报告。在RAG技术发展过程中，记忆机制的引入是一个重要的里程碑事件。",
 			},
 		},
 	}
 
-	schemas := []EntitySchema{
-		{
-			Type:   "concept",
-			Prompt: "技术概念或术语",
-		},
-		{
-			Type:   "technology",
-			Prompt: "技术栈或框架",
-		},
+	// ── 3. 执行 Refill ──────────────────────────────────────────
+	r, err := NewRefiller(*cfg, logging.DefaultNoopLogger())
+	if err != nil {
+		t.Fatalf("创建 Refiller 失败: %v", err)
 	}
 
 	result, err := r.Refill(context.Background(), input, schemas)
@@ -460,7 +549,16 @@ func TestRefill_WithRealLLM(t *testing.T) {
 		t.Fatalf("Refill 失败: %v", err)
 	}
 
-	// 验证：所有边的 Source 和 Target 都应能在节点列表中找到
+	// ── 4. 验证结果 ────────────────────────────────────────────
+	t.Logf("Refiller 输出：实体=%d 关系=%d", len(result.Nodes), len(result.Edges))
+	for _, n := range result.Nodes {
+		t.Logf("  实体: %s | 类型=%s | 属性=%v", n.Name, n.Labels[0], n.Properties)
+	}
+	for _, e := range result.Edges {
+		t.Logf("  关系: %s -[%s]-> %s", e.Source, e.Type, e.Target)
+	}
+
+	// 4a. 所有边必须引用存在的节点
 	nodeIDMap := make(map[string]bool, len(result.Nodes))
 	for _, n := range result.Nodes {
 		nodeIDMap[n.ID] = true
@@ -474,5 +572,28 @@ func TestRefill_WithRealLLM(t *testing.T) {
 		}
 	}
 
-	t.Logf("集成测试通过：实体=%d 关系=%d", len(result.Nodes), len(result.Edges))
+	// 4b. 实体类型必须来自已注册的 schema（Concept / Event / Method）
+	validTypes := map[string]bool{"Concept": true, "Event": true, "Method": true}
+	for _, n := range result.Nodes {
+		if len(n.Labels) == 0 || !validTypes[n.Labels[0]] {
+			t.Errorf("Node %q 的实体类型 %v 不在已注册的 schema 中", n.Name, n.Labels)
+		}
+	}
+
+	// 4c. 至少应提取到一些实体
+	if len(result.Nodes) == 0 {
+		t.Error("Refiller 未提取任何实体，可能 prompt 或模型存在问题")
+	}
+
+	// 4d. "概念"相关的约定名称应该出现
+	conceptFound := false
+	for _, n := range result.Nodes {
+		if n.Labels[0] == "Concept" {
+			conceptFound = true
+			break
+		}
+	}
+	if !conceptFound {
+		t.Log("警告：未提取到 Concept 类型实体，请检查 prompt 是否有效")
+	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/embedder"
@@ -15,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ragSuffix .rag 库文件的后缀（目录实现，文件认知）。
+// ragSuffix 保留用于兼容，不强制校验。
 const ragSuffix = ".rag"
 
 // configFileName 配置文件名。
@@ -139,20 +138,15 @@ func defaultConfig() *Config {
 	}
 }
 
-// Init 在指定路径创建 .rag 库目录结构。
+// Init 在指定路径创建数据目录结构。
 // 物理结构 = config.yml + .api_key + .ragignore + .lock +
 // meta.db + vectors/ + graphs/ + logs/。
 //
-// ragDir 必须以 .rag 结尾，否则返回错误。
-// 已存在的 .rag 目录会被复用（不报错），但缺失的子目录和文件会被补齐。
+// 已存在的目录会被复用（不报错），但缺失的子目录和文件会被补齐。
 func Init(ragDir string) error {
-	if !strings.HasSuffix(ragDir, ragSuffix) {
-		return fmt.Errorf("路径必须以 .rag 结尾（RAG 库文件）: %s", ragDir)
-	}
-
 	// 1. 创建根目录
 	if err := os.MkdirAll(ragDir, 0755); err != nil {
-		return fmt.Errorf("创建 .rag 目录失败: %w", err)
+		return fmt.Errorf("创建数据目录失败: %w", err)
 	}
 
 	// 2. 创建子目录
@@ -249,27 +243,21 @@ LICENSE
 .claude/
 `
 
-// Open 打开已存在的 .rag 库。
-// 强制 .rag 后缀校验，不兼容旧 dataDir。
+// Open 打开已存在的数据目录。
 // opts 可注入 WithLLM、WithEmbeddingModelFile 等。
 //
 // 行为：
-//   - 校验路径以 .rag 结尾
 //   - 加载 config.yml
 //   - 根据 cfg.Indexer.Type 创建索引器
 //   - 若有 LLM 配置，则创建 gochat 客户端并注入 GraphIndexer/HyperIndexer
 func Open(ragDir string, opts ...RAGOption) (indexer.Indexer, error) {
-	if !strings.HasSuffix(ragDir, ragSuffix) {
-		return nil, fmt.Errorf("路径必须以 .rag 结尾（RAG 库文件）: %s", ragDir)
-	}
-
 	// 1. 检查目录存在
 	info, err := os.Stat(ragDir)
 	if err != nil {
-		return nil, fmt.Errorf(".rag 库不存在: %w（提示：请先运行 grag init）", err)
+		return nil, fmt.Errorf("数据目录不存在: %w（提示：请先运行 mrag install）", err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("%s 不是目录（.rag 库必须是目录）", ragDir)
+		return nil, fmt.Errorf("%s 不是目录", ragDir)
 	}
 
 	// 2. 加载配置文件
@@ -422,6 +410,11 @@ func saveConfig(ragDir string, cfg *Config) error {
 		return fmt.Errorf("序列化 config.yml 失败: %w", err)
 	}
 	return os.WriteFile(configPath, data, 0644)
+}
+
+// LoadConfigRaw 加载配置并同时返回原始 YAML 字符串（导出版本）。
+func LoadConfigRaw(ragDir string) (*Config, string, error) {
+	return loadConfigRaw(ragDir)
 }
 
 // loadConfigRaw 加载配置并同时返回原始 YAML 字符串。

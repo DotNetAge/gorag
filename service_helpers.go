@@ -18,8 +18,8 @@ import (
 	gvcore "github.com/DotNetAge/govector/core"
 )
 
-// textExts 可索引的文本文件扩展名列表
-var textExts = []string{
+// TextExts 可索引的文本文件扩展名列表
+var TextExts = []string{
 	".txt", ".md", ".json", ".yaml", ".yml",
 	".html", ".xml", ".css",
 	".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h",
@@ -27,12 +27,12 @@ var textExts = []string{
 	".sql", ".conf", ".cfg", ".ini",
 }
 
-// scanDir 扫描目录下的所有文本文件，跳过 .ragignore 匹配的目录。
+// ScanDir 扫描目录下的所有文本文件，跳过 .ragignore 匹配的目录。
 //
 // 支持层级 .ragignore：每个目录可放置自己的 .ragignore，规则叠加生效。
 // basePatterns 来自 .rag 库目录的全局规则，作为根目录的默认规则。每个子目录的
 // 本地 .ragignore 规则会附加到父目录规则之上，子目录规则不影响平级目录。
-func scanDir(dir string, basePatterns []string) ([]string, error) {
+func ScanDir(dir string, basePatterns []string) ([]string, error) {
 	// patternCache 缓存每个目录的合并后规则
 	patternCache := map[string][]string{}
 	patternCache[dir] = basePatterns
@@ -48,12 +48,12 @@ func scanDir(dir string, basePatterns []string) ([]string, error) {
 			if patterns, ok := patternCache[parent]; ok {
 				rel, relErr := filepath.Rel(dir, path)
 				if relErr == nil {
-					if matchRagignoreEntry(d.Name(), rel, patterns) {
+					if MatchRagignoreEntry(d.Name(), rel, patterns) {
 						return nil
 					}
 				}
 			}
-			if isTextFile(path) {
+			if IsTextFile(path) {
 				files = append(files, path)
 			}
 			return nil
@@ -78,13 +78,13 @@ func scanDir(dir string, basePatterns []string) ([]string, error) {
 				curPatterns = basePatterns
 			}
 			// 用父目录规则判断当前目录是否应被跳过
-			if matchRagignoreDir(path, dir, curPatterns) {
+			if MatchRagignoreDir(path, dir, curPatterns) {
 				return filepath.SkipDir
 			}
 		}
 
 		// 检查当前目录是否有本地 .ragignore，若有则合并后缓存供子目录使用
-		localPatterns := loadRagignore(path)
+		localPatterns := LoadRagignore(path)
 		if len(localPatterns) > 0 {
 			merged := make([]string, len(curPatterns)+len(localPatterns))
 			copy(merged, curPatterns)
@@ -98,9 +98,9 @@ func scanDir(dir string, basePatterns []string) ([]string, error) {
 	return files, err
 }
 
-// loadRagignore 从 .rag 目录加载 .ragignore 忽略规则。
+// LoadRagignore 从 .rag 目录加载 .ragignore 忽略规则。
 // 返回非空、非注释的规则行列表。文件不存在时返回空切片。
-func loadRagignore(ragDir string) []string {
+func LoadRagignore(ragDir string) []string {
 	data, err := os.ReadFile(filepath.Join(ragDir, ".ragignore"))
 	if err != nil {
 		return nil
@@ -158,14 +158,14 @@ func matchRagignoreEntry(name, rel string, patterns []string) bool {
 	return false
 }
 
-// matchRagignoreDir 判断目录是否匹配任一 .ragignore 规则。
+// MatchRagignoreDir 判断目录是否匹配任一 .ragignore 规则。
 // 规则支持目录匹配（尾随 /）和文件名匹配。
-func matchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
+func MatchRagignoreDir(dirPath, scanRoot string, patterns []string) bool {
 	rel, err := filepath.Rel(scanRoot, dirPath)
 	if err != nil {
 		return false
 	}
-	return matchRagignoreEntry(filepath.Base(dirPath), rel, patterns)
+	return MatchRagignoreEntry(filepath.Base(dirPath), rel, patterns)
 }
 
 // MatchRagignoreEntry 是 matchRagignoreEntry 的导出版本，供 webapi 等外部包使用。
@@ -173,14 +173,14 @@ func MatchRagignoreEntry(name, rel string, patterns []string) bool {
 	return matchRagignoreEntry(name, rel, patterns)
 }
 
-// isTextFile 判断是否为可索引的文本文件
-func isTextFile(filename string) bool {
+// IsTextFile 判断是否为可索引的文本文件
+func IsTextFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
-	return slices.Contains(textExts, ext)
+	return slices.Contains(TextExts, ext)
 }
 
-// computeFileHash 计算文件的 SHA256 哈希值。
-func computeFileHash(absPath string) (string, error) {
+// ComputeFileHash 计算文件的 SHA256 哈希值。
+func ComputeFileHash(absPath string) (string, error) {
 	f, err := os.Open(absPath)
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
@@ -194,13 +194,13 @@ func computeFileHash(absPath string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// timePtr 返回 time.Time 的指针。
-func timePtr(t time.Time) *time.Time {
+// TimePtr 返回 time.Time 的指针。
+func TimePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// computeChunkContentHash 计算分片内容的简短哈希（SHA256 前 16 位十六进制）。
-func computeChunkContentHash(content string) string {
+// ComputeChunkContentHash 计算分片内容的简短哈希（SHA256 前 16 位十六进制）。
+func ComputeChunkContentHash(content string) string {
 	if content == "" {
 		return ""
 	}
@@ -208,16 +208,16 @@ func computeChunkContentHash(content string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// abs 返回 int 绝对值。
-func abs(n int) int {
+// Abs 返回 int 绝对值。
+func Abs(n int) int {
 	if n < 0 {
 		return -n
 	}
 	return n
 }
 
-// contains 检查字符串切片是否包含指定值。
-func contains(slice []string, val string) bool {
+// Contains 检查字符串切片是否包含指定值。
+func Contains(slice []string, val string) bool {
 	for _, s := range slice {
 		if s == val {
 			return true
@@ -226,20 +226,20 @@ func contains(slice []string, val string) bool {
 	return false
 }
 
-// dirExists 判断路径是否为已存在目录。
-func dirExists(path string) bool {
+// DirExists 判断路径是否为已存在目录。
+func DirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
-// fileExists 判断文件是否存在（目录返回 false）。
-func fileExists(path string) bool {
+// FileExists 判断文件是否存在（目录返回 false）。
+func FileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
 
-// calcDirSizes 递归计算各子目录大小。
-func calcDirSizes(dataDir string) map[string]int64 {
+// CalcDirSizes 递归计算各子目录大小。
+func CalcDirSizes(dataDir string) map[string]int64 {
 	sizes := make(map[string]int64)
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
@@ -253,15 +253,15 @@ func calcDirSizes(dataDir string) map[string]int64 {
 			}
 			continue
 		}
-		subSize := dirSize(filepath.Join(dataDir, entry.Name()))
+		subSize := DirSize(filepath.Join(dataDir, entry.Name()))
 		sizes[entry.Name()] = subSize
 		sizes["total"] += subSize
 	}
 	return sizes
 }
 
-// dirSize 递归计算目录总大小。
-func dirSize(path string) int64 {
+// DirSize 递归计算目录总大小。
+func DirSize(path string) int64 {
 	var size int64
 	filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -276,8 +276,8 @@ func dirSize(path string) int64 {
 	return size
 }
 
-// getVectorCount 获取向量索引中的条目数。
-func getVectorCount(dbPath string) int {
+// GetVectorCount 获取向量索引中的条目数。
+func GetVectorCount(dbPath string) int {
 	storage, err := gvcore.NewStorage(dbPath)
 	if err != nil {
 		return -1
@@ -301,8 +301,8 @@ func getVectorCount(dbPath string) int {
 	return col.Count()
 }
 
-// getGraphCount 获取图索引的节点和边数量。
-func getGraphCount(dbPath string) (nodes int64, edges int64) {
+// GetGraphCount 获取图索引的节点和边数量。
+func GetGraphCount(dbPath string) (nodes int64, edges int64) {
 	db, err := api.Open(dbPath)
 	if err != nil {
 		return -1, -1
@@ -310,13 +310,13 @@ func getGraphCount(dbPath string) (nodes int64, edges int64) {
 	defer db.Close()
 
 	ctx := context.Background()
-	nodes = queryGraphCount(ctx, db, "MATCH (n) RETURN count(n) AS cnt")
-	edges = queryGraphCount(ctx, db, "MATCH ()-[r]->() RETURN count(r) AS cnt")
+	nodes = QueryGraphCount(ctx, db, "MATCH (n) RETURN count(n) AS cnt")
+	edges = QueryGraphCount(ctx, db, "MATCH ()-[r]->() RETURN count(r) AS cnt")
 	return nodes, edges
 }
 
-// queryGraphCount 执行图查询获取计数值。
-func queryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
+// QueryGraphCount 执行图查询获取计数值。
+func QueryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
 	rows, err := db.Query(ctx, query)
 	if err != nil {
 		return -1
@@ -346,10 +346,10 @@ func queryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
 	return count
 }
 
-// sourceHasPrefix 判断 chunk.Source 是否以指定绝对路径开头。
+// SourceHasPrefix 判断 chunk.Source 是否以指定绝对路径开头。
 // filterPath 必须是已经转换后的绝对路径。
 // 为了避免 /foo 匹配到 /foobar 这类部分路径，函数会自动确保 filterPath 以路径分隔符结尾。
-func sourceHasPrefix(source, filterPath string) bool {
+func SourceHasPrefix(source, filterPath string) bool {
 	if source == "" || filterPath == "" {
 		return false
 	}
@@ -360,8 +360,8 @@ func sourceHasPrefix(source, filterPath string) bool {
 	return strings.HasPrefix(source, filterPath)
 }
 
-// topChunkScore 返回 ChunkHit 切片中的最高分。
-func topChunkScore(hits []core.ChunkHit) float32 {
+// TopChunkScore 返回 ChunkHit 切片中的最高分。
+func TopChunkScore(hits []core.ChunkHit) float32 {
 	if len(hits) == 0 {
 		return 0
 	}
@@ -374,8 +374,8 @@ func topChunkScore(hits []core.ChunkHit) float32 {
 	return max
 }
 
-// filterHitBySourcePrefix 按 source 路径前缀过滤命中结果。
-func filterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
+// FilterHitBySourcePrefix 按 source 路径前缀过滤命中结果。
+func FilterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
 	if hit == nil {
 		return nil
 	}
@@ -385,7 +385,7 @@ func filterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
 	}
 	var filtered []core.ChunkHit
 	for _, ch := range hit.Chunks {
-		if sourceHasPrefix(ch.Chunk.Source, absFilter) {
+		if SourceHasPrefix(ch.Chunk.Source, absFilter) {
 			filtered = append(filtered, ch)
 		}
 	}

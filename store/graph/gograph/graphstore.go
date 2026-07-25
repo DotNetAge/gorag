@@ -3,6 +3,7 @@ package gograph
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	api "github.com/DotNetAge/gograph/pkg/api"
@@ -352,14 +353,17 @@ func (s *gographStore) GetNeighbors(ctx context.Context, nodeID string, depth in
 
 // Query executes a query on the graph store.
 func (s *gographStore) Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error) {
+	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query query=%q params=%+v\n", query, params)
 	rows, err := s.db.Query(ctx, query, params)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query ERROR: %v\n", err)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
 	var results []map[string]any
 	columns := rows.Columns()
+	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query columns=%v\n", columns)
 
 	for rows.Next() {
 		row := make(map[string]any)
@@ -374,11 +378,13 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 		}
 
 		if err := rows.Scan(vals...); err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query scan ERROR: %v\n", err)
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		for i, col := range columns {
 			if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
+				fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query col=%s val_type=%T val=%+v\n", col, *vp, *vp)
 				switch val := (*vp).(type) {
 				case *graph.Node:
 					if val != nil {
@@ -405,6 +411,7 @@ func (s *gographStore) Query(ctx context.Context, query string, params map[strin
 		results = append(results, row)
 	}
 
+	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query results count=%d\n", len(results))
 	return results, nil
 }
 

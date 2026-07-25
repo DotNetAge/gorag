@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	chat "github.com/DotNetAge/gochat/core"
@@ -161,6 +162,9 @@ func collectDocIDs(chunks []core.Chunk) []string {
 }
 
 // buildSystemPrompt 构建 Refiller 的系统提示词。
+//
+// 为每个实体类型生成完整的属性描述（含类型、枚举值、格式、必填约束），
+// 确保小参数中文模型能按统一的预期结构输出。
 func (r *gochatRefiller) buildSystemPrompt(schemas []EntitySchema) string {
 	var sb strings.Builder
 	sb.WriteString("你是一名精准的实体关系提取助手。\n")
@@ -170,15 +174,43 @@ func (r *gochatRefiller) buildSystemPrompt(schemas []EntitySchema) string {
 	sb.WriteString("- \"relations\": [{\"subject\": string, \"predicate\": string, \"object\": string}]\n\n")
 
 	if len(schemas) > 0 {
-		sb.WriteString("### 实体类型\n")
+		sb.WriteString("### 实体类型\n\n")
 		for _, s := range schemas {
-			if s.Prompt != "" {
-				sb.WriteString("- ")
-				sb.WriteString(s.Prompt)
+			sb.WriteString("**")
+			sb.WriteString(s.Type)
+			sb.WriteString("**")
+			if s.Description != "" {
+				sb.WriteString(" — ")
+				sb.WriteString(s.Description)
+			}
+			sb.WriteString("\n")
+
+			// 必填字段
+			if len(s.Required) > 0 {
+				sb.WriteString("必填：")
+				sb.WriteString(strings.Join(s.Required, ", "))
 				sb.WriteString("\n")
 			}
+
+			// 属性详情
+			if len(s.Properties) > 0 {
+				sb.WriteString("属性：\n")
+				for _, name := range sortedKeys(s.Properties) {
+					prop := s.Properties[name]
+					sb.WriteString("  - ")
+					sb.WriteString(name)
+					sb.WriteString(" (")
+					sb.WriteString(formatPropType(prop))
+					sb.WriteString(")")
+					if prop.Description != "" {
+						sb.WriteString(": ")
+						sb.WriteString(prop.Description)
+					}
+					sb.WriteString("\n")
+				}
+			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
 	}
 
 	sb.WriteString("规则：\n")
@@ -188,6 +220,7 @@ func (r *gochatRefiller) buildSystemPrompt(schemas []EntitySchema) string {
 	sb.WriteString(" 表达。\n")
 	sb.WriteString("- 如果未找到实体或关系，返回 {\"entities\":[],\"relations\":[]}。\n")
 	sb.WriteString("- 优先使用文本中实际出现的实体名称。\n")
+	sb.WriteString("- 每个实体的 properties 必须严格按照对应实体类型的属性定义输出，必填字段不可省略，枚举值只能取定义范围内的值。\n")
 	return sb.String()
 }
 
@@ -262,4 +295,28 @@ func buildNodesAndEdges(ext refillExtraction, docIDs []string) ([]core.Node, []c
 		})
 	}
 	return nodes, edges
+}
+
+// sortedKeys 返回 map 的按键名排序后的键列表，确保 prompt 输出顺序稳定。
+func sortedKeys(m map[string]SchemaProperty) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// formatPropType 格式化属性类型描述，包含数组元素类型、枚举值和格式信息。
+func formatPropType(p SchemaProperty) string {
+	switch {
+	case p.Type == "array" && p.Items != nil:
+		return "array[" + p.Items.Type + "]"
+	case len(p.Enum) > 0:
+		return "string, 枚举值 [" + strings.Join(p.Enum, ", ") + "]"
+	case p.Format != "":
+		return p.Type + ", " + p.Format
+	default:
+		return p.Type
+	}
 }
