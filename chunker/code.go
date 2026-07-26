@@ -451,15 +451,20 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	sortSymbolsByStart(symbols)
 
 	// 5.1 提取每个符号的注释/docstring 作为 Summary（优先），无注释时 fallback 到内容摘要
+	//     先走手搓 fallback（Go/Python 命名约定类只能手搓）
 	for i, sym := range symbols {
 		prevEnd := uint32(0)
 		if i > 0 {
 			prevEnd = symbols[i-1].end
 		}
-		symbols[i].summary = extractSymbolSummary(content, sym, prevEnd)
+		symbols[i].summary = extractSymbolSummary(content, sym, prevEnd, tree.RootNode(), spec.lang)
 		symbols[i].signature = extractSymbolSignature(content, sym)
 		symbols[i].visibility = extractSymbolVisibility(content, sym)
 	}
+
+	// 5.2 用 AST 覆盖签名和可见性（精确提取，多行签名正确）
+	extractSignaturesFromAST(content, symbols, spec, tree.RootNode())
+	extractVisibilityFromAST(content, symbols, spec, tree.RootNode())
 
 	var chunks []core.Chunk
 	symbolChunkIDs := make([]string, len(symbols)) // 记录每个 symbol 对应的 chunkID
@@ -548,7 +553,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	extractGoMethodReceivers(doc, content, symbols)
 
 	// 9. 构建符号层级结构对应的 Nodes/Edges（同时回填 qualifiedName）
-	nodes, edges, symbolNodeIDs := buildCodeGraph(doc, content, symbols, symbolChunkIDs)
+	nodes, edges, symbolNodeIDs := buildCodeGraph(doc, content, symbols, symbolChunkIDs, tree.RootNode(), spec.lang)
 
 	// 10. 提取 CONTAINS 之外的额外代码关系边（如 Go 方法的 BELONGS_TO）
 	edges = append(edges, buildGoBelongsToEdges(doc, symbols, symbolChunkIDs, symbolNodeIDs, nodes)...)
@@ -558,7 +563,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	edges = append(edges, buildCodeRelationEdges(doc, relations, symbols, symbolChunkIDs, symbolNodeIDs)...)
 
 	// 12. 回填 package 元数据（Go/Java/Kotlin 等）
-	pkg := extractPackageName(doc.FileName(), content)
+	pkg := extractPackageName(doc.FileName(), content, tree.RootNode(), spec.lang)
 	if pkg != "" {
 		for i := range chunks {
 			if chunks[i].Metadata == nil {
@@ -596,13 +601,13 @@ func sortSymbolsByStart(s []codeSymbol) {
 //   - Node.ID 使用代码作用域（如 package 名）生成，使同一 package 的跨文件同名实体可合并
 //
 // 返回值 symbolNodeIDs 与 symbols 一一对应，表示每个符号生成的 Node ID。
-func buildCodeGraph(doc document.RawDoc, content string, symbols []codeSymbol, symbolChunkIDs []string) ([]core.Node, []core.Edge, []string) {
+func buildCodeGraph(doc document.RawDoc, content string, symbols []codeSymbol, symbolChunkIDs []string, root *sitter.Node, lang *sitter.Language) ([]core.Node, []core.Edge, []string) {
 	docTitle := deriveTitle(doc.FileName())
 	docProps := map[string]any{
 		"node_type": "document",
 		"language":  deriveLanguage(doc.FileName()),
 	}
-	pkg := extractPackageName(doc.FileName(), content)
+	pkg := extractPackageName(doc.FileName(), content, root, lang)
 	if pkg != "" {
 		docProps[core.PropPackage] = pkg
 	}
@@ -1323,8 +1328,16 @@ func isClassLikeSymbol(sym codeSymbol) bool {
 //   - Go：package xxx
 //   - Java：package xxx.yyy;
 //   - Python：从文件路径推断模块名（后续可扩展）
-func extractPackageName(fileName, content string) string {
+func extractPackageName(fileName, content string, root *sitter.Node, lang *sitter.Language) string {
 	ext := strings.ToLower(filepath.Ext(fileName))
+	src := []byte(content)
+
+	// AST 优先
+	if pkg := extractPackageNameFromAST(src, ext, root, lang); pkg != "" {
+		return pkg
+	}
+
+	// 手搓正则 fallback（AST 不可用时）
 	switch ext {
 	case ".go":
 		if m := goPackageRegexp.FindStringSubmatch(content); len(m) >= 2 {
@@ -1338,7 +1351,163 @@ func extractPackageName(fileName, content string) string {
 	return ""
 }
 
+// extractPackageNameFromAST 用 tree-sitter (package_clause) 等查询提取包名。
+func extractPackageNameFromAST(src []byte, ext string, root *sitter.Node, lang *sitter.Language) string {
+	var queryText string
+	switch ext {
+	case ".go":
+		queryText = `(package_clause name: (package_identifier) @pkg)`
+	case ".java", ".kt":
+		queryText = `(package_declaration (scoped_identifier) @pkg)`
+	default:
+		return ""
+	}
+
+	q, err := sitter.NewQuery([]byte(queryText), lang)
+	if err != nil {
+		return ""
+	}
+	defer q.Close()
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+	qc.Exec(q, root)
+
+	for {
+		match, ok := qc.NextMatch()
+		if !ok {
+			break
+		}
+		for _, cap := range match.Captures {
+			if q.CaptureNameForId(cap.Index) == "pkg" {
+				return strings.TrimSpace(cap.Node.Content(src))
+			}
+		}
+	}
+	return ""
+}
+
+// extractSignaturesFromAST 用 AST body 字段边界精确提取多行签名。
+// 覆盖 extractSymbolSignature 的 firstNonEmptyLine 盲切结果。
+func extractSignaturesFromAST(content string, symbols []codeSymbol, spec languageSpec, root *sitter.Node) {
+	src := []byte(content)
+	q, err := sitter.NewQuery([]byte(spec.query), spec.lang)
+	if err != nil {
+		return
+	}
+	defer q.Close()
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+	qc.Exec(q, root)
+
+	sigByStart := map[uint32]string{}
+	for {
+		match, ok := qc.NextMatch()
+		if !ok {
+			break
+		}
+		var defNode *sitter.Node
+		for _, cap := range match.Captures {
+			if q.CaptureNameForId(cap.Index) == spec.defCapture {
+				defNode = cap.Node
+			}
+		}
+		if defNode == nil {
+			continue
+		}
+		if sig := extractSignatureFromNode(src, defNode); sig != "" {
+			sigByStart[defNode.StartByte()] = sig
+		}
+	}
+
+	for i, sym := range symbols {
+		if sig, ok := sigByStart[sym.start]; ok {
+			symbols[i].signature = sig
+		}
+	}
+}
+
+// extractSignatureFromNode 从定义节点中提取签名（节点开头到 body 字段前）。
+// 支持多种语言：body 字段在 tree-sitter 中几乎通用（function_declaration、
+// method_declaration、class_declaration 等均有 body）
+func extractSignatureFromNode(src []byte, node *sitter.Node) string {
+	body := node.ChildByFieldName("body")
+	if body != nil {
+		sig := strings.TrimSpace(string(src[node.StartByte():body.StartByte()]))
+		sig = strings.TrimRight(sig, "{ \t")
+		return strings.TrimSpace(sig)
+	}
+	return ""
+}
+
+// extractVisibilityFromAST 用 AST visibility/modifiers 字段精确提取可见性。
+// 未命中时保留 symbols 中已有的值（由 extractSymbolVisibility 的命名约定 fallback 设置）。
+func extractVisibilityFromAST(content string, symbols []codeSymbol, spec languageSpec, root *sitter.Node) {
+	src := []byte(content)
+	q, err := sitter.NewQuery([]byte(spec.query), spec.lang)
+	if err != nil {
+		return
+	}
+	defer q.Close()
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+	qc.Exec(q, root)
+
+	visByStart := map[uint32]string{}
+	for {
+		match, ok := qc.NextMatch()
+		if !ok {
+			break
+		}
+		var defNode *sitter.Node
+		for _, cap := range match.Captures {
+			if q.CaptureNameForId(cap.Index) == spec.defCapture {
+				defNode = cap.Node
+			}
+		}
+		if defNode == nil {
+			continue
+		}
+		if vis := extractVisibilityFromNode(src, defNode); vis != "" {
+			visByStart[defNode.StartByte()] = vis
+		}
+	}
+
+	for i, sym := range symbols {
+		if vis, ok := visByStart[sym.start]; ok {
+			symbols[i].visibility = vis
+		}
+	}
+}
+
+// extractVisibilityFromNode 检查定义节点的 visibility/modifiers 子节点提取可见性。
+// Go/Python 等无 AST 可见性的语言返回 ""，保留命名约定 fallback。
+func extractVisibilityFromNode(src []byte, node *sitter.Node) string {
+	for _, field := range []string{"visibility", "modifiers"} {
+		child := node.ChildByFieldName(field)
+		if child == nil {
+			continue
+		}
+		text := child.Content(src)
+		if strings.Contains(text, "pub") || strings.Contains(text, "public") {
+			return "public"
+		}
+		if strings.Contains(text, "private") {
+			return "private"
+		}
+		if strings.Contains(text, "protected") {
+			return "protected"
+		}
+	}
+	return ""
+}
+
 // extractSymbolSignature 提取符号定义的第一行作为签名。
+//
+// 注意：此函数保留为 fallback，实际签名提取由 extractSignaturesFromAST（AST body
+// 字段方式）优先覆盖。此函数仅在 AST 无法解析时生效。
 func extractSymbolSignature(content string, sym codeSymbol) string {
 	body := content[sym.start:sym.end]
 	sig := firstNonEmptyLine(body)
@@ -1452,9 +1621,13 @@ func codeSymbolLabel(nodeType string) string {
 // extractSymbolSummary 提取符号的 Summary。
 //
 // 策略：
-//  1. 优先取符号前的注释（行注释 // / #，或块注释 /* */）
-//  2. 没有前导注释时，fallback 取函数体内的第一个 docstring（主要针对 Python）
-func extractSymbolSummary(content string, sym codeSymbol, prevEnd uint32) string {
+//  1. 优先用 AST (comment) 查询取符号前的注释（精确识取注释边界）
+//  2. AST 失败时回退到字符串方式（行注释 // / #，或块注释 /* */）
+//  3. 都没有时 fallback 取函数体内的第一个 docstring（主要针对 Python）
+func extractSymbolSummary(content string, sym codeSymbol, prevEnd uint32, root *sitter.Node, lang *sitter.Language) string {
+	if astSummary := extractPrecedingCommentAST([]byte(content), sym.start, prevEnd, root, lang); astSummary != "" {
+		return astSummary
+	}
 	prefix := ""
 	if sym.start > prevEnd {
 		prefix = content[prevEnd:sym.start]
@@ -1467,6 +1640,100 @@ func extractSymbolSummary(content string, sym codeSymbol, prevEnd uint32) string
 		return summary
 	}
 	return ""
+}
+
+// extractPrecedingCommentAST 用 tree-sitter (comment) 查询从 AST 中提取
+// 符号 symStart 前面连续的注释块。
+//
+// 步骤：
+//  1. 查询 AST 中 (prevEnd, symStart) 范围内所有 comment 节点
+//  2. 从最末一个 comment 向前收拢，直到遇到空行（或非 comment 间隙）
+//  3. 检查末 comment 与 symStart 之间无空行；有空行则认为不属于该符号
+func extractPrecedingCommentAST(src []byte, symStart, prevEnd uint32, root *sitter.Node, lang *sitter.Language) string {
+	q, err := sitter.NewQuery([]byte("(comment) @c"), lang)
+	if err != nil {
+		return ""
+	}
+	defer q.Close()
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+	qc.Exec(q, root)
+
+	type commentNode struct {
+		start, end uint32
+		text       string
+	}
+	var comments []commentNode
+
+	for {
+		match, ok := qc.NextMatch()
+		if !ok {
+			break
+		}
+		for _, cap := range match.Captures {
+			if q.CaptureNameForId(cap.Index) != "c" {
+				continue
+			}
+			n := cap.Node
+			s, e := n.StartByte(), n.EndByte()
+			if s >= prevEnd && e <= symStart {
+				comments = append(comments, commentNode{s, e, n.Content(src)})
+			}
+		}
+	}
+
+	if len(comments) == 0 {
+		return ""
+	}
+
+	// 检查末位 comment 与 symStart 之间是否有空行
+	last := comments[len(comments)-1]
+	gapAfter := string(src[last.end:symStart])
+	if strings.Count(gapAfter, "\n") > 1 {
+		return "" // 有空行 → 注释属于上一个代码块
+	}
+
+	// 从末位向前收拢连续的注释（之间无空行）
+	lines := []string{cleanCommentText(last.text)}
+	for i := len(comments) - 2; i >= 0; i-- {
+		c := comments[i]
+		next := comments[i+1]
+		gap := string(src[c.end:next.start])
+		if strings.Count(gap, "\n") > 1 {
+			break // 有空行 → 不属于同一个注释块
+		}
+		lines = append([]string{cleanCommentText(c.text)}, lines...)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// cleanCommentText 去除常见注释前缀（// / # / /* / """ / '''）并 TrimSpace。
+func cleanCommentText(text string) string {
+	text = strings.TrimSpace(text)
+	switch {
+	case strings.HasPrefix(text, "//") || strings.HasPrefix(text, "#"):
+		return stripLineComment(text)
+	case strings.HasPrefix(text, "/*"):
+		inner := strings.TrimPrefix(text, "/*")
+		if idx := strings.LastIndex(inner, "*/"); idx >= 0 {
+			inner = inner[:idx]
+		}
+		return strings.TrimSpace(stripBlockCommentStars(inner))
+	default:
+		// Python """ 或 ''' docstring
+		for _, quote := range []string{`"""`, `'''`} {
+			if idx := strings.Index(text, quote); idx >= 0 {
+				inner := text[idx+3:]
+				if ri := strings.LastIndex(inner, quote); ri >= 0 {
+					inner = inner[:ri]
+				}
+				return strings.TrimSpace(inner)
+			}
+		}
+	}
+	return text
 }
 
 // extractPrecedingComment 从符号前的文本中提取注释。

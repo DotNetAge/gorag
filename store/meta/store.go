@@ -44,6 +44,10 @@ type Store interface {
 	// DeleteChunkLLMStatusByChunkID 删除指定 chunk 的 LLM 处理状态。
 	DeleteChunkLLMStatusByChunkID(chunkID string) error
 
+	// CountLLMStatus 聚合统计所有 chunk 的 LLM 处理状态。
+	// 返回 total_chunks（总数）、summarized（已摘要数）、refilled（已实体提取数）。
+	CountLLMStatus() (totalChunks, summarized, refilled int, err error)
+
 	// GetChunksNeedingLLM 查询需要 LLM 处理的 chunk 状态列表。
 	// 当 summarized=false 表示需要摘要，refilled=false 表示需要实体提取。
 	// limit <= 0 时不限制数量。

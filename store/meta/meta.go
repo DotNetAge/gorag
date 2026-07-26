@@ -238,6 +238,20 @@ func (s *sqliteStore) CountDocumentsByStatus() (map[string]int, error) {
 	return counts, rows.Err()
 }
 
+// CountLLMStatus 实现 Store 接口。
+func (s *sqliteStore) CountLLMStatus() (totalChunks, summarized, refilled int, err error) {
+	row := s.db.QueryRow(`SELECT
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN summarized = 1 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN refilled = 1 THEN 1 ELSE 0 END), 0)
+		FROM chunk_llm_status`)
+	err = row.Scan(&totalChunks, &summarized, &refilled)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("CountLLMStatus: 查询失败: %w", err)
+	}
+	return
+}
+
 // ListDocumentsWithProgress 实现 Store 接口。
 func (s *sqliteStore) ListDocumentsWithProgress(status, filterPath string) ([]*DocumentProgress, error) {
 	query := `SELECT
