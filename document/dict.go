@@ -24,7 +24,7 @@ var funcDict = map[string]ParseFunc{
 
 	// 数据类 → JSON
 	".csv":  ParseCSV,
-	".xls":  ParseXlsx,
+	".xls":  ParseXls,
 	".xlsx": ParseXlsx,
 	".json": ParseJSON,
 	".yml":  ParseYAML,

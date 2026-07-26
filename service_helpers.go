@@ -27,6 +27,17 @@ var TextExts = []string{
 	".sql", ".conf", ".cfg", ".ini",
 }
 
+// DataExts 可索引的数据类文件扩展名列表（解析为 JSON 字符串）。
+//
+// 涵盖：csv/xls/xlsx/json/yaml/yml/xml/toml/log/eml/msg。
+// 这些文件不进入 TextExts，因为它们的归一化策略不同（输出 JSON 字符串而非原文）。
+var DataExts = []string{
+	".csv", ".xls", ".xlsx",
+	".json", ".yaml", ".yml",
+	".xml", ".toml", ".log",
+	".eml", ".msg",
+}
+
 // ScanDir 扫描目录下的所有文本文件，跳过 .ragignore 匹配的目录。
 //
 // 支持层级 .ragignore：每个目录可放置自己的 .ragignore，规则叠加生效。
@@ -53,7 +64,7 @@ func ScanDir(dir string, basePatterns []string) ([]string, error) {
 					}
 				}
 			}
-			if IsTextFile(path) {
+			if IsIndexableFile(path) {
 				files = append(files, path)
 			}
 			return nil
@@ -177,6 +188,21 @@ func MatchRagignoreEntry(name, rel string, patterns []string) bool {
 func IsTextFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return slices.Contains(TextExts, ext)
+}
+
+// IsDataFile 判断是否为可索引的数据类文件（CSV / XLSX / JSON / 等）。
+//
+// 数据类文件的归一化策略是输出 JSON 字符串（不同于文本类输出原文）。
+// 与 IsTextFile 是并列关系。
+func IsDataFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return slices.Contains(DataExts, ext)
+}
+
+// IsIndexableFile 判断文件是否应被索引（文本类 + 数据类）。
+// 这是 ScanDir 与 index 单文件入口的统一判断入口。
+func IsIndexableFile(filename string) bool {
+	return IsTextFile(filename) || IsDataFile(filename)
 }
 
 // ComputeFileHash 计算文件的 SHA256 哈希值。

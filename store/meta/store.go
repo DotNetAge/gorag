@@ -49,6 +49,10 @@ type Store interface {
 	// limit <= 0 时不限制数量。
 	GetChunksNeedingLLM(docPath string, summarized, refilled bool, limit int) ([]*ChunkLLMStatus, error)
 
+	// ResetAllLLMStatus 将所有 chunk 的 LLM 处理状态重置为未处理。
+	// 用于清理之前被错误标记的 chunk，使 Update 能真正执行 LLM 处理。
+	ResetAllLLMStatus() error
+
 	// ── Token 用量记录 ──────────────────────────────────────────────
 
 	// SaveUsage 保存一次 LLM 调用的 token 用量记录。

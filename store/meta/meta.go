@@ -681,6 +681,22 @@ func (s *sqliteStore) GetChunksNeedingLLM(docPath string, summarized, refilled b
 	return results, rows.Err()
 }
 
+// ResetAllLLMStatus 实现 Store 接口。
+// 将所有 chunk 的 summarized 和 refilled 重置为 0，同时清空时间戳。
+func (s *sqliteStore) ResetAllLLMStatus() error {
+	_, err := s.db.Exec(`UPDATE chunk_llm_status SET
+		summarized = 0,
+		refilled = 0,
+		last_summarized_at = NULL,
+		last_refilled_at = NULL,
+		updated_at = CURRENT_TIMESTAMP
+		WHERE summarized = 1 OR refilled = 1`)
+	if err != nil {
+		return fmt.Errorf("ResetAllLLMStatus: 重置失败: %w", err)
+	}
+	return nil
+}
+
 // ── ChunkLLMStatus 辅助函数 ───────────────────────────────────────
 
 // scanChunkLLMStatus 从数据库行扫描 ChunkLLMStatus。

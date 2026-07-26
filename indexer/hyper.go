@@ -789,6 +789,7 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 	}
 
 	// 1. [摘要] Summarizer 阶段
+	// 1a. 先按 minSummaryContentLength 过滤出需要摘要的分片
 	if h.summarizer != nil {
 		var toSummarize []core.Chunk
 		for _, c := range chunks {
@@ -797,22 +798,36 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 			}
 		}
 		if len(toSummarize) > 0 {
-			h.logger.Info("复合索引器: ProcessChunks 调用 Summarizer", "分片数", len(toSummarize))
-			var result []core.Chunk
-			var sErr error
-			if bs, ok := h.summarizer.(interface {
-				SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
-			}); ok {
-				result, sErr = bs.SummarizeBatch(ctx, toSummarize)
-			} else {
-				result, sErr = h.summarizer.Summarize(ctx, toSummarize)
+			// 1b. 按 content 字符数分批，避免单次 LLM 调用 token 超限
+			batches := splitChunksBySize(toSummarize, defaultProcessBatchChars)
+			h.logger.Info("复合索引器: ProcessChunks 调用 Summarizer",
+				"分片数", len(toSummarize), "批次数", len(batches))
+
+			allSummarized := make([]core.Chunk, 0, len(toSummarize))
+			for batchIdx, batch := range batches {
+				var result []core.Chunk
+				var sErr error
+				if bs, ok := h.summarizer.(interface {
+					SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
+				}); ok {
+					result, sErr = bs.SummarizeBatch(ctx, batch)
+				} else {
+					result, sErr = h.summarizer.Summarize(ctx, batch)
+				}
+				if sErr != nil {
+					h.logger.Warn("复合索引器: ProcessChunks Summarizer 批次失败",
+						"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", sErr)
+					continue
+				}
+				h.logger.Info("复合索引器: ProcessChunks Summarizer 批次完成",
+					"批次", batchIdx+1, "总批", len(batches), "已摘要", len(result))
+				allSummarized = append(allSummarized, result...)
 			}
-			if sErr != nil {
-				h.logger.Warn("复合索引器: ProcessChunks Summarizer 失败", "error", sErr)
-			} else {
-				// 按 ID 回写到 processedChunks
-				updatedByID := make(map[string]core.Chunk, len(result))
-				for _, u := range result {
+
+			// 1c. 按 ID 回写到 processedChunks
+			if len(allSummarized) > 0 {
+				updatedByID := make(map[string]core.Chunk, len(allSummarized))
+				for _, u := range allSummarized {
 					updatedByID[u.ID] = u
 				}
 				processedChunks = make([]core.Chunk, len(chunks))
@@ -823,7 +838,8 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 						processedChunks[i] = c
 					}
 				}
-				h.logger.Info("复合索引器: ProcessChunks Summarizer 完成", "已摘要", len(result))
+				h.logger.Info("复合索引器: ProcessChunks Summarizer 完成",
+					"已摘要", len(allSummarized), "总批", len(batches))
 			}
 		}
 	}
@@ -855,16 +871,31 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 		}
 		if len(schemas) > 0 {
 			// Refiller 应基于摘要后的 processedChunks，而非原始 chunks
-			result := chunker.ChunkResult{Chunks: processedChunks}
-			refilled, rErr := h.refiller.Refill(ctx, result, schemas)
-			if rErr != nil {
-				h.logger.Warn("复合索引器: ProcessChunks Refiller 失败", "error", rErr)
-			} else {
-				addedNodes = refilled.Nodes
-				addedEdges = refilled.Edges
-				h.logger.Info("复合索引器: ProcessChunks Refiller 完成",
-					"实体数", len(addedNodes), "关系数", len(addedEdges))
+			// 同样按 content 字符数分批，避免单次 prompt token 超限
+			batches := splitChunksBySize(processedChunks, defaultProcessBatchChars)
+			h.logger.Info("复合索引器: ProcessChunks 调用 Refiller",
+				"分片数", len(processedChunks), "批次数", len(batches))
+
+			var allNodes []core.Node
+			var allEdges []core.Edge
+			for batchIdx, batch := range batches {
+				result := chunker.ChunkResult{Chunks: batch}
+				refilled, rErr := h.refiller.Refill(ctx, result, schemas)
+				if rErr != nil {
+					h.logger.Warn("复合索引器: ProcessChunks Refiller 批次失败",
+						"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", rErr)
+					continue
+				}
+				h.logger.Info("复合索引器: ProcessChunks Refiller 批次完成",
+					"批次", batchIdx+1, "总批", len(batches),
+					"实体数", len(refilled.Nodes), "关系数", len(refilled.Edges))
+				allNodes = append(allNodes, refilled.Nodes...)
+				allEdges = append(allEdges, refilled.Edges...)
 			}
+			addedNodes = allNodes
+			addedEdges = allEdges
+			h.logger.Info("复合索引器: ProcessChunks Refiller 完成",
+				"实体数", len(addedNodes), "关系数", len(addedEdges), "总批", len(batches))
 		}
 	}
 
@@ -973,3 +1004,51 @@ func keywordInTags(tags []string, lowerKeyword string) bool {
 // minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。
 // 短于此长度的分块没有摘要化的必要，直接跳过以节省 LLM 调用。
 const minSummaryContentLength = 100
+
+// defaultProcessBatchChars 是 ProcessChunks 中单批 LLM 调用的最大内容字符数。
+//
+// 设计依据：32K tokens 模型，预留 8K 给 system prompt + response，剩 24K 给用户输入。
+// 中文 1 字符 ≈ 1.5–2 tokens，保守按 3 字符/token 折算 → 8000 字符 ≈ 24K tokens。
+// 超出此阈值的批次会再次拆分，避免单次请求 token 超限。
+const defaultProcessBatchChars = 8000
+
+// splitChunksBySize 按 content 字符数累计把 chunks 切分为多个批次。
+//
+// 单个 chunk 若已超阈值则独占一批（不会因单 chunk 超大而阻塞后续 chunk）。
+// 返回的批次顺序与原 chunks 一致。
+func splitChunksBySize(chunks []core.Chunk, maxChars int) [][]core.Chunk {
+	if maxChars <= 0 || len(chunks) == 0 {
+		return [][]core.Chunk{chunks}
+	}
+	var batches [][]core.Chunk
+	var cur []core.Chunk
+	var curSize int
+	for _, c := range chunks {
+		cs := utf8.RuneCountInString(c.Content)
+		// 单 chunk 已超阈值：先 flush 当前批，再独立成批
+		if cs >= maxChars {
+			if len(cur) > 0 {
+				batches = append(batches, cur)
+				cur = nil
+				curSize = 0
+			}
+			batches = append(batches, []core.Chunk{c})
+			continue
+		}
+		// 累加后超出阈值：flush 当前批，开新批
+		if curSize+cs > maxChars && len(cur) > 0 {
+			batches = append(batches, cur)
+			cur = nil
+			curSize = 0
+		}
+		cur = append(cur, c)
+		curSize += cs
+	}
+	if len(cur) > 0 {
+		batches = append(batches, cur)
+	}
+	if len(batches) == 0 {
+		return [][]core.Chunk{chunks}
+	}
+	return batches
+}
