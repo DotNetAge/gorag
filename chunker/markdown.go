@@ -25,7 +25,7 @@ import (
 //   - 没有 heading 时整个文档作为一个 Chunk
 //   - Chunk.Title 取 heading 行去除 # 前缀后的纯文本
 //   - Chunk.StartPos/EndPos 为字节偏移
-//   - Chunk.Summary 取 heading 后内容的前 2 个句子
+//   - Chunk.Summary 不取值
 
 // markdownHeadingQuery 匹配 Markdown 的所有 heading 节点。
 // 同时识别 ATX heading（#/##/.../######）和 setext heading（=/- 下划线）。
@@ -194,12 +194,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		nodes = append([]core.Node{regionNode}, nodes...)
 	}
 
-	// 8. 统一填充 Summary：每个 Chunk 取内容前 2 个句子
-	for i := range chunks {
-		if chunks[i].Summary == "" {
-			chunks[i].Summary = deriveSummary(chunks[i].Content, 2)
-		}
-	}
+	// 8. 不对Summary进行填充，由LLM进行摘要处理，单纯截取字符串效果太差；
 
 	// 9. 统一 enriched 通用元数据（行号、语言、目录等）
 	chunks = enrichChunksMetadata(chunks, content, doc.FileName())

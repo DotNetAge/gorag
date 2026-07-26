@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
@@ -131,54 +130,23 @@ func enrichChunksMetadata(chunks []core.Chunk, fullContent, fileName string) []c
 	return chunks
 }
 
-// deriveSummary 从内容中提取前 maxSentences 个句子作为 Summary。
-//
-// 句子切分支持中英文句号；若内容为空或无法切分，返回原文或空字符串。
-// 用于统一 Markdown/Datum/Image 等 Chunker 的默认 Summary 生成策略。
-func deriveSummary(content string, maxSentences int) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
-	}
-	if maxSentences <= 0 {
-		maxSentences = 1
-	}
-
-	var sentences []string
-	start := 0
-	for i, r := range content {
-		size := utf8.RuneLen(r)
-		if r == '。' {
-			s := strings.TrimSpace(content[start : i+size])
-			if s != "" {
-				sentences = append(sentences, s)
-			}
-			start = i + size
-		} else if r == '.' && i+size < len(content) {
-			next := content[i+size]
-			if next == ' ' || next == '\n' {
-				s := strings.TrimSpace(content[start : i+size])
-				if s != "" {
-					sentences = append(sentences, s)
-				}
-				start = i + size
-			}
+// removeMarkdownCodeBlocks 移除 Markdown 代码块（```...```）。
+func removeMarkdownCodeBlocks(content string) string {
+	var sb strings.Builder
+	inCodeBlock := false
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		if !inCodeBlock {
+			sb.WriteString(line)
+			sb.WriteString("\n")
 		}
 	}
-	if start < len(content) {
-		s := strings.TrimSpace(content[start:])
-		if s != "" {
-			sentences = append(sentences, s)
-		}
-	}
-
-	if len(sentences) == 0 {
-		return content
-	}
-	if len(sentences) > maxSentences {
-		sentences = sentences[:maxSentences]
-	}
-	return strings.Join(sentences, " ")
+	return strings.TrimSpace(sb.String())
 }
 
 // byteOffsetToLine 计算字节偏移量对应的行号（从 1 开始）。

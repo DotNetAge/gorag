@@ -120,22 +120,33 @@ func (s *gochatSummarizer) summarizeOne(ctx context.Context, content string) (st
 	return res.Title, res.Summary, res.Tags, nil
 }
 
-// buildSystemPrompt 构建 Summarizer 的系统提示词。
+// buildSystemPrompt 构建单条摘要的系统提示词。
+//
+// 设计要点：
+//   - 先识别内容类型（代码/文档/数据），再按类型执行不同的摘要策略
+//   - 明确禁止复制原文，要求对内容进行提炼、概括和重组
+//   - summary 必须比原文短且更具概括性
 func (s *gochatSummarizer) buildSystemPrompt() string {
 	var sb strings.Builder
-	sb.WriteString("你是一名精准的文档摘要助手。\n")
-	sb.WriteString("请对给定文本片段生成严格的 JSON，仅包含三个字段：\n")
-	sb.WriteString("- \"title\": 简洁、利于搜索的标题（最多 10 个词）\n")
-	sb.WriteString("- \"summary\": 准确概括关键语义（禁止使用一切标记，包括 Markdown、XML、HTML、Emoji 等）\n")
+	sb.WriteString("你是一名精准的文档分块摘要助手。\n\n")
+	sb.WriteString("用户提供的是一个从完整文档中切分出的片段。请你先判断这个片段属于哪种类型")
+	sb.WriteString("（代码片段/自然语言文档/结构化数据/其他），然后按以下规则处理：\n\n")
+	sb.WriteString("输出字段：\n")
+	sb.WriteString("- \"title\": 该片段的核心标识（最多 10 个词）。\n")
+	sb.WriteString("  · 代码：优先使用函数名、类名、方法名\n")
+	sb.WriteString("  · 文档：使用该片段讨论的核心主题\n")
+	sb.WriteString("  · 数据：使用表格/记录的语义描述\n")
+	sb.WriteString("- \"summary\": 对该片段关键语义的**提炼概括**，而非复制。\n")
+	sb.WriteString("  · 必须是对原文的浓缩、重述，禁止直接复制或基本照搬原文句子\n")
+	sb.WriteString("  · 长度应在 1-3 句话内，比原文短得多\n")
+	sb.WriteString("  · 禁止使用一切标记（Markdown、XML、HTML、Emoji 等）\n")
+	sb.WriteString("  · 如果原文是代码：用自然语言描述该代码段的功能和行为\n")
+	sb.WriteString("  · 如果原文是文档：提取核心观点或事实\n")
+	sb.WriteString("  · 如果原文是数据：描述数据的内容、范围或统计特征\n")
 	sb.WriteString("- \"tags\": 3-5 个关键词标签，用于分类和检索（字符串数组）\n\n")
-	sb.WriteString("规则：\n")
-	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
-	sb.WriteString("- 标题、摘要和标签使用 ")
-	sb.WriteString(s.config.Language)
-	sb.WriteString(" 表达。\n")
-	sb.WriteString("- 标签应简洁，避免与标题重复。\n")
-	sb.WriteString("- 如果内容很短，标题和摘要也应简短但有意义。\n")
-	sb.WriteString("- 如果输入是代码，标题优先使用函数/类名，摘要描述其行为。\n")
+	sb.WriteString("格式规则：\n")
+	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号\n")
+	sb.WriteString("- 标签应简洁，避免与标题重复\n")
 	return sb.String()
 }
 
@@ -196,8 +207,11 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 	// 3. 解析结果
 	result, err := parseBatchSummarizeResult(resp.Content)
 	if err != nil {
-		s.logger.Warn("SummarizeBatch: 解析 LLM 响应失败，保留原始分片", "error", err)
-		return chunks, nil
+		s.logger.Warn("SummarizeBatch: 解析 LLM 响应失败",
+			"error", err,
+			"raw_response", resp.Content,
+		)
+		return nil, fmt.Errorf("批量 JSON 解析失败: %w", err)
 	}
 	// 4. 按 chunk_id 匹配回写
 	resultByID := make(map[string]batchSummarizeEntry, len(result))
@@ -223,27 +237,25 @@ func (s *gochatSummarizer) SummarizeBatch(ctx context.Context, chunks []core.Chu
 }
 
 // buildBatchSystemPrompt 构建批量模式的系统提示词。
+//
+// 与单条模式相同的摘要策略，区别在于输入输出为 JSON 数组格式。
+// 注意保持 prompt 尽可能简短，避免 LLM 输出 token 超限导致 JSON 截断。
 func (s *gochatSummarizer) buildBatchSystemPrompt() string {
 	var sb strings.Builder
-	sb.WriteString("你是一名精准的文档摘要助手。\n")
-	sb.WriteString("给定一个 JSON 数组形式的文档分块列表，请为每条记录生成 title、summary 和 tags。\n")
-	sb.WriteString("输入格式：\n")
-	sb.WriteString("[{\"chunk_id\": \"...\", \"content\": \"...\"}]\n\n")
-	sb.WriteString("输出格式（严格的 JSON 数组，内容和输入一一对应）：\n")
-	sb.WriteString("[{\"chunk_id\": \"...\", \"title\": \"...\", \"summary\": \"...\", \"tags\": [\"...\"]}]\n\n")
-	sb.WriteString("字段说明：\n")
-	sb.WriteString("- \"title\": 简洁、利于搜索的标题（最多 10 个词）\n")
-	sb.WriteString("- \"summary\": 准确概括关键语义（禁止使用一切标记，包括 Markdown、XML、HTML、Emoji 等）\n")
-	sb.WriteString("- \"tags\": 3-5 个关键词标签，用于分类和检索（字符串数组）\n\n")
+	sb.WriteString("你是一名精准的文档分块摘要助手。\n")
+	sb.WriteString("输入是 JSON 数组，每个元素是一个文档片段。\n")
+	sb.WriteString("请为每条记录输出 title, summary, tags。\n\n")
+	sb.WriteString("输入: [{\"chunk_id\":\"...\",\"content\":\"...\"}]\n")
+	sb.WriteString("输出: [{\"chunk_id\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[...]}]\n\n")
 	sb.WriteString("规则：\n")
-	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
-	sb.WriteString("- 标题、摘要和标签使用 ")
-	sb.WriteString(s.config.Language)
-	sb.WriteString(" 表达。\n")
-	sb.WriteString("- 标签应简洁，避免与标题重复。\n")
-	sb.WriteString("- 确保输出数组的长度与输入数组一致，chunk_id 一一对应。\n")
-	sb.WriteString("- 如果某个分块内容很短，标题和摘要也应简短但有意义。\n")
-	sb.WriteString("- 如果输入是代码段，标题优先使用函数/类名，摘要描述其行为。\n")
+	sb.WriteString("- title: 核心标识，代码用函数/类名，文档用主题（最多10词）\n")
+	sb.WriteString("- summary: 提炼概括，禁止复制原文，1-3句话，禁止使用任何标记\n")
+	sb.WriteString("  · 代码：自然语言描述功能\n")
+	sb.WriteString("  · 文档：提取核心观点\n")
+	sb.WriteString("  · 数据：描述内容/范围/特征\n")
+	sb.WriteString("- tags: 3-5个关键词\n")
+	sb.WriteString("- chunk_id 必须原样返回\n")
+	sb.WriteString("- 输出必须是合法 JSON 数组，长度与输入一致\n")
 	return sb.String()
 }
 
@@ -252,7 +264,7 @@ func parseBatchSummarizeResult(resp string) ([]batchSummarizeEntry, error) {
 	resp = normalizeLLMJSON(resp)
 	var res []batchSummarizeEntry
 	if err := json.Unmarshal([]byte(resp), &res); err != nil {
-		return nil, fmt.Errorf("批量 JSON 解析失败: %w", err)
+		return nil, fmt.Errorf("批量 JSON 解析失败: %w\n原始响应: %s", err, resp)
 	}
 	return res, nil
 }

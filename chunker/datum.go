@@ -53,7 +53,7 @@ func (d *DatumChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	// log 是非结构化文本，直接按行切分
 	if strings.EqualFold(dataKind, "Log") {
 		chunks := d.chunkByLines(doc, content, dataKind)
-		fillDatumSummary(chunks)
+		// fillDatumSummary(chunks)
 		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
 		return ChunkResult{Chunks: chunks}, nil
 	}
@@ -63,7 +63,7 @@ func (d *DatumChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		// 按数据路径前缀回填 ParentID，形成分块树
 		setDatumParentIDs(chunks, dataKind)
 		nodes, edges := buildDatumGraph(doc, chunks, dataKind)
-		fillDatumSummary(chunks)
+		// fillDatumSummary(chunks)
 		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
 		return ChunkResult{
 			Chunks: chunks,
@@ -74,22 +74,30 @@ func (d *DatumChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	// 解析失败：降级为按行切分
 	chunks := d.chunkByLines(doc, content, dataKind)
-	fillDatumSummary(chunks)
+	// fillDatumSummary(chunks)
 	chunks = enrichChunksMetadata(chunks, content, doc.FileName())
 	return ChunkResult{Chunks: chunks}, nil
 }
 
-// fillDatumSummary 为数据分块统一填充 Summary。
-//
-// 结构化数据取每个 Chunk 内容的前 2 个句子；log 等按行切分的文本同样适用。
-// 若内容中没有句子结束符，则返回完整内容作为摘要。
-func fillDatumSummary(chunks []core.Chunk) {
-	for i := range chunks {
-		if chunks[i].Summary == "" {
-			chunks[i].Summary = deriveSummary(chunks[i].Content, 2)
-		}
-	}
-}
+// // fillDatumSummary 为数据分块统一填充 Summary。
+// //
+// // 优先使用 deriveSummary 提取自然语言句子；若数据内容无句子结束符，
+// // 则取前 80 个字符作为摘要，避免数据类分片摘要为空。
+// func fillDatumSummary(chunks []core.Chunk) {
+// 	// NOTE: 此方法是废方法，不进行默认的截断开的Summary
+// }
+
+// truncateString 按 UTF-8 字符截断字符串到最大长度，避免切出乱码。
+// func truncateString(s string, maxRunes int) string {
+// 	if maxRunes <= 0 {
+// 		return ""
+// 	}
+// 	runes := []rune(s)
+// 	if len(runes) <= maxRunes {
+// 		return s
+// 	}
+// 	return string(runes[:maxRunes])
+// }
 
 // detectDataKind 根据文件扩展名返回数据类型标签（用于 Chunk.Title）。
 func (d *DatumChunker) detectDataKind(fileName string) string {

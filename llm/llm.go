@@ -17,6 +17,9 @@ import "strings"
 // 处理项：
 //   - 去除 markdown 代码块标记
 //   - 自动替换中文标点为英文标点，避免 JSON 解析失败
+//   - 删除 ] 之后的多余内容（LLM 可能在数组外附加文字）
+//   - 在 } 与 { 之间插入逗号（数组元素间缺少逗号）
+//   - 删除 ] 之前的多余逗号（末尾多逗号）
 func normalizeLLMJSON(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "```json")
@@ -27,13 +30,30 @@ func normalizeLLMJSON(s string) string {
 	// 仅替换 JSON 结构所需标点；内容中的中文句号/分号保留原样。
 	s = strings.ReplaceAll(s, "，", ",")
 	s = strings.ReplaceAll(s, "：", ":")
-	s = strings.ReplaceAll(s, "“", "\"")
-	s = strings.ReplaceAll(s, "”", "\"")
-	s = strings.ReplaceAll(s, "‘", "'")
-	s = strings.ReplaceAll(s, "’", "'")
-	s = strings.ReplaceAll(s, "【", "[")
-	s = strings.ReplaceAll(s, "】", "]")
-	s = strings.ReplaceAll(s, "（", "(")
-	s = strings.ReplaceAll(s, "）", ")")
+	s = strings.ReplaceAll(s, "\u201c", "\"")
+	s = strings.ReplaceAll(s, "\u201d", "\"")
+	s = strings.ReplaceAll(s, "\u2018", "'")
+	s = strings.ReplaceAll(s, "\u2019", "'")
+	s = strings.ReplaceAll(s, "\u3010", "[")
+	s = strings.ReplaceAll(s, "\u3011", "]")
+	s = strings.ReplaceAll(s, "\uff08", "(")
+	s = strings.ReplaceAll(s, "\uff09", ")")
+
+	// 修复常见 LLM JSON 格式错误
+	// 1. 删除 ] 之后的多余内容（仅当根是数组时）
+	// 2. 如果数组中根本没有 ]，说明被截断，补充 }] 尝试闭合
+	if strings.HasPrefix(s, "[") {
+		if idx := strings.LastIndex(s, "]"); idx >= 0 {
+			s = s[:idx+1]
+		} else {
+			// 数组被截断（连 ] 都没有），补充 }] 尝试闭合最后一个对象和数组
+			s += "}]"
+		}
+	}
+	// 3. 在 } 与 { 之间插入逗号（数组元素间缺逗号）
+	s = strings.ReplaceAll(s, "}{", "},{")
+	// 4. 删除 ] 之前的多余逗号
+	s = strings.ReplaceAll(s, ",]", "]")
+
 	return s
 }

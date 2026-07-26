@@ -17,6 +17,8 @@ const (
 	VecMetaTags     = "tags"      // Chunk.Tags
 	VecMetaStartLine = "start_line" // Chunk.StartLine
 	VecMetaEndLine   = "end_line"   // Chunk.EndLine
+	VecMetaStartPos  = "start_pos"  // Chunk.StartPos
+	VecMetaEndPos    = "end_pos"    // Chunk.EndPos
 )
 
 // Vector 向量：Chunk 的向量化表示。

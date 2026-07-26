@@ -15,16 +15,11 @@ import (
 //   - 与具体 LLM 客户端解耦，仅描述调用参数
 //   - 调用方负责从环境变量、.rag 配置或 keychain 中读取真实密钥
 //   - Timeout 为 0 时使用默认 10 分钟
-//   - Language 直接注入提示词，控制输出语言
-//   - MaxTokens / ContextLength 为 0 时使用默认值 128000
 type Config struct {
-	APIKey        string
-	BaseURL       string
-	Model         string
-	Language      string
-	MaxTokens     int
-	ContextLength int
-	Timeout       time.Duration
+	APIKey  string
+	BaseURL string
+	Model   string
+	Timeout time.Duration
 }
 
 // validate 校验必填参数。
@@ -43,15 +38,6 @@ func (c Config) validate() error {
 
 // withDefaults 为 0 值填充默认值。
 func (c Config) withDefaults() Config {
-	if c.Language == "" {
-		c.Language = "Chinese"
-	}
-	if c.MaxTokens <= 0 {
-		c.MaxTokens = 128000
-	}
-	if c.ContextLength <= 0 {
-		c.ContextLength = 128000
-	}
 	if c.Timeout <= 0 {
 		c.Timeout = 10 * time.Minute
 	}

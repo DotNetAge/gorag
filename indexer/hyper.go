@@ -484,16 +484,55 @@ func (h *HyperIndexer) Remove(ctx context.Context, chunkID string) error {
 	}
 	// 2. 关系线删除（若 graph 存在）
 	if h.graph != nil {
-		if a, ok := h.graph.(IndexerAdmin); ok {
-			if err := a.Remove(ctx, chunkID); err != nil {
-				h.logger.Warn("复合索引器: 关系线删除失败（不阻塞）",
-					"chunk_id", chunkID, "error", err.Error())
-				// 关系线删除失败不阻塞，仅记录警告
-			}
-		}
+		h.removeGraphData(ctx, chunkID)
 	}
 	h.logger.Debug("复合索引器: 删除分片完成", "chunk_id", chunkID)
 	return nil
+}
+
+// removeGraphData 按 chunkID 删除 GraphStore 中关联的 Nodes 和 Edges。
+func (h *HyperIndexer) removeGraphData(ctx context.Context, chunkID string) {
+	// 优先通过 IndexerAdmin 接口删除
+	if a, ok := h.graph.(IndexerAdmin); ok {
+		if err := a.Remove(ctx, chunkID); err != nil {
+			h.logger.Warn("复合索引器: 关系线删除失败（不阻塞）",
+				"chunk_id", chunkID, "error", err.Error())
+		}
+		return
+	}
+
+	// 回退：直接操作 GraphStore（GraphIndexer 不实现 IndexerAdmin）
+	gi, ok := h.graph.(*GraphIndexer)
+	if !ok {
+		h.logger.Debug("复合索引器: graph 不支持删除，跳过", "chunk_id", chunkID)
+		return
+	}
+	gdb := gi.GraphDB()
+	if gdb == nil {
+		return
+	}
+
+	nodes, edges, err := gdb.GetByChunkIDs(ctx, []string{chunkID})
+	if err != nil {
+		h.logger.Warn("复合索引器: 查询 chunk 关联的图数据失败", "chunk_id", chunkID, "error", err)
+		return
+	}
+
+	// 先删除边，再删除节点
+	for _, e := range edges {
+		if dErr := gdb.DeleteEdge(ctx, e.ID); dErr != nil {
+			h.logger.Warn("复合索引器: 删除图边失败", "edge_id", e.ID, "error", dErr)
+		}
+	}
+	for _, n := range nodes {
+		if dErr := gdb.DeleteNode(ctx, n.ID); dErr != nil {
+			h.logger.Warn("复合索引器: 删除图节点失败", "node_id", n.ID, "error", dErr)
+		}
+	}
+	h.logger.Debug("复合索引器: 图数据清理完成",
+		"chunk_id", chunkID,
+		"节点数", len(nodes),
+		"边数", len(edges))
 }
 
 // Clear 实现 IndexerAdmin 接口：双线联动清空。
@@ -778,15 +817,21 @@ func (h *HyperIndexer) SetLogger(logger logging.Logger) {
 //   - processedChunks: 处理后的分片列表（Summary/Title 已更新）
 //   - addedNodes: 新提取的实体节点
 //   - addedEdges: 新提取的关系边
+//   - summarizeCompleted: Summarizer 阶段是否已完成（未注入或已调用）
+//   - refillCompleted: Refiller 阶段是否已完成（未注入、无 Schema 或已调用）
 //   - error: 整体错误（单个阶段失败不阻塞后续阶段，仅记录警告）
 //
 // 典型调用方：IndexingService.Update，从 meta.db 查询需要 LLM 处理的分片，
 // 从 VectorStore 加载完整数据后传给此方法。
-func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (processedChunks []core.Chunk, addedNodes []core.Node, addedEdges []core.Edge, err error) {
+func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (processedChunks []core.Chunk, addedNodes []core.Node, addedEdges []core.Edge, summarizeCompleted, refillCompleted bool, err error) {
 	h.logger.Info("复合索引器: 开始增量 LLM 处理", "chunks", len(chunks))
 	if len(chunks) == 0 {
-		return chunks, nil, nil, nil
+		return chunks, nil, nil, true, true, nil
 	}
+
+	// summarizeCompleted / refillCompleted 表示对应阶段是否已完成。
+	// 默认 false，仅当组件实际执行后才设为 true。
+	// 若 summarizer/refiller 为 nil（未注入），保持 false，避免调用方错误标记状态。
 
 	// 1. [摘要] Summarizer 阶段
 	// 1a. 先按 minSummaryContentLength 过滤出需要摘要的分片
@@ -798,6 +843,7 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 			}
 		}
 		if len(toSummarize) > 0 {
+			summarizeCompleted = true
 			// 1b. 按 content 字符数分批，避免单次 LLM 调用 token 超限
 			batches := splitChunksBySize(toSummarize, defaultProcessBatchChars)
 			h.logger.Info("复合索引器: ProcessChunks 调用 Summarizer",
@@ -811,11 +857,17 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 					SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
 				}); ok {
 					result, sErr = bs.SummarizeBatch(ctx, batch)
+					if sErr != nil {
+						// 批量失败，降级为逐条摘要
+						h.logger.Warn("复合索引器: SummarizeBatch 失败，降级为逐条摘要",
+							"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", sErr)
+						result, sErr = h.summarizer.Summarize(ctx, batch)
+					}
 				} else {
 					result, sErr = h.summarizer.Summarize(ctx, batch)
 				}
 				if sErr != nil {
-					h.logger.Warn("复合索引器: ProcessChunks Summarizer 批次失败",
+					h.logger.Warn("复合索引器: ProcessChunks Summarizer 全部失败",
 						"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", sErr)
 					continue
 				}
@@ -872,6 +924,7 @@ func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (
 		if len(schemas) > 0 {
 			// Refiller 应基于摘要后的 processedChunks，而非原始 chunks
 			// 同样按 content 字符数分批，避免单次 prompt token 超限
+			refillCompleted = true
 			batches := splitChunksBySize(processedChunks, defaultProcessBatchChars)
 			h.logger.Info("复合索引器: ProcessChunks 调用 Refiller",
 				"分片数", len(processedChunks), "批次数", len(batches))

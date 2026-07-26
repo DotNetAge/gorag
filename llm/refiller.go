@@ -215,11 +215,7 @@ func (r *gochatRefiller) buildSystemPrompt(schemas []EntitySchema) string {
 
 	sb.WriteString("规则：\n")
 	sb.WriteString("- JSON 输出必须使用英文标点，禁止出现中文引号、中文逗号或中文冒号。\n")
-	sb.WriteString("- 实体名称和关系谓词使用 ")
-	sb.WriteString(r.config.Language)
-	sb.WriteString(" 表达。\n")
 	sb.WriteString("- 如果未找到实体或关系，返回 {\"entities\":[],\"relations\":[]}。\n")
-	sb.WriteString("- 优先使用文本中实际出现的实体名称。\n")
 	sb.WriteString("- 每个实体的 properties 必须严格按照对应实体类型的属性定义输出，必填字段不可省略，枚举值只能取定义范围内的值。\n")
 	return sb.String()
 }

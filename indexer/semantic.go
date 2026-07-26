@@ -272,6 +272,8 @@ var vecMetaKeys = map[string]bool{
 	core.VecMetaTags:      true,
 	core.VecMetaStartLine: true,
 	core.VecMetaEndLine:   true,
+	core.VecMetaStartPos:  true,
+	core.VecMetaEndPos:    true,
 }
 
 // toIntFromMeta 从 VecMeta 元数据中安全提取 int 值。
@@ -319,6 +321,11 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 	}
 	if chunk.EndLine > 0 {
 		m[core.VecMetaEndLine] = chunk.EndLine
+	}
+	// 保存原始字节偏移位置；0 也是合法起始位置，因此只要有一个非零就写入
+	if chunk.StartPos != 0 || chunk.EndPos != 0 {
+		m[core.VecMetaStartPos] = chunk.StartPos
+		m[core.VecMetaEndPos] = chunk.EndPos
 	}
 	// 复制 Metadata 中的其他扩展属性（跳过已映射到顶层字段的 VecMeta* 键）
 	for k, v := range chunk.Metadata {
@@ -566,6 +573,8 @@ func vectorToChunk(vec *core.Vector) *core.Chunk {
 	}
 	chunk.StartLine = toIntFromMeta(vec.Metadata[core.VecMetaStartLine])
 	chunk.EndLine = toIntFromMeta(vec.Metadata[core.VecMetaEndLine])
+	chunk.StartPos = toIntFromMeta(vec.Metadata[core.VecMetaStartPos])
+	chunk.EndPos = toIntFromMeta(vec.Metadata[core.VecMetaEndPos])
 	// 复制非 VecMeta 键到 Metadata
 	for k, v := range vec.Metadata {
 		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {
