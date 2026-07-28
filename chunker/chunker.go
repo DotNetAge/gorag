@@ -95,7 +95,8 @@ func buildChunk(
 		Index:    idx,
 		StartPos: start,
 		EndPos:   end,
-		Source:   doc.FileName(),
+		FileName: strings.ToLower(filepath.Base(doc.FileName())),
+		Dir:      strings.ToLower(filepath.Dir(doc.FileName())),
 	}
 }
 
@@ -110,7 +111,7 @@ func enrichChunksMetadata(chunks []core.Chunk, fullContent, fileName string) []c
 	directory := ""
 	regionID := ""
 	if fileName != "" {
-		directory = filepath.Dir(fileName)
+		directory = strings.ToLower(filepath.Dir(fileName))
 		regionID = utils.GenerateID([]byte(directory))
 	}
 	for i := range chunks {

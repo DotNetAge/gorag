@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/DotNetAge/gorag/v2/core"
@@ -127,7 +128,7 @@ func (f *TerminalFormatter) formatChunk(idx int, ch core.ChunkHit) string {
 
 	// 来源文件和行号
 	sb.WriteString(f.config.MetaColor)
-	fmt.Fprintf(&sb, "[%s]", ch.Source)
+	fmt.Fprintf(&sb, "[%s]", filepath.Join(ch.Dir, ch.FileName))
 	if ch.StartLine > 0 || ch.EndLine > 0 {
 		fmt.Fprintf(&sb, " [L%d-L%d]", ch.StartLine, ch.EndLine)
 	}

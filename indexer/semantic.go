@@ -266,7 +266,8 @@ var vecMetaKeys = map[string]bool{
 	core.VecMetaSummary:   true,
 	core.VecMetaDocID:     true,
 	core.VecMetaParentID:  true,
-	core.VecMetaSource:    true,
+	core.VecMetaDir:       true,
+	core.VecMetaFileName:  true,
 	core.VecMetaRegionID:  true,
 	core.VecMetaLanguage:  true,
 	core.VecMetaTags:      true,
@@ -301,7 +302,8 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 		core.VecMetaContent:  chunk.Content,
 		core.VecMetaDocID:    chunk.DocID,
 		core.VecMetaParentID: chunk.ParentID,
-		core.VecMetaSource:   chunk.Source,
+		core.VecMetaDir:      chunk.Dir,
+		core.VecMetaFileName: chunk.FileName,
 		core.VecMetaRegionID: chunk.RegionID,
 	}
 	if chunk.Title != "" {
@@ -552,8 +554,11 @@ func vectorToChunk(vec *core.Vector) *core.Chunk {
 	if v, ok := vec.Metadata[core.VecMetaParentID].(string); ok {
 		chunk.ParentID = v
 	}
-	if v, ok := vec.Metadata[core.VecMetaSource].(string); ok {
-		chunk.Source = v
+	if v, ok := vec.Metadata[core.VecMetaDir].(string); ok {
+		chunk.Dir = v
+	}
+	if v, ok := vec.Metadata[core.VecMetaFileName].(string); ok {
+		chunk.FileName = v
 	}
 	if v, ok := vec.Metadata[core.VecMetaRegionID].(string); ok {
 		chunk.RegionID = v
@@ -852,25 +857,17 @@ func (s *semanticIndexer) GetChunks(ctx context.Context, docID string) ([]*core.
 
 // Count 实现 IndexerAdmin 接口：返回已索引的 Chunk 总数。
 //
-// 只统计主向量（Content 维度），排除从属维度向量（:title / :summary），
-// 与 List 的 total 语义保持一致。VectorStore.Count 返回的是向量总数（含维度），
-// 会偏高约 3 倍，因此这里改用 List 后过滤的方式得到准确的 Chunk 数。
+// 使用 VectorStore.Count() 获取原始向量总数，这是 col.Count() 的轻量调用（O(1)），
+// 只读取 bbolt bucket 元素计数，不加载向量数据。
+//
+// 注意：VectorStore.Count 返回的是所有向量总数（含 :title / :summary 从属维度），
+// 会比实际 Chunk 数偏高约 2~3 倍。上层调用方（如 Tree）可据此估算。
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
-	all, _, err := s.db.List(ctx, 0, 1<<30, nil)
+	total, err := s.db.Count(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("Count: 查询失败: %w", err)
 	}
-	count := 0
-	for _, vec := range all {
-		if vec == nil {
-			continue
-		}
-		if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
-			continue
-		}
-		count++
-	}
-	return count, nil
+	return total, nil
 }
 
 // Clear 实现 IndexerAdmin 接口：清空索引。

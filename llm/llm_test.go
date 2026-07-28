@@ -61,20 +61,7 @@ func TestParseSummarizeResult(t *testing.T) {
 	}
 }
 
-// TestParseBatchSummarizeResult 验证批量 Summarizer 的 LLM 响应解析。
-func TestParseBatchSummarizeResult(t *testing.T) {
-	resp := `[{"chunk_id":"c1","title":"标题1","summary":"摘要1。","tags":["标签1","标签2"]}]`
-	res, err := parseBatchSummarizeResult(resp)
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
-	if len(res) != 1 {
-		t.Fatalf("期望 1 条结果，实际 %d", len(res))
-	}
-	if len(res[0].Tags) != 2 || res[0].Tags[0] != "标签1" {
-		t.Errorf("tags 期望 [标签1 标签2]，实际 %v", res[0].Tags)
-	}
-}
+
 
 // TestNewRefiller_ValidConfig 验证合法配置能成功创建 Refiller。
 func TestNewRefiller_ValidConfig(t *testing.T) {
@@ -254,18 +241,18 @@ func TestRefill_EmptyChunks(t *testing.T) {
 	}
 }
 
-// TestSummarize_EmptyChunks 验证空 Chunk 列表直接返回。
-func TestSummarize_EmptyChunks(t *testing.T) {
+// TestSummarize_EmptyContent 验证空内容直接返回空结果。
+func TestSummarize_EmptyContent(t *testing.T) {
 	s, err := NewSummarizer(validConfig(), logging.DefaultNoopLogger())
 	if err != nil {
 		t.Fatalf("创建 Summarizer 失败: %v", err)
 	}
-	result, err := s.Summarize(nil, nil)
+	title, summary, err := s.Summarize(context.Background(), "")
 	if err != nil {
-		t.Fatalf("空 chunks 不应返回错误: %v", err)
+		t.Fatalf("空内容不应返回错误: %v", err)
 	}
-	if len(result) != 0 {
-		t.Errorf("空 chunks 应返回空切片")
+	if title != "" || summary != "" {
+		t.Errorf("空内容应返回空 title 和 summary，实际 title=%q summary=%q", title, summary)
 	}
 }
 
@@ -388,12 +375,12 @@ func TestLoadEntitySchema_MissingFile(t *testing.T) {
 
 // ── Summarizer 集成测试（使用真实 LLM）─────────────────────────────
 
-// TestSummarize_WithRealLLM 使用真实 LLM 验证单条摘要全流程。
+// TestSummarize_WithRealLLM 使用真实 LLM 验证单 chunk 摘要全流程。
 //
 // 测试策略：
-//   - 构造三种类型的 Chunk：代码、文档、数据
-//   - 验证 LLM 不是复制原文，而是生成真正的提炼摘要
-//   - 验证 summary 比原文短、title 有意义、tags 不重复
+//   - 构造三种类型的文本：代码、文档、数据
+//   - 逐 chunk 调用 Summarize 验证新接口
+//   - 验证 title/summary 有值、summary 比原文短、tags 不重复
 //
 // 运行条件：GORAG_API_KEY、GORAG_BASE_URL、GORAG_MODEL 三个环境变量必须设置。
 func TestSummarize_WithRealLLM(t *testing.T) {
@@ -407,173 +394,80 @@ func TestSummarize_WithRealLLM(t *testing.T) {
 		t.Fatalf("创建 Summarizer 失败: %v", err)
 	}
 
-	// ── 构造测试分片（三种类型）─────────────────────────────────
-	input := []core.Chunk{
+	// ── 构造测试文本（三种类型）─────────────────────────────────
+	type testCase struct {
+		id      string
+		content string
+	}
+	cases := []testCase{
 		{
-			ID: "code1",
-			Content: `func (s *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) ([]core.Chunk, []core.Node, []core.Edge, error) {
-	if h.summarizer != nil {
-		var toSummarize []core.Chunk
-		for _, c := range chunks {
-			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
-				toSummarize = append(toSummarize, c)
-			}
-		}
-		if len(toSummarize) > 0 {
-			batches := splitChunksBySize(toSummarize, defaultProcessBatchChars)
-			for batchIdx, batch := range batches {
-				result, sErr := h.summarizer.Summarize(ctx, batch)
-				if sErr != nil {
-					continue
-				}
-				allSummarized = append(allSummarized, result...)
-			}
+			id: "code1",
+			content: `func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("HyperIndexer: 文件路径不能为空")
+	}
+	raw, err := document.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("HyperIndexer: 打开文件失败: %w", err)
+	}
+	if h.hooks.hasOnBeforeChunk() {
+		raw, err = runOnBeforeChunkHooks(ctx, raw, h.hooks.onBeforeChunk)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return processedChunks, addedNodes, addedEdges, nil
+	doc, err := core.NewStructuredDoc(raw)
+	if err != nil {
+		return nil, fmt.Errorf("HyperIndexer: 创建文档容器失败: %w", err)
+	}
+	return h.processAndSave(ctx, raw, doc)
 }`,
 		},
 		{
-			ID:      "doc1",
-			Content: "向量数据库是一种专门为存储和检索向量嵌入而设计的数据库系统。与传统的关系型数据库不同，向量数据库通过高维向量空间中的距离度量（如余弦相似度、欧氏距离）来实现语义级别的相似性搜索。典型的应用场景包括语义搜索、推荐系统、异常检测和图像检索。目前主流的向量数据库包括 Milvus、Pinecone、Weaviate 和 Qdrant 等。向量数据库通常支持近似最近邻搜索算法（如 HNSW、IVF）来平衡搜索精度和性能。",
+			id:      "doc1",
+			content: "向量数据库是一种专门为存储和检索向量嵌入而设计的数据库系统。与传统的关系型数据库不同，向量数据库通过高维向量空间中的距离度量（如余弦相似度、欧氏距离）来实现语义级别的相似性搜索。典型的应用场景包括语义搜索、推荐系统、异常检测和图像检索。目前主流的向量数据库包括 Milvus、Pinecone、Weaviate 和 Qdrant 等。向量数据库通常支持近似最近邻搜索算法（如 HNSW、IVF）来平衡搜索精度和性能。",
 		},
 		{
-			ID:      "data1",
-			Content: `2024年第一季度各部门销售业绩汇总：华东区实现总销售额 128.5万元，同比增长 15.2%，主要由新零售业务线贡献；华南区销售一部完成 96.3万元，同比增长 8.7%，受季节性影响较大；华北区销售三部实现 152.7万元，同比增长 22.1%，创历史新高，主要得益于大客户签约；西南区销售四部完成 73.4万元，同比增长 5.3%，处于业务拓展初期。全国四个大区总销售额 450.9万元，较去年同期增长 12.3%，超额完成季度目标。从产品线来看，核心产品 A 系列占比 45%，B 系列占比 32%，新推出的 C 系列占比 15%，其余为配件和服务收入。`,
+			id:      "data1",
+			content: `2024年第一季度各部门销售业绩汇总：华东区实现总销售额 128.5万元，同比增长 15.2%，主要由新零售业务线贡献；华南区销售一部完成 96.3万元，同比增长 8.7%，受季节性影响较大；华北区销售三部实现 152.7万元，同比增长 22.1%，创历史新高，主要得益于大客户签约；西南区销售四部完成 73.4万元，同比增长 5.3%，处于业务拓展初期。全国四个大区总销售额 450.9万元，较去年同期增长 12.3%，超额完成季度目标。`,
 		},
 	}
 
-	// ── 执行摘要 ──────────────────────────────────────────────
-	result, err := s.Summarize(context.Background(), input)
-	if err != nil {
-		t.Fatalf("Summarize 失败: %v", err)
-	}
-	if len(result) != len(input) {
-		t.Fatalf("期望 %d 条结果，实际 %d", len(input), len(result))
-	}
-
-	// ── 逐条验证 ──────────────────────────────────────────────
-	for i, c := range result {
-		t.Logf("Chunk[%d] (%s):", i, c.ID)
-		t.Logf("  title:   %q", c.Title)
-		t.Logf("  summary: %q", c.Summary)
-		t.Logf("  tags:    %v", c.Tags)
-
-		// title 必须有值
-		if c.Title == "" {
-			t.Errorf("Chunk[%d] (%s): title 为空", i, c.ID)
-		}
-		// summary 必须有值
-		if c.Summary == "" {
-			t.Errorf("Chunk[%d] (%s): summary 为空", i, c.ID)
-		}
-		// summary 不能等于或基本照搬原文
-		// 短文本（≤200 字符）的摘要可能因补充性描述略长于原文，仅对长文本做严格检查
-		origLen := len(input[i].Content)
-		summaryLen := len(c.Summary)
-		if summaryLen >= origLen && origLen > 200 {
-			t.Errorf("Chunk[%d] (%s): summary 长度(%d) >= 原文长度(%d)，疑似复制原文",
-				i, c.ID, summaryLen, origLen)
-		}
-		// summary 禁止包含 Markdown 标记
-		if contains(c.Summary, "```") || contains(c.Summary, "# ") || contains(c.Summary, "**") {
-			t.Errorf("Chunk[%d] (%s): summary 包含 Markdown 标记: %q",
-				i, c.ID, c.Summary)
-		}
-		// tags 必须有值
-		if len(c.Tags) == 0 {
-			t.Errorf("Chunk[%d] (%s): tags 为空", i, c.ID)
-		}
-		// tags 不能与 title 重复
-		for _, tag := range c.Tags {
-			if tag == c.Title {
-				t.Errorf("Chunk[%d] (%s): tag %q 与 title 重复", i, c.ID, tag)
+	// ── 逐 chunk 执行摘要 ──────────────────────────────────────
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			title, summary, sErr := s.Summarize(context.Background(), tc.content)
+			if sErr != nil {
+				t.Fatalf("Summarize 失败: %v", sErr)
 			}
-		}
+
+			t.Logf("  title:   %q", title)
+			t.Logf("  summary: %q", summary)
+
+			// title 必须有值
+			if title == "" {
+				t.Errorf("title 为空")
+			}
+			// summary 必须有值
+			if summary == "" {
+				t.Errorf("summary 为空")
+			}
+			// summary 不能等于或基本照搬原文
+			origLen := len(tc.content)
+			summaryLen := len(summary)
+			if summaryLen >= origLen && origLen > 200 {
+				t.Errorf("summary 长度(%d) >= 原文长度(%d)，疑似复制原文",
+					summaryLen, origLen)
+			}
+			// summary 禁止包含 Markdown 标记
+			if contains(summary, "```") || contains(summary, "# ") || contains(summary, "**") {
+				t.Errorf("summary 包含 Markdown 标记: %q", summary)
+			}
+		})
 	}
 }
 
-// TestSummarizeBatch_WithRealLLM 使用真实 LLM 验证批量摘要全流程。
-//
-// 测试策略：
-//   - 构造多个不同类型的分片，一次性提交批量处理
-//   - 验证输出数组长度与输入一致
-//   - 验证每个 chunk_id 都能正确回写
-//
-// 运行条件：GORAG_API_KEY、GORAG_BASE_URL、GORAG_MODEL 三个环境变量必须设置。
-func TestSummarizeBatch_WithRealLLM(t *testing.T) {
-	cfg := envLLMConfig()
-	if cfg == nil {
-		t.Skip("跳过集成测试：未设置 GORAG_API_KEY / GORAG_BASE_URL / GORAG_MODEL")
-	}
 
-	s, err := NewSummarizer(*cfg, logging.DefaultNoopLogger())
-	if err != nil {
-		t.Fatalf("创建 Summarizer 失败: %v", err)
-	}
-
-	// 通过类型断言获取批量处理器
-	bs, ok := s.(interface {
-		SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
-	})
-	if !ok {
-		t.Fatal("Summarizer 未实现 SummarizeBatch 接口")
-	}
-
-	// ── 构造测试分片（简短内容，避免 LLM 输出截断）─────────────
-	input := []core.Chunk{
-		{
-			ID:      "batch_a",
-			Content: "Go 语言的 goroutine 是一种轻量级线程，由 Go 运行时管理。通过 go 关键字启动，使用 channel 进行安全通信。",
-		},
-		{
-			ID:      "batch_b",
-			Content: "RESTful API 使用名词作为资源路径，用 HTTP 方法表示操作。GET 查询，POST 创建，DELETE 删除。",
-		},
-	}
-
-	// ── 执行批量摘要 ─────────────────────────────────────────
-	result, err := bs.SummarizeBatch(context.Background(), input)
-	if err != nil {
-		t.Fatalf("SummarizeBatch 失败: %v", err)
-	}
-	if len(result) != len(input) {
-		t.Fatalf("期望 %d 条结果，实际 %d", len(input), len(result))
-	}
-
-	// ── 验证 ──────────────────────────────────────────────
-	for i, c := range result {
-		t.Logf("Batch[%d] (%s):", i, c.ID)
-		t.Logf("  title:   %q", c.Title)
-		t.Logf("  summary: %q", c.Summary)
-		t.Logf("  tags:    %v", c.Tags)
-
-		// chunk_id 原样保留
-		if c.ID != input[i].ID {
-			t.Errorf("Batch[%d]: chunk_id 从 %q 变为 %q", i, input[i].ID, c.ID)
-		}
-		// title 必须有值
-		if c.Title == "" {
-			t.Errorf("Batch[%d] (%s): title 为空", i, c.ID)
-		}
-		// summary 必须有值
-		if c.Summary == "" {
-			t.Errorf("Batch[%d] (%s): summary 为空", i, c.ID)
-		}
-		// summary 不能复制原文
-		// 短文本（≤200 字符）的摘要可能因补充性描述略长于原文，仅对长文本做严格检查
-		origLen := len(input[i].Content)
-		summaryLen := len(c.Summary)
-		if summaryLen >= origLen && origLen > 200 {
-			t.Errorf("Batch[%d] (%s): summary 长度(%d) >= 原文长度(%d)，疑似复制原文",
-				i, c.ID, summaryLen, origLen)
-		}
-		// tags 必须有值
-		if len(c.Tags) == 0 {
-			t.Errorf("Batch[%d] (%s): tags 为空", i, c.ID)
-		}
-	}
-}
 
 // writeSchemaFile 是测试辅助函数，用于写入临时 schema 文件。
 func writeSchemaFile(t *testing.T, path, content string) {

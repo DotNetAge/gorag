@@ -401,6 +401,7 @@ func TopChunkScore(hits []core.ChunkHit) float32 {
 }
 
 // FilterHitBySourcePrefix 按 source 路径前缀过滤命中结果。
+// 使用 Dir + FileName 重构完整路径后匹配。
 func FilterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
 	if hit == nil {
 		return nil
@@ -409,9 +410,11 @@ func FilterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
 	if err != nil {
 		absFilter = filterPath
 	}
+	absFilter = strings.ToLower(absFilter)
 	var filtered []core.ChunkHit
 	for _, ch := range hit.Chunks {
-		if SourceHasPrefix(ch.Chunk.Source, absFilter) {
+		fullPath := filepath.Join(ch.Chunk.Dir, ch.Chunk.FileName)
+		if SourceHasPrefix(fullPath, absFilter) {
 			filtered = append(filtered, ch)
 		}
 	}

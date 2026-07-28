@@ -292,7 +292,7 @@ func Open(ragDir string, opts ...RAGOption) (indexer.Indexer, error) {
 //   - 未显式配置 type 时：有 LLM 默认 hyper，无 LLM 默认 semantic
 func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 	// 创建 embedder
-	clip, err := embedder.NewChineseClipEmbedder(embedder.WithModelFile(cfg.Embedding.ModelFile))
+	clip, err := embedder.GetOrCreateChineseClipEmbedder(embedder.WithModelFile(cfg.Embedding.ModelFile))
 	if err != nil {
 		return nil, fmt.Errorf("创建 embedder 失败: %w", err)
 	}

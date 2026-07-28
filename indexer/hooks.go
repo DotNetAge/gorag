@@ -12,32 +12,49 @@ import (
 // 事件 Hook 接口定义
 // =====================================================================
 //
-// 所有 Hook 按"修改型 / 通知型"分类：
-//   - 修改型 Hook 返回 error 时阻塞管线，调用方需处理
-//   - 通知型 Hook 返回 error 时仅记录日志，不阻塞管线
+// 所有 Hook 按触发时机命名，分为修改型（返回 error 阻塞管线）
+// 和通知型（仅记录日志，不阻塞管线）。
 
-// OnFileOpenedHook 修改型 Hook。
-// 在 document.Open 之后、Chunker 之前触发，可修改 RawDoc。
-type OnFileOpenedHook interface {
-	OnFileOpened(ctx context.Context, doc document.RawDoc) (document.RawDoc, error)
+// OnBeforeChunkHook 修改型 Hook。
+// 在 document.Open 之后、Chunker.Chunk 之前触发，可修改 RawDoc。
+// 应用场景：文件类型白名单、前置过滤。
+type OnBeforeChunkHook interface {
+	OnBeforeChunk(ctx context.Context, raw document.RawDoc) (document.RawDoc, error)
 }
 
-// OnChunkHook 修改型 Hook。
-// 在 Chunker 产出每个 Chunk 后触发，可修改 *core.Chunk。
-type OnChunkHook interface {
-	OnChunk(ctx context.Context, chunk *core.Chunk) (*core.Chunk, error)
+// OnChunkedHook 修改型 Hook。
+// 在 Chunker 完成分片后、Summarizer 之前触发，可修改 StructuredDoc。
+// 应用场景：补充标签、审计分片结果。
+type OnChunkedHook interface {
+	OnChunked(ctx context.Context, doc core.StructuredDoc) (core.StructuredDoc, error)
 }
 
-// OnBeforeSemanticSaveHook 修改型 Hook。
-// 在 Summarizer 之后、semantic.Save 之前触发，可修改 StructuredDoc 的 Chunks。
-type OnBeforeSemanticSaveHook interface {
-	OnBeforeSemanticSave(ctx context.Context, doc core.StructuredDoc) (core.StructuredDoc, error)
+// OnSummarizedHook 通知型 Hook。
+// 在每个 chunk 完成 LLM 摘要后触发，不阻塞管线。
+// 应用场景：逐 chunk 进度通知。
+type OnSummarizedHook interface {
+	OnSummarized(ctx context.Context, chunk *core.Chunk) error
 }
 
-// OnIndexCompleteHook 通知型 Hook。
-// 在 AddFile 所有步骤完成后触发，仅通知，不阻塞返回。
-type OnIndexCompleteHook interface {
-	OnIndexComplete(ctx context.Context, result []*core.Chunk) error
+// OnChunkedSavedHook 修改型 Hook。
+// 在 semantic.Save（向量化+存储）完成后、Refiller 之前触发。
+// 应用场景：外部 API 增强、补充元数据。
+type OnChunkedSavedHook interface {
+	OnChunkedSaved(ctx context.Context, chunks []core.Chunk) error
+}
+
+// OnExtractedHook 通知型 Hook。
+// 在 Refiller 完成实体提取后、graph.Save 之前触发，不阻塞管线。
+// 应用场景：审计实体提取结果。
+type OnExtractedHook interface {
+	OnExtracted(ctx context.Context, chunks []core.Chunk, nodes []core.Node, edges []core.Edge) error
+}
+
+// OnNodesSavedHook 通知型 Hook。
+// 在 graph.Save（图存储）完成后触发，不阻塞管线。
+// 应用场景：图数据通知、审计日志。
+type OnNodesSavedHook interface {
+	OnNodesSaved(ctx context.Context, nodes []core.Node) error
 }
 
 // ---------------------------------------------------------------------------
@@ -46,78 +63,81 @@ type OnIndexCompleteHook interface {
 
 // hooks 聚合 HyperIndexer 的所有 Hook 切片。
 type hooks struct {
-	onFileOpened        []OnFileOpenedHook
-	onChunk             []OnChunkHook
-	onBeforeSemantic    []OnBeforeSemanticSaveHook
-	onIndexComplete     []OnIndexCompleteHook
+	onBeforeChunk  []OnBeforeChunkHook
+	onChunked      []OnChunkedHook
+	onSummarized   []OnSummarizedHook
+	onChunkedSaved []OnChunkedSavedHook
+	onExtracted    []OnExtractedHook
+	onNodesSaved   []OnNodesSavedHook
 }
 
 // register 按接口类型将 hook 归入对应切片。
-// 不认识的类型静默忽略，方便未来扩展。
 func (h *hooks) register(hook any) {
 	switch v := hook.(type) {
-	case OnFileOpenedHook:
-		h.onFileOpened = append(h.onFileOpened, v)
-	case OnChunkHook:
-		h.onChunk = append(h.onChunk, v)
-	case OnBeforeSemanticSaveHook:
-		h.onBeforeSemantic = append(h.onBeforeSemantic, v)
-	case OnIndexCompleteHook:
-		h.onIndexComplete = append(h.onIndexComplete, v)
+	case OnBeforeChunkHook:
+		h.onBeforeChunk = append(h.onBeforeChunk, v)
+	case OnChunkedHook:
+		h.onChunked = append(h.onChunked, v)
+	case OnSummarizedHook:
+		h.onSummarized = append(h.onSummarized, v)
+	case OnChunkedSavedHook:
+		h.onChunkedSaved = append(h.onChunkedSaved, v)
+	case OnExtractedHook:
+		h.onExtracted = append(h.onExtracted, v)
+	case OnNodesSavedHook:
+		h.onNodesSaved = append(h.onNodesSaved, v)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Hook 执行辅助方法
+// Hook 执行辅助方法（新版）
 // ---------------------------------------------------------------------------
 
-// runOnFileOpenedHooks 依次执行所有 OnFileOpenedHook。
-// 任一失败则阻塞并返回 error。
-func runOnFileOpenedHooks(ctx context.Context, doc document.RawDoc, hs []OnFileOpenedHook) (document.RawDoc, error) {
+func runOnBeforeChunkHooks(ctx context.Context, raw document.RawDoc, hs []OnBeforeChunkHook) (document.RawDoc, error) {
 	var err error
 	for _, h := range hs {
-		doc, err = h.OnFileOpened(ctx, doc)
+		raw, err = h.OnBeforeChunk(ctx, raw)
 		if err != nil {
-			return doc, fmt.Errorf("Hook OnFileOpened 失败: %w", err)
+			return raw, fmt.Errorf("Hook OnBeforeChunk 失败: %w", err)
+		}
+	}
+	return raw, nil
+}
+
+func runOnChunkedHooks(ctx context.Context, doc core.StructuredDoc, hs []OnChunkedHook) (core.StructuredDoc, error) {
+	var err error
+	for _, h := range hs {
+		doc, err = h.OnChunked(ctx, doc)
+		if err != nil {
+			return doc, fmt.Errorf("Hook OnChunked 失败: %w", err)
 		}
 	}
 	return doc, nil
 }
 
-// runOnChunkHooks 依次执行所有 OnChunkHook。
-// 任一失败则阻塞并返回 error。
-func runOnChunkHooks(ctx context.Context, chunk *core.Chunk, hs []OnChunkHook) (*core.Chunk, error) {
-	var err error
+func runOnSummarizedHooks(ctx context.Context, chunk *core.Chunk, hs []OnSummarizedHook) {
 	for _, h := range hs {
-		chunk, err = h.OnChunk(ctx, chunk)
-		if err != nil {
-			return chunk, fmt.Errorf("Hook OnChunk 失败: %w", err)
-		}
+		_ = h.OnSummarized(ctx, chunk)
 	}
-	return chunk, nil
 }
 
-// runOnBeforeSemanticSaveHooks 依次执行所有 OnBeforeSemanticSaveHook。
-// 任一失败则阻塞并返回 error。
-func runOnBeforeSemanticSaveHooks(ctx context.Context, doc core.StructuredDoc, hs []OnBeforeSemanticSaveHook) (core.StructuredDoc, error) {
-	var err error
+func runOnChunkedSavedHooks(ctx context.Context, chunks []core.Chunk, hs []OnChunkedSavedHook) error {
 	for _, h := range hs {
-		doc, err = h.OnBeforeSemanticSave(ctx, doc)
-		if err != nil {
-			return doc, fmt.Errorf("Hook OnBeforeSemanticSave 失败: %w", err)
+		if err := h.OnChunkedSaved(ctx, chunks); err != nil {
+			return fmt.Errorf("Hook OnChunkedSaved 失败: %w", err)
 		}
 	}
-	return doc, nil
+	return nil
 }
 
-// runOnIndexCompleteHooks 依次执行所有 OnIndexCompleteHook。
-// 任一失败仅记录日志，不阻塞（通知型 Hook）。
-func runOnIndexCompleteHooks(ctx context.Context, result []*core.Chunk, hs []OnIndexCompleteHook, logger interface{ Warn(msg string, keysAndValues ...any) }) {
+func runOnExtractedHooks(ctx context.Context, chunks []core.Chunk, nodes []core.Node, edges []core.Edge, hs []OnExtractedHook) {
 	for _, h := range hs {
-		if err := h.OnIndexComplete(ctx, result); err != nil {
-			if logger != nil {
-				logger.Warn("Hook OnIndexComplete 失败（不阻塞）", "error", err)
-			}
-		}
+		_ = h.OnExtracted(ctx, chunks, nodes, edges)
+	}
+}
+
+func runOnNodesSavedHooks(ctx context.Context, nodes []core.Node, hs []OnNodesSavedHook) {
+	for _, h := range hs {
+		_ = h.OnNodesSaved(ctx, nodes)
 	}
 }

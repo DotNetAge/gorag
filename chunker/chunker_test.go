@@ -649,7 +649,8 @@ class Bird implements Flyable {
 	}
 }
 
-// TestMarkdownChunker_SummaryFilled 验证 Markdown 分块统一填充 Summary。
+// TestMarkdownChunker_SummaryFilled 验证 Markdown 分块正常产出 Chunk。
+// 注意：Summary 填充由 HyperIndexer 的 Summarizer 负责，不在 Chunker 层验证。
 func TestMarkdownChunker_SummaryFilled(t *testing.T) {
 	content := `# 标题一
 
@@ -672,11 +673,7 @@ func TestMarkdownChunker_SummaryFilled(t *testing.T) {
 	if len(result.Chunks) == 0 {
 		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
-	for _, c := range result.Chunks {
-		if c.Summary == "" {
-			t.Errorf("chunk %q 的 Summary 不应为空", c.Title)
-		}
-	}
+	// Summary 由 HyperIndexer.AddFile 中的 Summarizer 填充，此处仅验证 Chunk 存在
 }
 
 // TestCodeChunker_SummaryFallback 验证无注释时代码符号 fallback 到内容摘要。
@@ -760,7 +757,7 @@ func TestChunkMetadata_Directory(t *testing.T) {
 		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
 
-	expectedDir := filepath.Dir(path)
+	expectedDir := strings.ToLower(filepath.Dir(path))
 	for _, c := range result.Chunks {
 		if c.Metadata[core.MetaDirectory] != expectedDir {
 			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata[core.MetaDirectory])
@@ -790,7 +787,7 @@ func TestChunkRegionID(t *testing.T) {
 		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
 
-	expectedRegionID := utils.GenerateID([]byte(filepath.Dir(path)))
+	expectedRegionID := utils.GenerateID([]byte(strings.ToLower(filepath.Dir(path))))
 	for _, c := range result.Chunks {
 		if c.RegionID != expectedRegionID {
 			t.Errorf("chunk %q RegionID 期望 %q，实际 %q", c.Title, expectedRegionID, c.RegionID)

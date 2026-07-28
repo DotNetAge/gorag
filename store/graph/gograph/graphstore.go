@@ -180,8 +180,24 @@ func convertEdge(rel graph.Relationship) *core.Edge {
 
 // gographStore is an implementation of core.GraphStore using gograph.
 type gographStore struct {
-	db *api.DB
-	gs *api.GraphStore
+	dbPath string          // open-close 模式
+	db     *api.DB         // WrapGraphStore 模式（非空时优先使用）
+	gs     *api.GraphStore // WrapGraphStore 模式（非空时优先使用）
+}
+
+// withStore 统一管理数据库连接生命周期。
+// WrapGraphStore 模式（s.db != nil）时直接使用已有连接，否则打开新连接。
+func (s *gographStore) withStore(fn func(db *api.DB, gs *api.GraphStore) error) error {
+	if s.db != nil {
+		return fn(s.db, s.gs)
+	}
+	db, err := api.Open(s.dbPath)
+	if err != nil {
+		return fmt.Errorf("gograph: 打开数据库失败: %w", err)
+	}
+	defer db.Close()
+	gs := api.NewGraphStore(db)
+	return fn(db, gs)
 }
 
 // Options contains configuration options for the gograph store.
@@ -216,15 +232,13 @@ func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 
 // NewGraphStore creates a new gograph store with the specified path.
 func NewGraphStore(path string) (core.GraphStore, error) {
-	db, err := api.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open gograph database: %w", err)
+	if path == "" {
+		return nil, fmt.Errorf("gograph.NewGraphStore: 数据库路径不能为空")
 	}
-	gs := api.NewGraphStore(db)
-	return &gographStore{
-		db: db,
-		gs: gs,
-	}, nil
+	s := &gographStore{dbPath: path}
+	return s, s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		return nil
+	})
 }
 
 // WrapGraphStore 将已存在的 gograph 数据库包装为 core.GraphStore 接口。
@@ -245,7 +259,6 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 
 	nodeDataList := make([]*api.NodeData, 0, len(nodes))
 	for _, node := range nodes {
-		// Labels 直接映射到 gograph.Node.Labels，使用原生标签匹配（MATCH (n:Person)）。
 		props := make(map[string]interface{}, len(node.Properties)+5)
 		props["ID"] = node.ID
 		props["name"] = node.Name
@@ -271,7 +284,9 @@ func (s *gographStore) UpsertNodes(ctx context.Context, nodes []*core.Node) erro
 		})
 	}
 
-	return s.gs.UpsertNodes(nodeDataList)
+	return s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		return gs.UpsertNodes(nodeDataList)
+	})
 }
 
 // UpsertEdges inserts or updates edges in the graph store.
@@ -303,148 +318,174 @@ func (s *gographStore) UpsertEdges(ctx context.Context, edges []*core.Edge) erro
 		})
 	}
 
-	return s.gs.UpsertEdges(edgeDataList)
+	return s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		return gs.UpsertEdges(edgeDataList)
+	})
 }
 
 // GetNode retrieves a node by ID.
 func (s *gographStore) GetNode(ctx context.Context, id string) (*core.Node, error) {
-	node, err := s.gs.GetNode(id)
-	if err != nil {
-		if err == api.ErrNodeNotFound {
-			return nil, nil
+	var node *core.Node
+	err := s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		n, err := gs.GetNode(id)
+		if err != nil {
+			if err == api.ErrNodeNotFound {
+				return nil
+			}
+			return fmt.Errorf("failed to get node: %w", err)
 		}
-		return nil, fmt.Errorf("failed to get node: %w", err)
-	}
-	return convertNode(node), nil
+		node = convertNode(n)
+		return nil
+	})
+	return node, err
 }
 
 // GetNeighbors retrieves the neighbors of a node.
 func (s *gographStore) GetNeighbors(ctx context.Context, nodeID string, depth int, limit int) ([]*core.Node, []*core.Edge, error) {
-	results, err := s.gs.GetNeighbors(nodeID, depth, limit)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get neighbors: %w", err)
-	}
-
-	nodeMap := make(map[string]*core.Node)
-	edgeMap := make(map[string]*core.Edge)
-
-	for _, result := range results {
-		if result.Node != nil {
-			node := convertNode(result.Node)
-			nodeMap[node.ID] = node
+	var nodes []*core.Node
+	var edges []*core.Edge
+	err := s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		results, err := gs.GetNeighbors(nodeID, depth, limit)
+		if err != nil {
+			return fmt.Errorf("failed to get neighbors: %w", err)
 		}
-		if result.Edge != nil {
-			edge := convertEdge(*result.Edge)
-			edgeMap[edge.ID] = edge
+
+		nodeMap := make(map[string]*core.Node)
+		edgeMap := make(map[string]*core.Edge)
+
+		for _, result := range results {
+			if result.Node != nil {
+				node := convertNode(result.Node)
+				nodeMap[node.ID] = node
+			}
+			if result.Edge != nil {
+				edge := convertEdge(*result.Edge)
+				edgeMap[edge.ID] = edge
+			}
 		}
-	}
 
-	nodes := make([]*core.Node, 0, len(nodeMap))
-	for _, n := range nodeMap {
-		nodes = append(nodes, n)
-	}
-	edges := make([]*core.Edge, 0, len(edgeMap))
-	for _, e := range edgeMap {
-		edges = append(edges, e)
-	}
+		nodes = make([]*core.Node, 0, len(nodeMap))
+		for _, n := range nodeMap {
+			nodes = append(nodes, n)
+		}
+		edges = make([]*core.Edge, 0, len(edgeMap))
+		for _, e := range edgeMap {
+			edges = append(edges, e)
+		}
 
-	return nodes, edges, nil
+		return nil
+	})
+	return nodes, edges, err
 }
 
 // Query executes a query on the graph store.
 func (s *gographStore) Query(ctx context.Context, query string, params map[string]any) ([]map[string]any, error) {
-	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query query=%q params=%+v\n", query, params)
-	rows, err := s.db.Query(ctx, query, params)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query ERROR: %v\n", err)
-		return nil, fmt.Errorf("failed to execute query: %w", err)
-	}
-	defer rows.Close()
-
 	var results []map[string]any
-	columns := rows.Columns()
-	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query columns=%v\n", columns)
-
-	for rows.Next() {
-		row := make(map[string]any)
-		for _, col := range columns {
-			row[col] = nil
+	err := s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query query=%q params=%+v\n", query, params)
+		rows, err := db.Query(ctx, query, params)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query ERROR: %v\n", err)
+			return fmt.Errorf("failed to execute query: %w", err)
 		}
+		defer rows.Close()
 
-		vals := make([]interface{}, len(columns))
-		for i := range vals {
-			var v interface{}
-			vals[i] = &v
-		}
+		columns := rows.Columns()
+		fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query columns=%v\n", columns)
 
-		if err := rows.Scan(vals...); err != nil {
-			fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query scan ERROR: %v\n", err)
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
+		for rows.Next() {
+			row := make(map[string]any)
+			for _, col := range columns {
+				row[col] = nil
+			}
 
-		for i, col := range columns {
-			if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
-				fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query col=%s val_type=%T val=%+v\n", col, *vp, *vp)
-				switch val := (*vp).(type) {
-				case *graph.Node:
-					if val != nil {
-						row[col] = map[string]any{
-							"id":         val.ID,
-							"labels":     val.Labels,
-							"properties": propsToAny(val.Properties),
+			vals := make([]interface{}, len(columns))
+			for i := range vals {
+				var v interface{}
+				vals[i] = &v
+			}
+
+			if err := rows.Scan(vals...); err != nil {
+				fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query scan ERROR: %v\n", err)
+				return fmt.Errorf("failed to scan row: %w", err)
+			}
+
+			for i, col := range columns {
+				if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
+					fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query col=%s val_type=%T val=%+v\n", col, *vp, *vp)
+					switch val := (*vp).(type) {
+					case *graph.Node:
+						if val != nil {
+							row[col] = map[string]any{
+								"id":         val.ID,
+								"labels":     val.Labels,
+								"properties": propsToAny(val.Properties),
+							}
 						}
+					case graph.Relationship:
+						row[col] = map[string]any{
+							"id":          val.ID,
+							"type":        val.Type,
+							"startNodeID": val.StartNodeID,
+							"endNodeID":   val.EndNodeID,
+							"properties":  propsToAny(val.Properties),
+						}
+					default:
+						row[col] = val
 					}
-				case graph.Relationship:
-					row[col] = map[string]any{
-						"id":          val.ID,
-						"type":        val.Type,
-						"startNodeID": val.StartNodeID,
-						"endNodeID":   val.EndNodeID,
-						"properties":  propsToAny(val.Properties),
-					}
-				default:
-					row[col] = val
 				}
 			}
+
+			results = append(results, row)
 		}
 
-		results = append(results, row)
-	}
-
-	fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query results count=%d\n", len(results))
-	return results, nil
+		fmt.Fprintf(os.Stderr, "[DEBUG] gographStore.Query results count=%d\n", len(results))
+		return nil
+	})
+	return results, err
 }
 
 // DeleteNode deletes a node and its edges.
 func (s *gographStore) DeleteNode(ctx context.Context, id string) error {
-	_, err := s.db.Exec(ctx, "MATCH (n {ID: $id}) DETACH DELETE n", map[string]any{"id": id})
-	if err != nil {
-		return fmt.Errorf("delete node %s: %w", id, err)
-	}
-	return nil
+	return s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		_, err := db.Exec(ctx, "MATCH (n {ID: $id}) DETACH DELETE n", map[string]any{"id": id})
+		if err != nil {
+			return fmt.Errorf("delete node %s: %w", id, err)
+		}
+		return nil
+	})
 }
 
 // DeleteEdge deletes an edge by ID.
 func (s *gographStore) DeleteEdge(ctx context.Context, id string) error {
-	_, err := s.db.Exec(ctx, "MATCH ()-[r {ID: $id}]-() DELETE r", map[string]any{"id": id})
-	if err != nil {
-		return fmt.Errorf("delete edge %s: %w", id, err)
-	}
-	return nil
+	return s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		_, err := db.Exec(ctx, "MATCH ()-[r {ID: $id}]-() DELETE r", map[string]any{"id": id})
+		if err != nil {
+			return fmt.Errorf("delete edge %s: %w", id, err)
+		}
+		return nil
+	})
 }
 
 // Clear removes all nodes and edges from the graph store.
 func (s *gographStore) Clear(ctx context.Context) error {
-	_, err := s.db.Exec(ctx, "MATCH (n) DETACH DELETE n", nil)
-	if err != nil {
-		return fmt.Errorf("clear graph: %w", err)
-	}
-	return nil
+	return s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		_, err := db.Exec(ctx, "MATCH (n) DETACH DELETE n", nil)
+		if err != nil {
+			return fmt.Errorf("clear graph: %w", err)
+		}
+		return nil
+	})
 }
 
 // Close closes the graph store.
+// 在 open-close 模式下（dbPath 模式）无需显式关闭，连接已由 withStore 管理。
+// 在 WrapGraphStore 模式下关闭底层连接。
 func (s *gographStore) Close(ctx context.Context) error {
-	return s.db.Close()
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
 }
 
 // GetByChunkIDs 通过 ChunkID 反查引用该 Chunk 的实体 Node 及其关联 Edge。
@@ -464,46 +505,107 @@ func (s *gographStore) GetByChunkIDs(ctx context.Context, chunkIDs []string) ([]
 	}
 	where := fmt.Sprintf("WHERE %s", strings.Join(whereParts, " OR "))
 
-	// 1. 查询 Nodes
-	nodeResults, err := s.Query(ctx, fmt.Sprintf("MATCH (n) %s RETURN n", where), params)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query nodes by chunk IDs: %w", err)
-	}
-
-	nodes := make([]*core.Node, 0, len(nodeResults))
-	for _, result := range nodeResults {
-		nodeData, ok := result["n"].(map[string]any)
-		if !ok {
-			continue
+	var nodes []*core.Node
+	var edges []*core.Edge
+	err := s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		// 1. 查询 Nodes
+		nodeRows, err := db.Query(ctx, fmt.Sprintf("MATCH (n) %s RETURN n", where), params)
+		if err != nil {
+			return fmt.Errorf("failed to query nodes by chunk IDs: %w", err)
 		}
-		nodes = append(nodes, queryResultToNode(nodeData))
-	}
+		defer nodeRows.Close()
 
-	// 2. 查询 Edges（使用相同的 chunkIDs，但匹配 r.source_chunk_ids）
-	edgeWhereParts := make([]string, len(chunkIDs))
-	edgeParams := make(map[string]any, len(chunkIDs))
-	for i, cid := range chunkIDs {
-		paramName := fmt.Sprintf("cid%d", i)
-		edgeWhereParts[i] = fmt.Sprintf("$%s IN r.source_chunk_ids", paramName)
-		edgeParams[paramName] = cid
-	}
-	edgeWhere := fmt.Sprintf("WHERE %s", strings.Join(edgeWhereParts, " OR "))
-
-	edgeResults, err := s.Query(ctx, fmt.Sprintf("MATCH ()-[r]->() %s RETURN r", edgeWhere), edgeParams)
-	if err != nil {
-		return nodes, nil, fmt.Errorf("failed to query edges by chunk IDs: %w", err)
-	}
-
-	edges := make([]*core.Edge, 0, len(edgeResults))
-	for _, result := range edgeResults {
-		edgeData, ok := result["r"].(map[string]any)
-		if !ok {
-			continue
+		nodeColumns := nodeRows.Columns()
+		for nodeRows.Next() {
+			row := make(map[string]any)
+			for _, col := range nodeColumns {
+				row[col] = nil
+			}
+			vals := make([]interface{}, len(nodeColumns))
+			for i := range vals {
+				var v interface{}
+				vals[i] = &v
+			}
+			if err := nodeRows.Scan(vals...); err != nil {
+				return fmt.Errorf("failed to scan node row: %w", err)
+			}
+			for i, col := range nodeColumns {
+				if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
+					switch val := (*vp).(type) {
+					case *graph.Node:
+						if val != nil {
+							row[col] = map[string]any{
+								"id":         val.ID,
+								"labels":     val.Labels,
+								"properties": propsToAny(val.Properties),
+							}
+						}
+					default:
+						row[col] = val
+					}
+				}
+			}
+			nodeData, ok := row["n"].(map[string]any)
+			if ok {
+				nodes = append(nodes, queryResultToNode(nodeData))
+			}
 		}
-		edges = append(edges, queryResultToEdge(edgeData))
-	}
 
-	return nodes, edges, nil
+		// 2. 查询 Edges（使用相同的 chunkIDs，但匹配 r.source_chunk_ids）
+		edgeWhereParts := make([]string, len(chunkIDs))
+		edgeParams := make(map[string]any, len(chunkIDs))
+		for i, cid := range chunkIDs {
+			paramName := fmt.Sprintf("cid%d", i)
+			edgeWhereParts[i] = fmt.Sprintf("$%s IN r.source_chunk_ids", paramName)
+			edgeParams[paramName] = cid
+		}
+		edgeWhere := fmt.Sprintf("WHERE %s", strings.Join(edgeWhereParts, " OR "))
+
+		edgeRows, err := db.Query(ctx, fmt.Sprintf("MATCH ()-[r]->() %s RETURN r", edgeWhere), edgeParams)
+		if err != nil {
+			return fmt.Errorf("failed to query edges by chunk IDs: %w", err)
+		}
+		defer edgeRows.Close()
+
+		edgeColumns := edgeRows.Columns()
+		for edgeRows.Next() {
+			row := make(map[string]any)
+			for _, col := range edgeColumns {
+				row[col] = nil
+			}
+			vals := make([]interface{}, len(edgeColumns))
+			for i := range vals {
+				var v interface{}
+				vals[i] = &v
+			}
+			if err := edgeRows.Scan(vals...); err != nil {
+				return fmt.Errorf("failed to scan edge row: %w", err)
+			}
+			for i, col := range edgeColumns {
+				if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
+					switch val := (*vp).(type) {
+					case graph.Relationship:
+						row[col] = map[string]any{
+							"id":          val.ID,
+							"type":        val.Type,
+							"startNodeID": val.StartNodeID,
+							"endNodeID":   val.EndNodeID,
+							"properties":  propsToAny(val.Properties),
+						}
+					default:
+						row[col] = val
+					}
+				}
+			}
+			edgeData, ok := row["r"].(map[string]any)
+			if ok {
+				edges = append(edges, queryResultToEdge(edgeData))
+			}
+		}
+
+		return nil
+	})
+	return nodes, edges, err
 }
 
 // GetByLabels 按 Label 查询节点（如查询所有 Label="Region" 的节点）。
@@ -526,22 +628,52 @@ func (s *gographStore) GetByLabels(ctx context.Context, labels []string, limit i
 	}
 	where := fmt.Sprintf("WHERE %s", strings.Join(whereParts, " OR "))
 
-	query := fmt.Sprintf("MATCH (n) %s RETURN n LIMIT %d", where, limit)
-	results, err := s.Query(ctx, query, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query nodes by labels: %w", err)
-	}
-
-	nodes := make([]*core.Node, 0, len(results))
-	for _, result := range results {
-		nodeData, ok := result["n"].(map[string]any)
-		if !ok {
-			continue
+	var nodes []*core.Node
+	err := s.withStore(func(db *api.DB, gs *api.GraphStore) error {
+		query := fmt.Sprintf("MATCH (n) %s RETURN n LIMIT %d", where, limit)
+		rows, err := db.Query(ctx, query, params)
+		if err != nil {
+			return fmt.Errorf("failed to query nodes by labels: %w", err)
 		}
-		nodes = append(nodes, queryResultToNode(nodeData))
-	}
+		defer rows.Close()
 
-	return nodes, nil
+		columns := rows.Columns()
+		for rows.Next() {
+			row := make(map[string]any)
+			for _, col := range columns {
+				row[col] = nil
+			}
+			vals := make([]interface{}, len(columns))
+			for i := range vals {
+				var v interface{}
+				vals[i] = &v
+			}
+			if err := rows.Scan(vals...); err != nil {
+				return fmt.Errorf("failed to scan row: %w", err)
+			}
+			for i, col := range columns {
+				if vp, ok := vals[i].(*interface{}); ok && *vp != nil {
+					switch val := (*vp).(type) {
+					case *graph.Node:
+						if val != nil {
+							row[col] = map[string]any{
+								"id":         val.ID,
+								"labels":     val.Labels,
+								"properties": propsToAny(val.Properties),
+							}
+						}
+					default:
+						row[col] = val
+					}
+				}
+			}
+			nodeData, ok := row["n"].(map[string]any)
+			if ok {
+				nodes = append(nodes, queryResultToNode(nodeData))
+			}
+		}
+
+		return nil
+	})
+	return nodes, err
 }
-
-

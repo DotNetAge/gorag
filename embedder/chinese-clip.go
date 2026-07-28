@@ -14,6 +14,9 @@ import (
 var onnxInitOnce sync.Once
 var onnxInitErr error
 
+// embedderCache 按模型文件路径缓存已加载的向量化器，避免重复加载 ONNX 模型
+var embedderCache sync.Map // map[string]*ChineseClipEmbedder
+
 // initONNX 幂等初始化 ONNX Runtime（全局只执行一次）
 func initONNX() error {
 	onnxInitOnce.Do(func() {
@@ -53,6 +56,37 @@ type ChineseClipEmbedder struct {
 	imageProcessor *ImageProcessor
 	imageSize      int
 	seqLength      int
+}
+
+// GetOrCreateChineseClipEmbedder 返回缓存的向量化器实例。
+// 同一模型文件路径仅加载一次，后续调用直接返回缓存。
+func GetOrCreateChineseClipEmbedder(opts ...ChineseClipOption) (*ChineseClipEmbedder, error) {
+	cfg := &chineseClipConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	modelFile := cfg.modelFile
+	if modelFile == "" {
+		modelFile = getDefaultModelPath()
+	}
+
+	if cached, ok := embedderCache.Load(modelFile); ok {
+		return cached.(*ChineseClipEmbedder), nil
+	}
+
+	emb, err := NewChineseClipEmbedder(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	embedderCache.Store(modelFile, emb)
+	return emb, nil
+}
+
+// getDefaultModelPath 返回默认模型路径
+func getDefaultModelPath() string {
+	return "models/model.onnx"
 }
 
 // NewChineseClipEmbedder 创建 Chinese-CLIP 向量化器

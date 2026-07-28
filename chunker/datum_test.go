@@ -387,7 +387,8 @@ func TestDatumChunker_DuplicateContent_HasUniqueIDs(t *testing.T) {
 	}
 }
 
-// TestDatumChunker_SummaryFilled 验证数据分块统一填充 Summary。
+// TestDatumChunker_SummaryFilled 验证数据分块正常产出 Chunk。
+// 注意：Summary 填充由 HyperIndexer 的 Summarizer 负责，不在 Chunker 层验证。
 func TestDatumChunker_SummaryFilled(t *testing.T) {
 	content := `{
   "users": [{"id": 1, "name": "Alice"}],
@@ -407,14 +408,11 @@ func TestDatumChunker_SummaryFilled(t *testing.T) {
 	if len(result.Chunks) == 0 {
 		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
-	for _, c := range result.Chunks {
-		if c.Summary == "" {
-			t.Errorf("chunk %q 的 Summary 不应为空", c.Title)
-		}
-	}
+	// Summary 由 HyperIndexer.AddFile 中的 Summarizer 填充，此处仅验证 Chunk 存在
 }
 
-// TestDatumChunker_LogSummaryFilled 验证 Log 按行切分后也填充 Summary。
+// TestDatumChunker_LogSummaryFilled 验证 Log 按行切分后正常产出 Chunk。
+// 注意：Summary 填充由 HyperIndexer 的 Summarizer 负责，不在 Chunker 层验证。
 func TestDatumChunker_LogSummaryFilled(t *testing.T) {
 	content := `2024-01-01 10:00:00 INFO 启动服务
 2024-01-01 10:00:05 INFO 加载配置完成`
@@ -429,11 +427,10 @@ func TestDatumChunker_LogSummaryFilled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DatumChunker 返回错误: %v", err)
 	}
-	for _, c := range result.Chunks {
-		if c.Summary == "" {
-			t.Errorf("log chunk %q 的 Summary 不应为空", c.Title)
-		}
+	if len(result.Chunks) == 0 {
+		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
+	// Summary 由 HyperIndexer.AddFile 中的 Summarizer 填充，此处仅验证 Chunk 存在
 }
 
 // TestDatumChunker_DirectoryMetadata 验证数据 Chunk 元数据包含文件所在目录。
@@ -449,7 +446,7 @@ func TestDatumChunker_DirectoryMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DatumChunker 返回错误: %v", err)
 	}
-	expectedDir := filepath.Dir(path)
+	expectedDir := strings.ToLower(filepath.Dir(path))
 	for _, c := range result.Chunks {
 		if c.Metadata[core.MetaDirectory] != expectedDir {
 			t.Errorf("chunk %q directory 期望 %q，实际 %v", c.Title, expectedDir, c.Metadata[core.MetaDirectory])

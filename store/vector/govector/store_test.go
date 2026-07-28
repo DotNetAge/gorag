@@ -30,8 +30,8 @@ func TestGoVectorStore(t *testing.T) {
 
 	// 1. Add vectors
 	vectors := []*core.Vector{
-		core.NewVector([]float32{1.0, 0.0, 0.0}, map[string]any{core.VecMetaSource: "doc1"}),
-		core.NewVector([]float32{0.0, 1.0, 0.0}, map[string]any{core.VecMetaSource: "doc2"}),
+		core.NewVector([]float32{1.0, 0.0, 0.0}, map[string]any{"key": "doc1"}),
+		core.NewVector([]float32{0.0, 1.0, 0.0}, map[string]any{"key": "doc2"}),
 	}
 
 	err = store.Upsert(ctx, vectors)
@@ -50,11 +50,11 @@ func TestGoVectorStore(t *testing.T) {
 	assert.Len(t, results, 1)
 	assert.Equal(t, id1, results[0].ID)
 	assert.Equal(t, chunkID1, results[0].ChunkID)
-	assert.Equal(t, "doc1", results[0].Metadata[core.VecMetaSource])
+	assert.Equal(t, "doc1", results[0].Metadata["key"])
 	assert.Len(t, scores, 1)
 
 	// 3. Search by Metadata (Filter)
-	filter := map[string]any{core.VecMetaSource: "doc2"}
+	filter := map[string]any{"key": "doc2"}
 	// A dummy zero query works as long as there is a filter in a flat scan
 	resultsFilter, _, err := store.Search(ctx, []float32{0, 0, 0}, 1, filter)
 	assert.NoError(t, err)

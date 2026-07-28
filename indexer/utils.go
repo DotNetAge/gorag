@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -198,7 +199,8 @@ func GetChunks(content string, opts ...ChunkOption) ([]*core.Chunk, error) {
 			Title:    extractFirstLine(content),
 			Summary:  "",
 			Content:  content,
-			Source:   "text",
+			FileName: "text",
+			Dir:      ".",
 			Index:    0,
 			StartPos: 0,
 			EndPos:   len(content),
@@ -263,7 +265,8 @@ func GetFileChunks(file string, opts ...ChunkOption) ([]*core.Chunk, error) {
 			Title:    extractFirstLine(content),
 			Summary:  "",
 			Content:  content,
-			Source:   file,
+			FileName: strings.ToLower(filepath.Base(file)),
+			Dir:      strings.ToLower(filepath.Dir(file)),
 			Index:    0,
 			StartPos: 0,
 			EndPos:   len(content),

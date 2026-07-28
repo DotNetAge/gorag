@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 
 	"github.com/DotNetAge/gorag/v2/core"
 	gvcore "github.com/DotNetAge/govector/core"
@@ -15,15 +14,15 @@ import (
 const chunkMetaKey = "chunk_meta"
 
 // Store is an implementation of core.VectorStore using govector.
+//
+// 完全采用原子化 open-close 模式：每次操作打开 bbolt 连接、执行、关闭。
+// 从不持有长连接，不与 mrag serve 产生文件锁冲突。
 type Store struct {
-	sync.RWMutex
-	storage    *gvcore.Storage
-	collection *gvcore.Collection
-	colName    string
-	dimension  int
-	dbPath     string
-	useHNSW    bool
-	readOnly   bool
+	colName   string
+	dimension int
+	dbPath    string
+	useHNSW  bool
+	readOnly bool
 }
 
 // Option is a function that configures a Store.
@@ -101,6 +100,8 @@ func DefaultStore() (core.VectorStore, error) {
 
 // NewStore initializes a new govector store.
 //
+// 原子化 open-close 模式：NewStore 仅验证连接可用即关闭，不持有长连接。
+//
 // Parameters:
 //   - opts: Configuration options
 //
@@ -108,7 +109,7 @@ func DefaultStore() (core.VectorStore, error) {
 //   - core.VectorStore: The vector store
 //   - error: Any error that occurred
 func NewStore(opts ...Option) (core.VectorStore, error) {
-	store := &Store{
+	s := &Store{
 		colName:   "gorag",
 		dimension: 1536,
 		dbPath:    "gorag_vectors.db",
@@ -116,22 +117,29 @@ func NewStore(opts ...Option) (core.VectorStore, error) {
 	}
 
 	for _, opt := range opts {
-		opt(store)
+		opt(s)
 	}
 
-	storage, err := gvcore.NewStorageWithQuantization(store.dbPath, false, gvcore.Quantizer(nil), store.readOnly)
+	// 验证连接可用后立即关闭，不持有长连接
+	return s, s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		return nil
+	})
+}
+
+// withStore 每次操作打开存储和集合，执行 fn 后自动关闭。
+func (s *Store) withStore(fn func(*gvcore.Storage, *gvcore.Collection) error) error {
+	storage, err := gvcore.NewStorageWithQuantization(s.dbPath, false, nil, s.readOnly)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open govector storage: %w", err)
+		return fmt.Errorf("govector: 打开存储失败: %w", err)
 	}
-	store.storage = storage
+	defer storage.Close()
 
-	col, err := gvcore.NewCollection(store.colName, store.dimension, gvcore.Cosine, storage, store.useHNSW)
+	col, err := gvcore.NewCollection(s.colName, s.dimension, gvcore.Cosine, storage, s.useHNSW)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize collection: %w", err)
+		return fmt.Errorf("govector: 打开集合失败: %w", err)
 	}
-	store.collection = col
 
-	return store, nil
+	return fn(storage, col)
 }
 
 // Upsert inserts or updates vectors in the store.
@@ -143,34 +151,31 @@ func NewStore(opts ...Option) (core.VectorStore, error) {
 // Returns:
 //   - error: Any error that occurred
 func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
-	s.Lock()
-	defer s.Unlock()
-
 	if len(vectors) == 0 {
 		return nil
 	}
+	return s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		var points []gvcore.PointStruct
+		for _, v := range vectors {
+			payload := make(gvcore.Payload)
+			for key, val := range v.Metadata {
+				payload[key] = val
+			}
+			payload["chunk_id"] = v.ChunkID
 
-	var points []gvcore.PointStruct
-	for _, v := range vectors {
-		payload := make(gvcore.Payload)
-		for key, val := range v.Metadata {
-			payload[key] = val
+			points = append(points, gvcore.PointStruct{
+				ID:      v.ID,
+				Vector:  v.Values,
+				Payload: payload,
+			})
 		}
-		// Inject the chunk_id into payload to map it back later
-		payload["chunk_id"] = v.ChunkID
 
-		points = append(points, gvcore.PointStruct{
-			ID:      v.ID,
-			Vector:  v.Values,
-			Payload: payload,
-		})
-	}
+		if len(points) == 0 {
+			return nil
+		}
 
-	if len(points) == 0 {
-		return nil
-	}
-
-	return s.collection.Upsert(points)
+		return col.Upsert(points)
+	})
 }
 
 // Search searches for vectors similar to the query vector.
@@ -186,57 +191,56 @@ func (s *Store) Upsert(ctx context.Context, vectors []*core.Vector) error {
 //   - []float32: The similarity scores
 //   - error: Any error that occurred
 func (s *Store) Search(ctx context.Context, query []float32, topK int, filters map[string]any) ([]*core.Vector, []float32, error) {
-	s.RLock()
-	defer s.RUnlock()
-
-	var gvFilter *gvcore.Filter
-
-	if len(filters) > 0 {
-		gvFilter = &gvcore.Filter{}
-		for k, v := range filters {
-			gvFilter.Must = append(gvFilter.Must, gvcore.Condition{
-				Key:   k,
-				Match: gvcore.MatchValue{Value: v},
-			})
-		}
-	}
-
-	if topK <= 0 {
-		topK = 5
-	}
-
-	scoredPoints, err := s.collection.Search(query, gvFilter, topK)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	var outVectors []*core.Vector
 	var outScores []float32
+	err := s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		var gvFilter *gvcore.Filter
 
-	for _, pt := range scoredPoints {
-		chunkID := ""
-		if c, ok := pt.Payload["chunk_id"].(string); ok {
-			chunkID = c
-		}
-
-		metadata := make(map[string]any)
-		for k, v := range pt.Payload {
-			if k != "chunk_id" {
-				metadata[k] = v
+		if len(filters) > 0 {
+			gvFilter = &gvcore.Filter{}
+			for k, v := range filters {
+				gvFilter.Must = append(gvFilter.Must, gvcore.Condition{
+					Key:   k,
+					Match: gvcore.MatchValue{Value: v},
+				})
 			}
 		}
 
-		vec := &core.Vector{
-			ID:       pt.ID,
-			Values:   nil,
-			ChunkID:  chunkID,
-			Metadata: metadata,
+		if topK <= 0 {
+			topK = 5
 		}
-		outVectors = append(outVectors, vec)
-		outScores = append(outScores, pt.Score)
-	}
 
-	return outVectors, outScores, nil
+		scoredPoints, err := col.Search(query, gvFilter, topK)
+		if err != nil {
+			return err
+		}
+
+		for _, pt := range scoredPoints {
+			chunkID := ""
+			if c, ok := pt.Payload["chunk_id"].(string); ok {
+				chunkID = c
+			}
+
+			metadata := make(map[string]any)
+			for k, v := range pt.Payload {
+				if k != "chunk_id" {
+					metadata[k] = v
+				}
+			}
+
+			vec := &core.Vector{
+				ID:       pt.ID,
+				Values:   nil,
+				ChunkID:  chunkID,
+				Metadata: metadata,
+			}
+			outVectors = append(outVectors, vec)
+			outScores = append(outScores, pt.Score)
+		}
+
+		return nil
+	})
+	return outVectors, outScores, err
 }
 
 // Delete deletes a vector by ID or chunk_id.
@@ -248,79 +252,69 @@ func (s *Store) Search(ctx context.Context, query []float32, topK int, filters m
 // Returns:
 //   - error: Any error that occurred
 func (s *Store) Delete(ctx context.Context, id string) error {
-	s.Lock()
-	defer s.Unlock()
-
 	if id == "" {
 		return nil
 	}
 
-	// 尝试按 vector UUID 删除
-	deleted, err := s.collection.Delete([]string{id}, nil)
-	if err != nil {
-		return err
-	}
-	if deleted > 0 {
-		return nil
-	}
+	return s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		// 尝试按 vector UUID 删除
+		deleted, err := col.Delete([]string{id}, nil)
+		if err != nil {
+			return err
+		}
+		if deleted > 0 {
+			return nil
+		}
 
-	// UUID 未命中，回退到按 chunk_id 元数据过滤删除
-	filter := &gvcore.Filter{
-		Must: []gvcore.Condition{{
-			Key:   "chunk_id",
-			Match: gvcore.MatchValue{Value: id},
-		}},
-	}
-	deleted, err = s.collection.Delete(nil, filter)
-	if err != nil {
-		return err
-	}
-	if deleted == 0 {
-		return fmt.Errorf("vector with chunk_id %q not found", id)
-	}
-	return nil
+		// UUID 未命中，回退到按 chunk_id 元数据过滤删除
+		filter := &gvcore.Filter{
+			Must: []gvcore.Condition{{
+				Key:   "chunk_id",
+				Match: gvcore.MatchValue{Value: id},
+			}},
+		}
+		deleted, err = col.Delete(nil, filter)
+		if err != nil {
+			return err
+		}
+		if deleted == 0 {
+			return fmt.Errorf("vector with chunk_id %q not found", id)
+		}
+		return nil
+	})
 }
 
 // Clear removes all vectors from the store by dropping and recreating the collection.
 func (s *Store) Clear(ctx context.Context) error {
-	s.Lock()
-	defer s.Unlock()
-
-	if err := s.storage.DropCollection(s.colName); err != nil {
-		return fmt.Errorf("clear: drop collection failed: %w", err)
-	}
-
-	if err := s.storage.EnsureCollection(s.colName); err != nil {
-		return fmt.Errorf("clear: ensure collection failed: %w", err)
-	}
-
-	newCol, err := gvcore.NewCollection(s.colName, s.dimension, gvcore.Cosine, s.storage, s.useHNSW)
-	if err != nil {
-		return fmt.Errorf("clear: recreate collection failed: %w", err)
-	}
-	s.collection = newCol
-
-	return nil
+	return s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		if err := storage.DropCollection(s.colName); err != nil {
+			return fmt.Errorf("clear: drop collection failed: %w", err)
+		}
+		if err := storage.EnsureCollection(s.colName); err != nil {
+			return fmt.Errorf("clear: ensure collection failed: %w", err)
+		}
+		return nil
+	})
 }
 
-// Count returns the total number of vectors in the store.
+// Count 返回向量总数（轻量操作，调用 col.Count()，复杂度 O(1)）。
 func (s *Store) Count(ctx context.Context) (int, error) {
-	s.RLock()
-	defer s.RUnlock()
-	return s.collection.Count(), nil
+	var count int
+	err := s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		count = col.Count()
+		return nil
+	})
+	return count, err
 }
 
-// Close closes the vector store.
+// Close 是空操作。Store 采用原子化 open-close 模式，从不持有长连接。
 //
 // Parameters:
 //   - ctx: Context for cancellation
 //
 // Returns:
-//   - error: Any error that occurred
+//   - error: Always nil
 func (s *Store) Close(ctx context.Context) error {
-	if s.storage != nil {
-		return s.storage.Close()
-	}
 	return nil
 }
 
@@ -335,53 +329,54 @@ func (s *Store) Close(ctx context.Context) error {
 //   - []*core.Vector: All vectors belonging to the document, sorted by chunk index
 //   - error: Any error that occurred
 func (s *Store) GetByDocID(ctx context.Context, docID string) ([]*core.Vector, error) {
-	s.RLock()
-	defer s.RUnlock()
-
 	if docID == "" {
 		return nil, fmt.Errorf("docID cannot be empty")
 	}
 
-	filter := &gvcore.Filter{
-		Must: []gvcore.Condition{{
-			Key:   "doc_id",
-			Match: gvcore.MatchValue{Value: docID},
-		}},
-	}
-
-	points, err := s.collection.GetPointsByFilter(filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get points by doc_id: %w", err)
-	}
-
-	vectors := make([]*core.Vector, 0, len(points))
-	for _, pt := range points {
-		chunkID := ""
-		if c, ok := pt.Payload["chunk_id"].(string); ok {
-			chunkID = c
+	var vectors []*core.Vector
+	err := s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		filter := &gvcore.Filter{
+			Must: []gvcore.Condition{{
+				Key:   "doc_id",
+				Match: gvcore.MatchValue{Value: docID},
+			}},
 		}
 
-		metadata := make(map[string]any)
-		for k, v := range pt.Payload {
-			if k != "chunk_id" {
-				metadata[k] = v
+		points, err := col.GetPointsByFilter(filter)
+		if err != nil {
+			return fmt.Errorf("failed to get points by doc_id: %w", err)
+		}
+
+		vectors = make([]*core.Vector, 0, len(points))
+		for _, pt := range points {
+			chunkID := ""
+			if c, ok := pt.Payload["chunk_id"].(string); ok {
+				chunkID = c
 			}
+
+			metadata := make(map[string]any)
+			for k, v := range pt.Payload {
+				if k != "chunk_id" {
+					metadata[k] = v
+				}
+			}
+
+			vectors = append(vectors, &core.Vector{
+				ID:       pt.ID,
+				Values:   pt.Vector,
+				ChunkID:  chunkID,
+				Metadata: metadata,
+			})
 		}
 
-		vectors = append(vectors, &core.Vector{
-			ID:       pt.ID,
-			Values:   pt.Vector,
-			ChunkID:  chunkID,
-			Metadata: metadata,
+		// Sort by chunk_meta.index for document reconstruction
+		sort.Slice(vectors, func(i, j int) bool {
+			return extractChunkIndex(vectors[i]) < extractChunkIndex(vectors[j])
 		})
-	}
 
-	// Sort by chunk_meta.index for document reconstruction
-	sort.Slice(vectors, func(i, j int) bool {
-		return extractChunkIndex(vectors[i]) < extractChunkIndex(vectors[j])
+		return nil
 	})
-
-	return vectors, nil
+	return vectors, err
 }
 
 // extractChunkIndex extracts the chunk index from a Vector's Metadata[chunkMetaKey].map["index"].
@@ -404,9 +399,6 @@ func extractChunkIndex(v *core.Vector) int {
 // filters 为 nil 时返回全部，非 nil 时按条件过滤；多个 FilterCondition 之间为 AND 语义。
 // 返回分页结果与过滤前总数。
 func (s *Store) List(ctx context.Context, offset, limit int, filters []core.FilterCondition) ([]*core.Vector, int, error) {
-	s.RLock()
-	defer s.RUnlock()
-
 	if limit <= 0 {
 		limit = 20
 	}
@@ -414,66 +406,72 @@ func (s *Store) List(ctx context.Context, offset, limit int, filters []core.Filt
 		offset = 0
 	}
 
-	// 构建 govector 过滤器（filters 为 nil 或空时 GetPointsByFilter 返回全部）
-	gvFilter := &gvcore.Filter{}
-	for _, fc := range filters {
-		cond := gvcore.Condition{
-			Key:  fc.Key,
-			Type: gvcore.ConditionType(fc.Type),
-		}
-		// JSON 数字以 float64 传入，但 protobuf 将 int 元数据存为 int64，直接比较会失败
-		val := fc.Value
-		if f64, ok := val.(float64); ok && f64 == float64(int64(f64)) {
-			val = int64(f64)
-		}
-		switch fc.Type {
-		case "exact":
-			cond.Match = gvcore.MatchValue{Value: val}
-		case "prefix":
-			if s, ok := val.(string); ok {
-				cond.Match = gvcore.MatchValue{Value: s}
+	var vectors []*core.Vector
+	var total int
+	err := s.withStore(func(storage *gvcore.Storage, col *gvcore.Collection) error {
+		// 构建 govector 过滤器（filters 为 nil 或空时 GetPointsByFilter 返回全部）
+		gvFilter := &gvcore.Filter{}
+		for _, fc := range filters {
+			cond := gvcore.Condition{
+				Key:  fc.Key,
+				Type: gvcore.ConditionType(fc.Type),
 			}
-		}
-		gvFilter.Must = append(gvFilter.Must, cond)
-	}
-
-	points, err := s.collection.GetPointsByFilter(gvFilter)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list vectors: %w", err)
-	}
-
-	total := len(points)
-
-	// 分页
-	end := offset + limit
-	if end > len(points) {
-		end = len(points)
-	}
-	if offset >= len(points) {
-		return []*core.Vector{}, total, nil
-	}
-
-	vectors := make([]*core.Vector, 0, end-offset)
-	for _, pt := range points[offset:end] {
-		chunkID := ""
-		if c, ok := pt.Payload["chunk_id"].(string); ok {
-			chunkID = c
-		}
-
-		metadata := make(map[string]any)
-		for k, v := range pt.Payload {
-			if k != "chunk_id" {
-				metadata[k] = v
+			// JSON 数字以 float64 传入，但 protobuf 将 int 元数据存为 int64，直接比较会失败
+			val := fc.Value
+			if f64, ok := val.(float64); ok && f64 == float64(int64(f64)) {
+				val = int64(f64)
 			}
+			switch fc.Type {
+			case "exact":
+				cond.Match = gvcore.MatchValue{Value: val}
+			case "prefix":
+				if s, ok := val.(string); ok {
+					cond.Match = gvcore.MatchValue{Value: s}
+				}
+			}
+			gvFilter.Must = append(gvFilter.Must, cond)
 		}
 
-		vectors = append(vectors, &core.Vector{
-			ID:       pt.ID,
-			Values:   pt.Vector,
-			ChunkID:  chunkID,
-			Metadata: metadata,
-		})
-	}
+		points, err := col.GetPointsByFilter(gvFilter)
+		if err != nil {
+			return fmt.Errorf("failed to list vectors: %w", err)
+		}
 
-	return vectors, total, nil
+		total = len(points)
+
+		// 分页
+		end := offset + limit
+		if end > len(points) {
+			end = len(points)
+		}
+		if offset >= len(points) {
+			vectors = []*core.Vector{}
+			return nil
+		}
+
+		vectors = make([]*core.Vector, 0, end-offset)
+		for _, pt := range points[offset:end] {
+			chunkID := ""
+			if c, ok := pt.Payload["chunk_id"].(string); ok {
+				chunkID = c
+			}
+
+			metadata := make(map[string]any)
+			for k, v := range pt.Payload {
+				if k != "chunk_id" {
+					metadata[k] = v
+				}
+			}
+
+			vectors = append(vectors, &core.Vector{
+				ID:       pt.ID,
+				Values:   pt.Vector,
+				ChunkID:  chunkID,
+				Metadata: metadata,
+			})
+		}
+
+		return nil
+	})
+	return vectors, total, err
 }

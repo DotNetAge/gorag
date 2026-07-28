@@ -110,11 +110,10 @@ func TestONNXEmbedder_Text(t *testing.T) {
 	}
 
 	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
-	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
+	embedder, err := GetOrCreateChineseClipEmbedder(WithModelFile(modelFile))
 	if err != nil {
 		t.Fatalf("Failed to create embedder: %v", err)
 	}
-	defer embedder.Close()
 
 	// 测试文本向量化
 	testTexts := []string{
@@ -161,11 +160,10 @@ func TestONNXEmbedder_Image(t *testing.T) {
 	}
 
 	modelFile := filepath.Join(testModelDir, "onnx", testONNXName)
-	embedder, err := NewChineseClipEmbedder(WithModelFile(modelFile))
+	embedder, err := GetOrCreateChineseClipEmbedder(WithModelFile(modelFile))
 	if err != nil {
 		t.Fatalf("Failed to create embedder: %v", err)
 	}
-	defer embedder.Close()
 
 	// 测试图像向量化
 	imgFiles := []string{"../inputs/sample_1.jpg", "../inputs/sample_2.jpg"}

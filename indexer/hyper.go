@@ -76,10 +76,8 @@ func WithHyperChunker(c chunker.Chunker) HyperOption {
 	}
 }
 
-// WithHyperSummarizer 注入批量摘要器，在分块后为文档类分片批量生成 title/summary。
+// WithHyperSummarizer 注入摘要器，在分块后为文档类分片逐 chunk 生成 title/summary。
 // 不传则不调用 Summarizer，title/summary 由 Chunker 默认策略产出。
-// 若注入的 llm.Summarizer 同时实现了 SummarizeBatch 方法，优先使用批量模式；
-// 否则回退到逐分片 Summarize 模式。
 func WithHyperSummarizer(s llm.Summarizer) HyperOption {
 	return func(h *HyperIndexer) {
 		if s != nil {
@@ -101,8 +99,8 @@ func WithHyperRefiller(r llm.Refiller) HyperOption {
 
 // WithHooks 注入事件扩展 Hook。
 //
-// 可传入任意数量的 Hook（OnFileOpenedHook、OnChunkHook、OnBeforeSemanticSaveHook、
-// OnIndexCompleteHook），WithHooks 按类型自动归入对应切片。
+// 可传入任意数量的 Hook（OnBeforeChunkHook、OnChunkedHook、OnSummarizedHook、
+// OnChunkedSavedHook、OnExtractedHook、OnNodesSavedHook），WithHooks 按类型自动归入对应切片。
 // 单一类型可注册多个 Hook，按注册顺序执行。
 func WithHooks(hooksList ...any) HyperOption {
 	return func(h *HyperIndexer) {
@@ -146,19 +144,22 @@ func (h *HyperIndexer) Name() string { return "hyper" }
 //
 // 工作流（完整）：
 //  1. document.Open(filePath) → RawDoc
-//     [1a] OnFileOpenedHook：文件类型白名单、前置过滤
+//     [1a] OnBeforeChunkHook：文件类型白名单、前置过滤
 //  2. core.NewStructuredDoc(raw) → StructuredDoc 容器
 //  3. 路由 Chunker → chunkerImpl.Chunk(raw) → ChunkResult
 //  4. doc.SetChunks/SetNodes/SetEdges
-//     [4a] OnChunkHook：对每个 Chunk 执行敏感词过滤、补充标签
-//     4.5 [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
-//     [4b] OnBeforeSemanticSaveHook：批量审核、外部 API 增强
+//     [4a] OnChunkedHook：补充标签、审计分片结果
+//     4.5 [语义线加工] 若注入了 Summarizer，对文档类分片逐 chunk 摘要
+//     [4b] OnSummarizedHook：逐 chunk 摘要完成通知
 //  5. semantic.Save(doc)（向量化 + 写入 VectorStore）
+//     [5a] OnChunkedSavedHook：外部 API 增强、补充元数据
 //     5.5 [关系线加工] 若注入了 Refiller + 已注册 Schema，调用 Refiller 提取实体和关系
+//     [5b] OnExtractedHook：审计实体提取结果
 //  6. graph.Save(doc)（实体 + CONTAINS 边 + 写入 GraphStore，若 graph 存在）
-//     [6a] OnIndexCompleteHook：通知下游、审计日志
+//     [6a] OnNodesSavedHook：图数据通知、审计日志
 //
-// 返回本次索引生成的 Chunks（用于调用方追踪）。
+// 原子化管线：AddFile 内部依次完成「分块→逐 chunk 摘要→向量化存储→实体提取→图存储」，
+// 每个文件独立完成全部处理。不再依赖外部分阶段编排（如 Update 中的 LLM 批量处理）。
 // 关系线失败不阻塞语义线，仅记录警告。
 func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Chunk, error) {
 	if filePath == "" {
@@ -175,13 +176,12 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	h.logger.Debug("复合索引器: 文件归一化完成",
 		"file", filePath, "doc_type", raw.Type(), "doc_id", raw.ID())
 
-	// [1a] OnFileOpenedHook：文件类型白名单、前置过滤
-	if len(h.hooks.onFileOpened) > 0 {
-		var hookErr error
-		raw, hookErr = runOnFileOpenedHooks(ctx, raw, h.hooks.onFileOpened)
-		if hookErr != nil {
-			h.logger.Error("复合索引器: OnFileOpenedHook 失败", hookErr, "file", filePath)
-			return nil, fmt.Errorf("HyperIndexer: OnFileOpenedHook 失败: %w", hookErr)
+	// [1a] OnBeforeChunkHook：文件类型白名单、前置过滤
+	if len(h.hooks.onBeforeChunk) > 0 {
+		raw, err = runOnBeforeChunkHooks(ctx, raw, h.hooks.onBeforeChunk)
+		if err != nil {
+			h.logger.Error("复合索引器: OnBeforeChunkHook 失败", err, "file", filePath)
+			return nil, fmt.Errorf("HyperIndexer: OnBeforeChunkHook 失败: %w", err)
 		}
 	}
 
@@ -220,112 +220,132 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 	doc.SetNodes(result.Nodes)
 	doc.SetEdges(result.Edges)
 
-	// [4a] OnChunkHook：对每个 Chunk 执行敏感词过滤、补充标签
-	if len(h.hooks.onChunk) > 0 {
-		for i := range result.Chunks {
-			modified, hookErr := runOnChunkHooks(ctx, &result.Chunks[i], h.hooks.onChunk)
-			if hookErr != nil {
-				h.logger.Error("复合索引器: OnChunkHook 失败", hookErr,
-					"chunk_id", result.Chunks[i].ID)
-				return nil, fmt.Errorf("HyperIndexer: OnChunkHook 失败: %w", hookErr)
-			}
-			if modified != nil {
-				result.Chunks[i] = *modified
-			}
+	// [4a] OnChunkedHook：完成分片，可补充标签
+	if len(h.hooks.onChunked) > 0 {
+		doc, err = runOnChunkedHooks(ctx, doc, h.hooks.onChunked)
+		if err != nil {
+			h.logger.Error("复合索引器: OnChunkedHook 失败", err, "file", filePath)
+			return nil, fmt.Errorf("HyperIndexer: OnChunkedHook 失败: %w", err)
 		}
-		doc.SetChunks(result.Chunks)
+		result.Chunks = doc.Chunks()
 	}
 
-	// 4b. [语义线加工] 若注入了 Summarizer，对文档类分片批量摘要
-	if h.summarizer != nil && raw.Type() == document.RawDocDoc {
-		var toSummarize []core.Chunk
-		for _, c := range result.Chunks {
-			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
-				toSummarize = append(toSummarize, c)
-			}
-		}
-		if len(toSummarize) > 0 {
-			h.logger.Info("复合索引器: 调用 Summarizer", "分片数", len(toSummarize))
-			// 优先使用批量模式（通过接口断言检测 SummarizeBatch 方法）
-			var updated []core.Chunk
-			var err error
-			if bs, ok := h.summarizer.(interface {
-				SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
-			}); ok {
-				updated, err = bs.SummarizeBatch(ctx, toSummarize)
-			} else {
-				updated, err = h.summarizer.Summarize(ctx, toSummarize)
-			}
-			if err != nil {
-				h.logger.Warn("复合索引器: Summarizer 调用失败，使用原始分片继续", "error", err)
-			} else {
-				updatedByID := make(map[string]core.Chunk, len(updated))
-				for _, u := range updated {
-					updatedByID[u.ID] = u
-				}
-				chunks := doc.Chunks()
+	// 4b. [增量跳过] 对照已有分片，避免不必要的 LLM 调用
+	chunks := doc.Chunks()
+	skipRefill := false
+
+	if admin, ok := h.semantic.(IndexerAdmin); ok {
+		existing, gErr := admin.GetChunks(ctx, raw.ID())
+		if gErr == nil && len(existing) == len(chunks) {
+			switch diffChunks(existing, chunks) {
+			case chunkDiffSkipAll:
+				h.logger.Info("复合索引器: 文件无变化，跳过索引", "file", filePath)
+				return existing, nil
+			case chunkDiffSkipRefill:
+				skipRefill = true
+				// 从已有 chunks 恢复已存在的 title/summary/tags
 				for i := range chunks {
-					if u, ok := updatedByID[chunks[i].ID]; ok {
-						chunks[i] = u
+					if existing[i].Summary != "" {
+						chunks[i].Title = existing[i].Title
+						chunks[i].Summary = existing[i].Summary
+						chunks[i].Tags = existing[i].Tags
 					}
 				}
-				doc.SetChunks(chunks)
-				h.logger.Info("复合索引器: Summarizer 完成", "已摘要", len(updated))
+				h.logger.Info("复合索引器: 分片结构无变化，"+
+					"跳过实体提取（仅补充缺失摘要）",
+					"file", filePath)
+			case chunkDiffFull:
+				// 有变化，全量处理
 			}
-		} else {
-			h.logger.Info("复合索引器: 所有分片内容过短，跳过 Summarizer",
-				"最短长度", minSummaryContentLength)
+			doc.SetChunks(chunks)
 		}
 	}
 
-	// [4b] OnBeforeSemanticSaveHook：批量审核、外部 API 增强
-	if len(h.hooks.onBeforeSemantic) > 0 {
-		var hookErr error
-		doc, hookErr = runOnBeforeSemanticSaveHooks(ctx, doc, h.hooks.onBeforeSemantic)
-		if hookErr != nil {
-			h.logger.Error("复合索引器: OnBeforeSemanticSaveHook 失败", hookErr, "file", filePath)
-			return nil, fmt.Errorf("HyperIndexer: OnBeforeSemanticSaveHook 失败: %w", hookErr)
+	// 4c. [语义线加工] 逐 chunk 调用 Summarizer（仅文档类，内容≥minContentForLLM 字符）
+	if h.summarizer != nil && raw.Type() == document.RawDocDoc {
+		for i := range chunks {
+			if utf8.RuneCountInString(chunks[i].Content) < minContentForLLM {
+				continue
+			}
+			title, summary, sErr := h.summarizer.Summarize(ctx, chunks[i].Content)
+			if sErr != nil {
+				h.logger.Warn("复合索引器: Summarizer 调用失败，跳过该分片",
+					"chunk_id", chunks[i].ID, "error", sErr)
+				continue
+			}
+			if title != "" {
+				chunks[i].Title = title
+			}
+			if summary != "" {
+				chunks[i].Summary = summary
+			}
+			// [4c] OnSummarizedHook：逐 chunk 摘要完成
+			if len(h.hooks.onSummarized) > 0 {
+				runOnSummarizedHooks(ctx, &chunks[i], h.hooks.onSummarized)
+			}
 		}
+		doc.SetChunks(chunks)
+		h.logger.Info("复合索引器: Summarizer 逐 chunk 完成", "file", filePath)
 	}
 
-	// 5. 语义线：向量化 + 写入 VectorStore（失败返回 error）
+	// ── 5. 语义线：向量化 + 写入 VectorStore ───────────────────────
 	if store, ok := h.semantic.(IndexerStore); ok {
 		if err := store.Save(ctx, doc); err != nil {
-			h.logger.Error("复合索引器: 语义线保存失败", err, "file", filePath)
-			return nil, fmt.Errorf("HyperIndexer: 语义线保存失败: %w", err)
+			h.logger.Error("复合索引器: 语义分块保存失败", err, "file", filePath)
+			return nil, fmt.Errorf("HyperIndexer: 语义分块保存失败: %w", err)
 		}
-		h.logger.Debug("复合索引器: 语义线保存完成", "chunks", len(result.Chunks))
+		h.logger.Debug("复合索引器: 语义分块保存完成", "chunks", len(chunks))
 	} else {
 		h.logger.Warn("复合索引器: semantic 未实现 IndexerStore，跳过语义线保存")
 	}
 
-	// 5b. [关系线加工] 若注入了 Refiller 且有已注册 Schema，调用 Refiller 提取实体和关系
-	if h.refiller != nil && len(h.schemasByPath) > 0 {
-		// 将注册表中所有 Schema 合并为一个列表传给 Refiller
+	// [5a] OnChunkedSavedHook：分片已持久化
+	if len(h.hooks.onChunkedSaved) > 0 {
+		if err := runOnChunkedSavedHooks(ctx, chunks, h.hooks.onChunkedSaved); err != nil {
+			h.logger.Warn("复合索引器: OnChunkedSavedHook 失败（不阻塞）", "error", err)
+		}
+	}
+
+	// ── 6. Refiller 实体提取（skipRefill 时跳过）───────────────────
+	if !skipRefill && h.refiller != nil && len(h.schemasByPath) > 0 {
 		var schemas []llm.EntitySchema
 		for _, ss := range h.schemasByPath {
 			schemas = append(schemas, ss...)
 		}
 		if len(schemas) > 0 {
-			// Refiller 应基于 Summarizer 更新后的分片，而非原始 result
-			refillInput := chunker.ChunkResult{Chunks: doc.Chunks()}
-			refilled, rErr := h.refiller.Refill(ctx, refillInput, schemas)
-			if rErr != nil {
-				h.logger.Warn("复合索引器: Refiller 调用失败（不阻塞语义线）",
-					"file", filePath, "error", rErr.Error())
+			// 仅对内容长度 ≥ minContentForLLM 的分片进行实体提取（短内容无足够语义）
+			var refillChunks []core.Chunk
+			for _, c := range chunks {
+				if utf8.RuneCountInString(c.Content) >= minContentForLLM {
+					refillChunks = append(refillChunks, c)
+				}
+			}
+			if len(refillChunks) == 0 {
+				h.logger.Debug("复合索引器: 所有分片内容过短，跳过实体提取",
+					"file", filePath)
 			} else {
-				// 将新增的 Nodes/Edges 合并到 doc
-				doc.SetNodes(append(doc.Nodes(), refilled.Nodes...))
-				doc.SetEdges(append(doc.Edges(), refilled.Edges...))
-				h.logger.Info("复合索引器: Refiller 完成",
-					"实体数", len(refilled.Nodes),
-					"关系数", len(refilled.Edges))
+				refillInput := chunker.ChunkResult{Chunks: refillChunks}
+				refilled, rErr := h.refiller.Refill(ctx, refillInput, schemas)
+				if rErr != nil {
+					h.logger.Warn("复合索引器: Refiller 调用失败（不阻塞语义线）",
+						"file", filePath, "error", rErr.Error())
+				} else {
+					doc.SetNodes(append(doc.Nodes(), refilled.Nodes...))
+					doc.SetEdges(append(doc.Edges(), refilled.Edges...))
+					h.logger.Info("复合索引器: Refiller 完成",
+						"实体数", len(refilled.Nodes),
+						"关系数", len(refilled.Edges))
+
+					// [6a] OnExtractedHook：实体提取完成
+					if len(h.hooks.onExtracted) > 0 {
+						runOnExtractedHooks(ctx, chunks, refilled.Nodes, refilled.Edges, h.hooks.onExtracted)
+					}
+				}
 			}
 		}
 	}
 
-	// 6. 关系线：实体 + CONTAINS 边 + 写入 GraphStore（若 graph 存在）
-	//    关系线失败不阻塞语义线结果，仅记录警告
+	// ── 7. 关系线：写入 GraphStore ─────────────────────────────────
 	if h.graph != nil {
 		if store, ok := h.graph.(IndexerStore); ok {
 			if err := store.Save(ctx, doc); err != nil {
@@ -335,6 +355,11 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 				h.logger.Info("复合索引器: 关系线保存完成",
 					"实体数", len(doc.Nodes()),
 					"关系数", len(doc.Edges()))
+
+				// [7a] OnNodesSavedHook：节点已持久化
+				if len(h.hooks.onNodesSaved) > 0 {
+					runOnNodesSavedHooks(ctx, doc.Nodes(), h.hooks.onNodesSaved)
+				}
 			}
 		} else {
 			h.logger.Warn("复合索引器: graph 未实现 IndexerStore，跳过关系线保存")
@@ -343,21 +368,16 @@ func (h *HyperIndexer) AddFile(ctx context.Context, filePath string) ([]*core.Ch
 		h.logger.Debug("复合索引器: 未启用关系线，跳过图保存")
 	}
 
-	// 7. 转换 []core.Chunk → []*core.Chunk 返回（保持 AddFile 签名一致）
-	chunks := make([]*core.Chunk, 0, len(result.Chunks))
-	for i := range result.Chunks {
-		ch := result.Chunks[i]
-		chunks = append(chunks, &ch)
-	}
-
-	// [6a] OnIndexCompleteHook：通知下游、审计日志（不阻塞管线）
-	if len(h.hooks.onIndexComplete) > 0 {
-		runOnIndexCompleteHooks(ctx, chunks, h.hooks.onIndexComplete, h.logger)
+	// ── 8. 返回结果 ────────────────────────────────────────────────
+	resultChunks := make([]*core.Chunk, 0, len(chunks))
+	for i := range chunks {
+		c := chunks[i]
+		resultChunks = append(resultChunks, &c)
 	}
 
 	h.logger.Info("复合索引器: 索引文件完成",
-		"file", filePath, "chunks", len(chunks))
-	return chunks, nil
+		"file", filePath, "chunks", len(resultChunks))
+	return resultChunks, nil
 }
 
 // Search 实现 Indexer 接口：双线融合检索。
@@ -798,182 +818,6 @@ func (h *HyperIndexer) SetLogger(logger logging.Logger) {
 }
 
 // ---------------------------------------------------------------------------
-// 多文件实体关系发现
-// ---------------------------------------------------------------------------
-
-// ProcessChunks 对指定分片执行增量 LLM 处理（摘要 + 实体提取）。
-//
-// 流程：
-//  1. [摘要] 若注入了 Summarizer，对所有内容足够长的分片调用 Summarizer
-//  2. [向量更新] 摘要后的分片重新向量化并写入 VectorStore
-//  3. [实体提取] 若注入了 Refiller + 已注册 Schema，对所有分片调用 Refiller
-//  4. [图更新] 新提取的 Nodes/Edges 写入 GraphStore
-//
-// 参数：
-//   - ctx: 上下文
-//   - chunks: 需要处理的分片（必须已从 VectorStore 或其他来源加载完整数据）
-//
-// 返回值：
-//   - processedChunks: 处理后的分片列表（Summary/Title 已更新）
-//   - addedNodes: 新提取的实体节点
-//   - addedEdges: 新提取的关系边
-//   - summarizeCompleted: Summarizer 阶段是否已完成（未注入或已调用）
-//   - refillCompleted: Refiller 阶段是否已完成（未注入、无 Schema 或已调用）
-//   - error: 整体错误（单个阶段失败不阻塞后续阶段，仅记录警告）
-//
-// 典型调用方：IndexingService.Update，从 meta.db 查询需要 LLM 处理的分片，
-// 从 VectorStore 加载完整数据后传给此方法。
-func (h *HyperIndexer) ProcessChunks(ctx context.Context, chunks []core.Chunk) (processedChunks []core.Chunk, addedNodes []core.Node, addedEdges []core.Edge, summarizeCompleted, refillCompleted bool, err error) {
-	h.logger.Info("复合索引器: 开始增量 LLM 处理", "chunks", len(chunks))
-	if len(chunks) == 0 {
-		return chunks, nil, nil, true, true, nil
-	}
-
-	// summarizeCompleted / refillCompleted 表示对应阶段是否已完成。
-	// 默认 false，仅当组件实际执行后才设为 true。
-	// 若 summarizer/refiller 为 nil（未注入），保持 false，避免调用方错误标记状态。
-
-	// 1. [摘要] Summarizer 阶段
-	// 1a. 先按 minSummaryContentLength 过滤出需要摘要的分片
-	if h.summarizer != nil {
-		var toSummarize []core.Chunk
-		for _, c := range chunks {
-			if utf8.RuneCountInString(c.Content) >= minSummaryContentLength {
-				toSummarize = append(toSummarize, c)
-			}
-		}
-		if len(toSummarize) > 0 {
-			summarizeCompleted = true
-			// 1b. 按 content 字符数分批，避免单次 LLM 调用 token 超限
-			batches := splitChunksBySize(toSummarize, defaultProcessBatchChars)
-			h.logger.Info("复合索引器: ProcessChunks 调用 Summarizer",
-				"分片数", len(toSummarize), "批次数", len(batches))
-
-			allSummarized := make([]core.Chunk, 0, len(toSummarize))
-			for batchIdx, batch := range batches {
-				var result []core.Chunk
-				var sErr error
-				if bs, ok := h.summarizer.(interface {
-					SummarizeBatch(context.Context, []core.Chunk) ([]core.Chunk, error)
-				}); ok {
-					result, sErr = bs.SummarizeBatch(ctx, batch)
-					if sErr != nil {
-						// 批量失败，降级为逐条摘要
-						h.logger.Warn("复合索引器: SummarizeBatch 失败，降级为逐条摘要",
-							"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", sErr)
-						result, sErr = h.summarizer.Summarize(ctx, batch)
-					}
-				} else {
-					result, sErr = h.summarizer.Summarize(ctx, batch)
-				}
-				if sErr != nil {
-					h.logger.Warn("复合索引器: ProcessChunks Summarizer 全部失败",
-						"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", sErr)
-					continue
-				}
-				h.logger.Info("复合索引器: ProcessChunks Summarizer 批次完成",
-					"批次", batchIdx+1, "总批", len(batches), "已摘要", len(result))
-				allSummarized = append(allSummarized, result...)
-			}
-
-			// 1c. 按 ID 回写到 processedChunks
-			if len(allSummarized) > 0 {
-				updatedByID := make(map[string]core.Chunk, len(allSummarized))
-				for _, u := range allSummarized {
-					updatedByID[u.ID] = u
-				}
-				processedChunks = make([]core.Chunk, len(chunks))
-				for i, c := range chunks {
-					if u, ok := updatedByID[c.ID]; ok {
-						processedChunks[i] = u
-					} else {
-						processedChunks[i] = c
-					}
-				}
-				h.logger.Info("复合索引器: ProcessChunks Summarizer 完成",
-					"已摘要", len(allSummarized), "总批", len(batches))
-			}
-		}
-	}
-
-	// 2. [向量更新] 将摘要后的分片重新向量化
-	if len(processedChunks) > 0 {
-		if si, ok := h.semantic.(*semanticIndexer); ok {
-			for i := range processedChunks {
-				if err := si.saveOneChunk(ctx, &processedChunks[i]); err != nil {
-					h.logger.Warn("复合索引器: 更新分片向量失败",
-						"chunk_id", processedChunks[i].ID, "error", err)
-				}
-			}
-			h.logger.Info("复合索引器: 向量更新完成", "chunks", len(processedChunks))
-		} else {
-			h.logger.Warn("复合索引器: semantic 不是 *semanticIndexer，无法更新向量")
-		}
-	} else if len(chunks) > 0 {
-		// 没有经过摘要处理，直接使用原始分片
-		processedChunks = make([]core.Chunk, len(chunks))
-		copy(processedChunks, chunks)
-	}
-
-	// 3. [实体提取] Refiller 阶段
-	if h.refiller != nil && len(h.schemasByPath) > 0 {
-		var schemas []llm.EntitySchema
-		for _, ss := range h.schemasByPath {
-			schemas = append(schemas, ss...)
-		}
-		if len(schemas) > 0 {
-			// Refiller 应基于摘要后的 processedChunks，而非原始 chunks
-			// 同样按 content 字符数分批，避免单次 prompt token 超限
-			refillCompleted = true
-			batches := splitChunksBySize(processedChunks, defaultProcessBatchChars)
-			h.logger.Info("复合索引器: ProcessChunks 调用 Refiller",
-				"分片数", len(processedChunks), "批次数", len(batches))
-
-			var allNodes []core.Node
-			var allEdges []core.Edge
-			for batchIdx, batch := range batches {
-				result := chunker.ChunkResult{Chunks: batch}
-				refilled, rErr := h.refiller.Refill(ctx, result, schemas)
-				if rErr != nil {
-					h.logger.Warn("复合索引器: ProcessChunks Refiller 批次失败",
-						"批次", batchIdx+1, "总批", len(batches), "分片数", len(batch), "error", rErr)
-					continue
-				}
-				h.logger.Info("复合索引器: ProcessChunks Refiller 批次完成",
-					"批次", batchIdx+1, "总批", len(batches),
-					"实体数", len(refilled.Nodes), "关系数", len(refilled.Edges))
-				allNodes = append(allNodes, refilled.Nodes...)
-				allEdges = append(allEdges, refilled.Edges...)
-			}
-			addedNodes = allNodes
-			addedEdges = allEdges
-			h.logger.Info("复合索引器: ProcessChunks Refiller 完成",
-				"实体数", len(addedNodes), "关系数", len(addedEdges), "总批", len(batches))
-		}
-	}
-
-	// 4. [图更新] 将新实体/关系写入 GraphStore
-	if h.graph != nil && (len(addedNodes) > 0 || len(addedEdges) > 0) {
-		doc := core.NewStructuredDocFromParts(addedNodes, addedEdges)
-		if store, ok := h.graph.(IndexerStore); ok {
-			if gErr := store.Save(ctx, doc); gErr != nil {
-				h.logger.Warn("复合索引器: ProcessChunks 图保存失败", "error", gErr)
-			} else {
-				h.logger.Info("复合索引器: ProcessChunks 图更新完成",
-					"实体数", len(addedNodes), "关系数", len(addedEdges))
-			}
-		}
-	}
-
-	h.logger.Info("复合索引器: 增量 LLM 处理完成",
-		"总分片", len(chunks),
-		"已摘要", len(processedChunks),
-		"实体数", len(addedNodes),
-		"关系数", len(addedEdges))
-	return
-}
-
-// ---------------------------------------------------------------------------
 // 查询结果重排序
 // ---------------------------------------------------------------------------
 
@@ -1054,54 +898,40 @@ func keywordInTags(tags []string, lowerKeyword string) bool {
 	return false
 }
 
-// minSummaryContentLength 是触发 Summarizer 的最小内容长度（按字符数）。
-// 短于此长度的分块没有摘要化的必要，直接跳过以节省 LLM 调用。
-const minSummaryContentLength = 100
+// minContentForLLM 是触发 LLM 处理（摘要/实体提取）的最小内容长度（按字符数）。
+// 短于此长度的分块：
+//   - 没有摘要化的必要（标题已起到摘要作用）
+//   - 无足够的语义信息提取有意义的实体
+const minContentForLLM = 200
 
-// defaultProcessBatchChars 是 ProcessChunks 中单批 LLM 调用的最大内容字符数。
-//
-// 设计依据：32K tokens 模型，预留 8K 给 system prompt + response，剩 24K 给用户输入。
-// 中文 1 字符 ≈ 1.5–2 tokens，保守按 3 字符/token 折算 → 8000 字符 ≈ 24K tokens。
-// 超出此阈值的批次会再次拆分，避免单次请求 token 超限。
-const defaultProcessBatchChars = 8000
+// chunkDiffResult 新旧分片对照结果
+type chunkDiffResult int
 
-// splitChunksBySize 按 content 字符数累计把 chunks 切分为多个批次。
-//
-// 单个 chunk 若已超阈值则独占一批（不会因单 chunk 超大而阻塞后续 chunk）。
-// 返回的批次顺序与原 chunks 一致。
-func splitChunksBySize(chunks []core.Chunk, maxChars int) [][]core.Chunk {
-	if maxChars <= 0 || len(chunks) == 0 {
-		return [][]core.Chunk{chunks}
+const (
+	chunkDiffFull       chunkDiffResult = iota // 分片有变化 → 全量处理（摘要 + 实体提取）
+	chunkDiffSkipRefill                        // 分片未变但摘要不全 → 补摘要，跳过实体提取
+	chunkDiffSkipAll                           // 分片未变 + 摘要完整 → 完全跳过 LLM 处理
+)
+
+// diffChunks 对比新旧 chunks，4 维度（StartPos、EndPos、Content、Title）精准对照。
+// 仅当四个维度全部匹配时视为「未变化」，否则触发全量重做。
+func diffChunks(existing []*core.Chunk, newChunks []core.Chunk) chunkDiffResult {
+	if len(existing) != len(newChunks) {
+		return chunkDiffFull
 	}
-	var batches [][]core.Chunk
-	var cur []core.Chunk
-	var curSize int
-	for _, c := range chunks {
-		cs := utf8.RuneCountInString(c.Content)
-		// 单 chunk 已超阈值：先 flush 当前批，再独立成批
-		if cs >= maxChars {
-			if len(cur) > 0 {
-				batches = append(batches, cur)
-				cur = nil
-				curSize = 0
-			}
-			batches = append(batches, []core.Chunk{c})
-			continue
+	for i := range newChunks {
+		if existing[i].StartPos != newChunks[i].StartPos ||
+			existing[i].EndPos != newChunks[i].EndPos ||
+			existing[i].Content != newChunks[i].Content ||
+			existing[i].Title != newChunks[i].Title {
+			return chunkDiffFull
 		}
-		// 累加后超出阈值：flush 当前批，开新批
-		if curSize+cs > maxChars && len(cur) > 0 {
-			batches = append(batches, cur)
-			cur = nil
-			curSize = 0
+	}
+	// 结构完全相同，检查 Summary 是否都已填充
+	for i := range newChunks {
+		if newChunks[i].Summary == "" {
+			return chunkDiffSkipRefill
 		}
-		cur = append(cur, c)
-		curSize += cs
 	}
-	if len(cur) > 0 {
-		batches = append(batches, cur)
-	}
-	if len(batches) == 0 {
-		return [][]core.Chunk{chunks}
-	}
-	return batches
+	return chunkDiffSkipAll
 }

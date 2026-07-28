@@ -11,7 +11,8 @@ const (
 	VecMetaSummary  = "summary"   // Chunk.Summary
 	VecMetaDocID    = "doc_id"    // Chunk.DocID
 	VecMetaParentID = "parent_id" // Chunk.ParentID
-	VecMetaSource   = "source"    // Chunk.Source
+	VecMetaDir       = "dir"       // Chunk.Dir
+	VecMetaFileName  = "file_name" // Chunk.FileName
 	VecMetaRegionID = "region_id" // Chunk.RegionID
 	VecMetaLanguage = "language"  // Chunk.Language
 	VecMetaTags     = "tags"      // Chunk.Tags
