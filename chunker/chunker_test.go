@@ -820,9 +820,9 @@ func TestMarkdownChunker_RegionDescriptor(t *testing.T) {
 		t.Fatalf("期望至少 1 个 chunk，实际 0")
 	}
 
-	expectedDirName := filepath.Base(dir)
+	expectedDirName := strings.ToLower(filepath.Base(dir))
 	foundRegionNode := false
-	expectedRegionID := utils.GenerateID([]byte(dir))
+	expectedRegionID := utils.GenerateID([]byte(strings.ToLower(dir)))
 
 	for _, c := range result.Chunks {
 		if c.ParentID == "" && c.Title != expectedDirName {
@@ -875,8 +875,8 @@ func TestMarkdownChunker_GeneratedRegionDescriptor(t *testing.T) {
 	}
 
 	chunk := result.Chunks[0]
-	if chunk.Title != filepath.Base(dir) {
-		t.Errorf("生成式 README Chunk Title 期望 %q，实际 %q", filepath.Base(dir), chunk.Title)
+	if chunk.Title != strings.ToLower(filepath.Base(dir)) {
+		t.Errorf("生成式 README Chunk Title 期望 %q，实际 %q", strings.ToLower(filepath.Base(dir)), chunk.Title)
 	}
 	if isDescriptor, ok := chunk.Metadata[core.MetaIsRegionDescriptor].(bool); !ok || !isDescriptor {
 		t.Errorf("生成式 README Chunk 应设置 %s=true", core.MetaIsRegionDescriptor)

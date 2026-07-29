@@ -100,6 +100,11 @@ func (s *semanticIndexer) AddFile(ctx context.Context, filePath string) ([]*core
 		s.logger.Error("语义索引器: 打开文件失败", err, "file", filePath)
 		return nil, fmt.Errorf("AddFile: 打开文件失败: %w", err)
 	}
+	// 1a. 非多模态 embedder 跳过图片文件（如 BGE 不支持图片索引）
+	if raw.Type() == document.RawDocImage && !s.embedder.Multimoding() {
+		s.logger.Info("语义索引器: embedder 不支持图片索引，跳过图片文件", "file", filePath)
+		return nil, nil
+	}
 	s.logger.Debug("语义索引器: 文件归一化完成",
 		"file", filePath,
 		"doc_type", raw.Type(),
@@ -275,6 +280,7 @@ var vecMetaKeys = map[string]bool{
 	core.VecMetaEndLine:   true,
 	core.VecMetaStartPos:  true,
 	core.VecMetaEndPos:    true,
+	core.VecMetaIndex:     true,
 }
 
 // toIntFromMeta 从 VecMeta 元数据中安全提取 int 值。
@@ -329,6 +335,8 @@ func buildVectorMetadata(chunk *core.Chunk) map[string]any {
 		m[core.VecMetaStartPos] = chunk.StartPos
 		m[core.VecMetaEndPos] = chunk.EndPos
 	}
+	// 始终保存 Index，用于查询时按文档顺序排序
+	m[core.VecMetaIndex] = chunk.Index
 	// 复制 Metadata 中的其他扩展属性（跳过已映射到顶层字段的 VecMeta* 键）
 	for k, v := range chunk.Metadata {
 		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {
@@ -580,6 +588,7 @@ func vectorToChunk(vec *core.Vector) *core.Chunk {
 	chunk.EndLine = toIntFromMeta(vec.Metadata[core.VecMetaEndLine])
 	chunk.StartPos = toIntFromMeta(vec.Metadata[core.VecMetaStartPos])
 	chunk.EndPos = toIntFromMeta(vec.Metadata[core.VecMetaEndPos])
+	chunk.Index = toIntFromMeta(vec.Metadata[core.VecMetaIndex])
 	// 复制非 VecMeta 键到 Metadata
 	for k, v := range vec.Metadata {
 		if _, isVecMeta := vecMetaKeys[k]; isVecMeta {

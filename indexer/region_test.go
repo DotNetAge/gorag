@@ -164,7 +164,7 @@ func TestGraphIndexer_RegionIDMatchesChunkRegionID(t *testing.T) {
 		t.Fatalf("Save 失败: %v", err)
 	}
 
-	expectedRegionID := utils.GenerateID([]byte(dir))
+	expectedRegionID := utils.GenerateID([]byte(strings.ToLower(dir)))
 	regionNode, ok := store.nodes[expectedRegionID]
 	if !ok {
 		t.Fatalf("未找到期望的 Region 节点 %s", expectedRegionID)
@@ -179,8 +179,8 @@ func TestGraphIndexer_RegionIDMatchesChunkRegionID(t *testing.T) {
 	if !foundRegionLabel {
 		t.Errorf("Region 节点 Labels 期望包含 %q，实际 %v", core.LabelRegion, regionNode.Labels)
 	}
-	if regionNode.Name != filepath.Base(dir) {
-		t.Errorf("Region 节点 Name 期望 %q，实际 %q", filepath.Base(dir), regionNode.Name)
+	if regionNode.Name != filepath.Base(strings.ToLower(dir)) {
+		t.Errorf("Region 节点 Name 期望 %q，实际 %q", filepath.Base(strings.ToLower(dir)), regionNode.Name)
 	}
 }
 

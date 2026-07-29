@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	bgeTestModelDir = "../models/bge-base-zh-v1.5"
+	bgeTestModelDir = "../models/bge-small-zh-v1.5"
 	bgeTestONNXName = "model_q4.onnx" // 使用量化版本测试，更快
-	bgeTestDim      = 768
+	bgeTestDim      = 384
 )
 
 // skipIfBGEModelNotFound 如果 BGE 模型文件不存在或是 LFS 占位符则跳过测试

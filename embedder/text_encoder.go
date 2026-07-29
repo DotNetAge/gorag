@@ -25,6 +25,7 @@ type TextEncoder struct {
 	session       *ort.AdvancedSession
 	inputIDs      *ort.Tensor[int64]   // session 绑定的 input_ids 张量
 	attentionMask *ort.Tensor[int64]   // session 绑定的 attention_mask 张量
+	tokenTypeIDs  *ort.Tensor[int64]   // session 绑定的 token_type_ids 张量（BGE 模型需要）
 	pixelValues   *ort.Tensor[float32] // session 绑定的 pixel_values 张量 (图像占位，可为 nil)
 	textEmbeds    *ort.Tensor[float32] // session 绑定的 text_embeds 输出张量
 	mu            sync.RWMutex
@@ -32,7 +33,7 @@ type TextEncoder struct {
 
 // NewTextEncoder 创建文本编码器
 func NewTextEncoder(config TextEncoderConfig, tokenizer *VocabTokenizer) (*TextEncoder, error) {
-	session, inputIDs, attentionMask, pixelValues, textEmbeds, err := createTextSession(config)
+	session, inputIDs, attentionMask, tokenTypeIDs, pixelValues, textEmbeds, err := createTextSession(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create text session: %w", err)
 	}
@@ -42,16 +43,20 @@ func NewTextEncoder(config TextEncoderConfig, tokenizer *VocabTokenizer) (*TextE
 		session:       session,
 		inputIDs:      inputIDs,
 		attentionMask: attentionMask,
+		tokenTypeIDs:  tokenTypeIDs,
 		pixelValues:   pixelValues,
 		textEmbeds:    textEmbeds,
 	}, nil
 }
 
 // createTextSession 创建文本编码 session，返回 session 和绑定的类型化张量
+// 注意：所有返回的张量都必须由调用方保持引用，确保 Go GC 不会回收它们。
+// AdvancedSession 内部只存储 C 指针，不持有 Go 引用。
 func createTextSession(config TextEncoderConfig) (
 	session *ort.AdvancedSession,
 	inputIDs *ort.Tensor[int64],
 	attentionMask *ort.Tensor[int64],
+	tokenTypeIDs *ort.Tensor[int64],
 	pixelValues *ort.Tensor[float32],
 	textEmbeds *ort.Tensor[float32],
 	err error,
@@ -64,6 +69,9 @@ func createTextSession(config TextEncoderConfig) (
 		}
 		if attentionMask != nil {
 			attentionMask.Destroy()
+		}
+		if tokenTypeIDs != nil {
+			tokenTypeIDs.Destroy()
 		}
 		if pixelValues != nil {
 			pixelValues.Destroy()
@@ -92,7 +100,7 @@ func createTextSession(config TextEncoderConfig) (
 			)
 			if err != nil {
 				cleanup()
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create pixel_values tensor: %w", err)
 			}
 			namedInputs = append(namedInputs, namedInput{name: name, value: pixelValues})
 		case "input_ids":
@@ -101,7 +109,7 @@ func createTextSession(config TextEncoderConfig) (
 			)
 			if err != nil {
 				cleanup()
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
 			}
 			namedInputs = append(namedInputs, namedInput{name: name, value: inputIDs})
 		case "attention_mask":
@@ -110,20 +118,19 @@ func createTextSession(config TextEncoderConfig) (
 			)
 			if err != nil {
 				cleanup()
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
 			}
 			namedInputs = append(namedInputs, namedInput{name: name, value: attentionMask})
 		default:
 			// 其他文本输入 (如 token_type_ids)，按 int64 处理
-			var t *ort.Tensor[int64]
-			t, err = ort.NewEmptyTensor[int64](
+			tokenTypeIDs, err = ort.NewEmptyTensor[int64](
 				ort.NewShape(batchSize, int64(config.SeqLength)),
 			)
 			if err != nil {
 				cleanup()
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create input tensor %s: %w", name, err)
 			}
-			namedInputs = append(namedInputs, namedInput{name: name, value: t})
+			namedInputs = append(namedInputs, namedInput{name: name, value: tokenTypeIDs})
 		}
 	}
 
@@ -149,7 +156,7 @@ func createTextSession(config TextEncoderConfig) (
 	}
 	if err != nil {
 		cleanup()
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create output tensor: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create output tensor: %w", err)
 	}
 
 	outputs := []ort.Value{textEmbeds}
@@ -164,10 +171,10 @@ func createTextSession(config TextEncoderConfig) (
 	)
 	if err != nil {
 		cleanup()
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to create session: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	return session, inputIDs, attentionMask, pixelValues, textEmbeds, nil
+	return session, inputIDs, attentionMask, tokenTypeIDs, pixelValues, textEmbeds, nil
 }
 
 // Embed 文本向量化
@@ -198,6 +205,13 @@ func (e *TextEncoder) Embed(texts []string) ([][]float32, error) {
 		// 2. 将数据写入 session 绑定的输入张量
 		copy(e.inputIDs.GetData(), inputIDs)
 		copy(e.attentionMask.GetData(), mask)
+		// 如果有 token_type_ids 张量（如 BGE 模型需要），设为全零（单序列编码）
+		if e.tokenTypeIDs != nil {
+			ttData := e.tokenTypeIDs.GetData()
+			for j := range ttData {
+				ttData[j] = 0
+			}
+		}
 
 		// 3. 推理（在绑定的张量上执行）
 		if err := e.session.Run(); err != nil {
@@ -228,6 +242,10 @@ func (e *TextEncoder) Close() error {
 	if e.attentionMask != nil {
 		e.attentionMask.Destroy()
 		e.attentionMask = nil
+	}
+	if e.tokenTypeIDs != nil {
+		e.tokenTypeIDs.Destroy()
+		e.tokenTypeIDs = nil
 	}
 	if e.pixelValues != nil {
 		e.pixelValues.Destroy()

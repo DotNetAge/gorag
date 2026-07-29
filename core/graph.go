@@ -4,8 +4,8 @@ package core
 // Node/Edge 属性键名常量。
 // 用于 Node.Properties 和 Edge.Properties 的键名，消除字符串散落。
 const (
-	PropSourceFile  = "source_file"  // 源文件路径
 	PropDir         = "dir"          // 目录路径
+	PropFileName    = "file"         // 文件名
 	PropSignature   = "signature"    // 代码符号签名
 	PropVisibility  = "visibility"   // 代码符号可见性
 	PropReceiver    = "receiver"     // 代码符号接收者

@@ -28,7 +28,7 @@ import (
 // 设计要点：
 //   - 只支持文件输入（AddFile），不支持字符串输入
 //   - 所有内容必须先落盘为文件，通过 document.Open 归一化
-//   - source_file / region_id 等元数据依赖文件路径
+//   - dir / file / region_id 等元数据依赖文件路径
 //   - Search 返回 *core.Hit 容器（持有 Chunks/Nodes/Edges），与 StructuredDoc 对称
 //
 // 实现类型：

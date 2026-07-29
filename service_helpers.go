@@ -372,18 +372,18 @@ func QueryGraphCount(ctx context.Context, db *api.DB, query string) int64 {
 	return count
 }
 
-// SourceHasPrefix 判断 chunk.Source 是否以指定绝对路径开头。
+// PathHasPrefix 判断完整路径是否以指定绝对路径开头。
 // filterPath 必须是已经转换后的绝对路径。
 // 为了避免 /foo 匹配到 /foobar 这类部分路径，函数会自动确保 filterPath 以路径分隔符结尾。
-func SourceHasPrefix(source, filterPath string) bool {
-	if source == "" || filterPath == "" {
+func PathHasPrefix(path, filterPath string) bool {
+	if path == "" || filterPath == "" {
 		return false
 	}
 	// 确保 filterPath 以路径分隔符结尾，避免部分匹配
 	if !strings.HasSuffix(filterPath, string(filepath.Separator)) {
 		filterPath += string(filepath.Separator)
 	}
-	return strings.HasPrefix(source, filterPath)
+	return strings.HasPrefix(path, filterPath)
 }
 
 // TopChunkScore 返回 ChunkHit 切片中的最高分。
@@ -400,9 +400,9 @@ func TopChunkScore(hits []core.ChunkHit) float32 {
 	return max
 }
 
-// FilterHitBySourcePrefix 按 source 路径前缀过滤命中结果。
+// FilterHitByPathPrefix 按文件路径前缀过滤命中结果。
 // 使用 Dir + FileName 重构完整路径后匹配。
-func FilterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
+func FilterHitByPathPrefix(hit *core.Hit, filterPath string) *core.Hit {
 	if hit == nil {
 		return nil
 	}
@@ -414,7 +414,7 @@ func FilterHitBySourcePrefix(hit *core.Hit, filterPath string) *core.Hit {
 	var filtered []core.ChunkHit
 	for _, ch := range hit.Chunks {
 		fullPath := filepath.Join(ch.Chunk.Dir, ch.Chunk.FileName)
-		if SourceHasPrefix(fullPath, absFilter) {
+		if PathHasPrefix(fullPath, absFilter) {
 			filtered = append(filtered, ch)
 		}
 	}

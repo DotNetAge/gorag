@@ -121,7 +121,7 @@ func (d *ModelDownloader) createRequest(method, url string) (*http.Request, erro
 }
 
 // Download 下载 HuggingFace 模型到本地目录
-// modelID: HuggingFace 模型 ID，如 "Xenova/bge-base-zh-v1.5"
+// modelID: HuggingFace 模型 ID，如 "Xenova/bge-small-zh-v1.5"
 // files: 要下载的文件路径列表，如 []string{"config.json", "onnx/model.onnx"}
 func (d *ModelDownloader) Download(modelID string, files []string) (string, error) {
 	if len(files) == 0 {

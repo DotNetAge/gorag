@@ -110,39 +110,48 @@ func WithColors(score, content, meta, title string) func(*TerminalConfig) {
 	}
 }
 
-// formatChunk 格式化单个 ChunkHit，直接使用其 Score/DocID/ID/Content。
-// hit.Chunks 为空时由 FormatAll 处理，此处不处理空场景。
+// formatChunk 格式化单个 ChunkHit。
+// 格式：
+//
+//	N. title
+//	summary
+//	位置:[PXX-PXXX] 路径:[] 标签:[tag1, tag2, tag3]
 func (f *TerminalFormatter) formatChunk(idx int, ch core.ChunkHit) string {
 	if ch.Chunk == nil {
 		return ""
 	}
+	fullPath := filepath.Join(ch.Chunk.Dir, ch.Chunk.FileName)
+
+	// 位置信息
+	pos := ""
+	if ch.Chunk.StartPos > 0 || ch.Chunk.EndPos > 0 {
+		if ch.Chunk.EndPos > ch.Chunk.StartPos {
+			pos = fmt.Sprintf("P%d-P%d", ch.Chunk.StartPos, ch.Chunk.EndPos)
+		} else {
+			pos = fmt.Sprintf("P%d", ch.Chunk.StartPos)
+		}
+	}
+
+	// 标签
+	tags := ""
+	if len(ch.Chunk.Tags) > 0 {
+		tags = strings.Join(ch.Chunk.Tags, ", ")
+	}
 
 	var sb strings.Builder
 
-	// 序号
-	if f.config.ShowIndex {
-		sb.WriteString(f.config.TitleColor)
-		fmt.Fprintf(&sb, "%d. ", idx+1)
-		sb.WriteString(Reset)
-	}
+	// 序号. title
+	fmt.Fprintf(&sb, "%s%d. %s%s\n", f.config.TitleColor, idx+1, ch.Chunk.Title, Reset)
 
-	// 来源文件和行号
-	sb.WriteString(f.config.MetaColor)
-	fmt.Fprintf(&sb, "[%s]", filepath.Join(ch.Dir, ch.FileName))
-	if ch.StartLine > 0 || ch.EndLine > 0 {
-		fmt.Fprintf(&sb, " [L%d-L%d]", ch.StartLine, ch.EndLine)
-	}
-	sb.WriteString(Reset)
-	sb.WriteString("\n")
+	// summary
+	fmt.Fprintf(&sb, "%s%s%s\n", f.config.ContentColor, ch.Chunk.Summary, Reset)
 
-	// 内容
-	sb.WriteString(f.config.ContentColor)
-	content := ch.Content
-	if f.config.ContentMax > 0 && len(content) > f.config.ContentMax {
-		content = content[:f.config.ContentMax] + "..."
+	// 元数据行：路径、位置、标签
+	fmt.Fprintf(&sb, "%s 路径:%s 位置:[%s]", f.config.MetaColor, fullPath, pos)
+	if tags != "" {
+		fmt.Fprintf(&sb, " 标签:[%s]", tags)
 	}
-	sb.WriteString(content)
-	sb.WriteString(Reset)
+	fmt.Fprint(&sb, Reset)
 
 	return sb.String()
 }

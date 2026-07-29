@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -313,13 +314,14 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		"nodes", len(doc.Nodes()),
 		"edges", len(doc.Edges()))
 
-	// 获取文件路径，用于为 Document 节点添加 source_file 属性
-	var sourceFile string
+	// 获取文件路径，用于为 Document 节点补充 dir + file 属性
+	var docDir, docFile string
 	if raw := doc.Raw(); raw != nil {
-		sourceFile = raw.FileName()
+		fn := raw.FileName()
+		docDir = strings.ToLower(filepath.Dir(fn))
+		docFile = strings.ToLower(filepath.Base(fn))
 	}
-	idx.logger.Debug("图索引器: Save 文件路径", "source_file", sourceFile)
-	fmt.Fprintf(os.Stderr, "[DEBUG] Save source_file=%s\n", sourceFile)
+	idx.logger.Debug("图索引器: Save 文件路径", "dir", docDir, "file", docFile)
 
 	// 1. 从 doc.Nodes() 读取，转换为 []*core.Node，调用 graphDB.UpsertNodes
 	rawNodes := doc.Nodes()
@@ -328,14 +330,15 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		nodes := make([]*core.Node, 0, len(rawNodes))
 		for i := range rawNodes {
 			n := rawNodes[i] // 复制一份，取地址
-			// 为 Document 节点补充 source_file 属性（供 CountByRegion 查询）
-			if sourceFile != "" {
+			// 为 Document 节点补充 dir + file 属性（与 Chunk.Dir/FileName 一致）
+			if docDir != "" {
 				for _, l := range n.Labels {
 					if l == "Document" {
 						if n.Properties == nil {
 							n.Properties = map[string]any{}
 						}
-						n.Properties[core.PropSourceFile] = sourceFile
+						n.Properties[core.PropDir] = docDir
+						n.Properties[core.PropFileName] = docFile
 						documentCount++
 						break
 					}
@@ -353,7 +356,7 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		idx.statsMu.Unlock()
 		idx.logger.Debug("图索引器: 节点写入完成",
 			"nodes", len(nodes),
-			"document_with_source_file", documentCount)
+			"document_with_dir_file", documentCount)
 	}
 
 	// 2. 从 doc.Edges() 读取，转换为 []*core.Edge，调用 graphDB.UpsertEdges
@@ -405,7 +408,7 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 	if fileName == "" {
 		return nil
 	}
-	dir := filepath.Dir(fileName)
+	dir := strings.ToLower(filepath.Dir(fileName))
 	regionName := filepath.Base(dir)
 	if regionName == "" || regionName == "." || regionName == "/" {
 		return nil
@@ -780,13 +783,14 @@ func (idx *GraphIndexer) CypherQuery(ctx context.Context, q string, params map[s
 // 流程：
 //  1. 通过目录路径生成 Region 节点 ID，获取 Region 节点
 //  2. 从 Region 节点出发，遍历 depth 跳邻居
-//  3. 通过 Cypher 查询所有 source_file 以 dir 为前缀的 Document 节点，
+//  3. 通过 Cypher 查询所有 dir 以指定目录为前缀的 Document 节点，
 //     从这些 Document 出发获取 entity 子节点（解决子目录 Region 独立导致的实体不可达问题）
 //  4. 合并全部节点与边并去重
 func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error) {
 	if idx.graphDB == nil {
 		return nil, fmt.Errorf("图索引器: graphDB 未初始化")
 	}
+	dir = strings.ToLower(dir)
 	if dir == "" {
 		return nil, fmt.Errorf("图索引器: 目录路径不能为空")
 	}
@@ -847,16 +851,15 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 		}
 	}
 
-	// Step 3: 从 source_file 前缀匹配的 Document 出发，捕获子目录实体的节点与边
+	// Step 3: 从 dir 前缀匹配的 Document 出发，捕获子目录实体的节点与边
 	// 解决子目录有独立 Region、根 Region 不可达的问题
 	idx.logger.Debug("图索引器: 执行 Document 前缀查询",
 		"dir", dir,
-		"query", "MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN d",
-		"params_path", dir)
+		"query", "MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN d")
 
 	docRows, queryErr := idx.graphDB.Query(ctx,
-		`MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN d`,
-		map[string]any{"path": dir})
+		`MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN d`,
+		map[string]any{"dir": dir})
 
 	if queryErr != nil {
 		idx.logger.Warn("图索引器: Document 前缀查询失败，仅返回 Region 遍历结果",
@@ -865,7 +868,7 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 		idx.logger.Debug("图索引器: Document 前缀查询结果", "rows", len(docRows))
 		fmt.Fprintf(os.Stderr, "[DEBUG] ExploreRegion docRows count=%d\n", len(docRows))
 		if len(docRows) == 0 {
-			idx.logger.Debug("图索引器: 无匹配 Document 节点，可能原因：", "建议", "1) source_file 属性未写入 2) 路径前缀不匹配 3) 节点实际数量")
+			idx.logger.Debug("图索引器: 无匹配 Document 节点，可能原因：", "建议", "1) dir + file 属性未写入 2) 路径前缀不匹配 3) 节点实际数量")
 		}
 		for _, row := range docRows {
 			dMap, ok := row["d"].(map[string]any)
@@ -939,7 +942,7 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 // ExploreFile 以文件 Document 为中心探索实体和关系。
 //
 // 流程：
-//  1. 通过 Cypher 查询 exact match source_file 的 Document 节点
+//  1. 通过 Cypher 查询 dir + file 精确匹配的 Document 节点
 //  2. 从 Document 出发遍历 depth 跳邻居实体
 //  3. 返回实体节点与关系边
 //
@@ -962,13 +965,16 @@ func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth
 		limit = 100
 	}
 
+	fileDir := strings.ToLower(filepath.Dir(filePath))
+	fileName := strings.ToLower(filepath.Base(filePath))
+
 	nodeMap := make(map[string]*core.Node)
 	edgeMap := make(map[string]*core.Edge)
 
-	// Step 1: 精确匹配 source_file 的 Document 节点
+	// Step 1: 精确匹配 dir + file 的 Document 节点
 	docRows, err := idx.graphDB.Query(ctx,
-		`MATCH (d:Document) WHERE d.source_file = $path RETURN d`,
-		map[string]any{"path": filePath})
+		`MATCH (d:Document) WHERE d.dir = $dir AND d.file = $file RETURN d`,
+		map[string]any{"dir": fileDir, "file": fileName})
 	if err != nil {
 		idx.logger.Error("图索引器: Document 精确查询失败", err, "file", filePath)
 		return nil, fmt.Errorf("图索引器: 查询文件 Document 节点失败: %w", err)
@@ -1032,17 +1038,18 @@ func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth
 	}, nil
 }
 
-// CountByRegion 返回指定路径下（source_file 前缀匹配）的 Document 节点总数。
-// Document 节点的 source_file 属性由 Save 方法在写入时填充。
+// CountByRegion 返回指定路径下（dir 前缀匹配）的 Document 节点总数。
+// Document 节点的 dir 属性由 Save 方法在写入时填充。
 func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, error) {
 	if idx.graphDB == nil {
 		return 0, nil
 	}
+	path = strings.ToLower(path)
 	if path == "" {
 		return 0, nil
 	}
-	cypher := `MATCH (d:Document) WHERE d.source_file STARTS WITH $path RETURN count(d) AS cnt`
-	rows, err := idx.graphDB.Query(ctx, cypher, map[string]any{"path": path})
+	cypher := `MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN count(d) AS cnt`
+	rows, err := idx.graphDB.Query(ctx, cypher, map[string]any{"dir": path})
 	if err != nil {
 		idx.logger.Error("图索引器: CountByRegion 查询失败", err, "path", path)
 		return 0, fmt.Errorf("图索引器: CountByRegion 查询失败: %w", err)
@@ -1149,7 +1156,7 @@ func extractNodeFromRow(row map[string]any) *core.Node {
 }
 
 // nodeToTreeNode 将 graphDB Node 转换为 TreeNode。
-// Document 节点的 source_file 映射到 Path；Region 节点的 dir 映射到 Path。
+// Document/Region 节点的 dir 映射到 Path。
 func nodeToTreeNode(n *core.Node, nodeType string) *core.TreeNode {
 	tn := &core.TreeNode{
 		ID:   n.ID,
@@ -1157,9 +1164,6 @@ func nodeToTreeNode(n *core.Node, nodeType string) *core.TreeNode {
 		Name: n.Name,
 	}
 	if n.Properties != nil {
-		if sourceFile, ok := n.Properties[core.PropSourceFile].(string); ok && sourceFile != "" {
-			tn.Path = sourceFile
-		}
 		if dir, ok := n.Properties[core.PropDir].(string); ok && dir != "" {
 			tn.Path = dir
 		}

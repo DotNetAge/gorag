@@ -8,6 +8,7 @@ import (
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/embedder"
 	"github.com/DotNetAge/gorag/v2/indexer"
+	"github.com/DotNetAge/gorag/v2/logging"
 	"github.com/DotNetAge/gorag/v2/store/graph/gograph"
 	"github.com/DotNetAge/gorag/v2/store/vector/govector"
 	"github.com/DotNetAge/gorag/v2/utils"
@@ -53,6 +54,7 @@ type StorageConfig struct {
 type EmbeddingConfig struct {
 	ModelFile string `yaml:"model_file"` // ONNX 模型文件路径
 	Dimension int    `yaml:"dimension"`  // 向量维度
+	ModelType string `yaml:"model_type"` // 模型类型: "bge"（纯文本）| "clip"（多模态），默认 "bge"
 }
 
 // LLMConfig LLM 配置
@@ -97,6 +99,20 @@ func WithEmbeddingModelFile(modelFile string) RAGOption {
 	}
 }
 
+// WithEmbeddingDimension 设置向量维度
+func WithEmbeddingDimension(dim int) RAGOption {
+	return func(cfg *Config) {
+		cfg.Embedding.Dimension = dim
+	}
+}
+
+// WithEmbeddingModelType 设置模型类型（"bge" | "clip"）
+func WithEmbeddingModelType(modelType string) RAGOption {
+	return func(cfg *Config) {
+		cfg.Embedding.ModelType = modelType
+	}
+}
+
 // WithIndexType 设置索引器类型
 func WithIndexType(indexType string) RAGOption {
 	return func(cfg *Config) {
@@ -122,6 +138,7 @@ func defaultConfig() *Config {
 		},
 		Embedding: EmbeddingConfig{
 			Dimension: 512,
+			ModelType: "bge",
 		},
 		LLM: LLMConfig{
 			Language:      "Chinese",
@@ -157,12 +174,19 @@ func Init(ragDir string) error {
 		}
 	}
 
-	// 3. 写入默认 config.yml（已存在则跳过）
+	// 3. 写入默认 config.yml（已存在则跳过，但迁移过时的维度值）
 	configPath := filepath.Join(ragDir, configFileName)
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		cfg := defaultConfig()
 		if err := saveConfig(ragDir, cfg); err != nil {
 			return fmt.Errorf("写入 config.yml 失败: %w", err)
+		}
+	} else {
+		// 已存在：检查并修复过时的维度值（384→512）
+		cfg, err := loadConfig(ragDir)
+		if err == nil && cfg.Embedding.Dimension == 384 {
+			cfg.Embedding.Dimension = 512
+			_ = saveConfig(ragDir, cfg)
 		}
 	}
 
@@ -210,6 +234,8 @@ logs/
 # 依赖和构建产物
 node_modules/
 vendor/
+.venv/
+venv/
 dist*/
 build/
 target/
@@ -286,19 +312,38 @@ func Open(ragDir string, opts ...RAGOption) (indexer.Indexer, error) {
 // createIndexer 根据 cfg.Indexer.Type 实例化索引器
 //
 // 策略：
+//   - 先按 cfg.Embedding.ModelType 创建 Embedder（bge 或 clip）
+//   - 再按 type 路由：semantic / graph / hyper
 //   - type=semantic → SemanticIndexer（仅向量库 + embedder）
 //   - type=graph    → GraphIndexer（纯图谱模式，不需要 LLM/extractor，独立使用一般不推荐）
 //   - type=hyper    → HyperIndexer（语义线 + 关系线，生产推荐模式）
 //   - 未显式配置 type 时：有 LLM 默认 hyper，无 LLM 默认 semantic
 func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
-	// 创建 embedder
-	clip, err := embedder.GetOrCreateChineseClipEmbedder(embedder.WithModelFile(cfg.Embedding.ModelFile))
-	if err != nil {
-		return nil, fmt.Errorf("创建 embedder 失败: %w", err)
+	// 创建文件日志器写入 {dataDir}/logs/gorag.log
+	indexLogger := logging.DefaultConsoleLogger()
+
+	// 创建 embedder（按 model_type 选择）
+	var emb core.Embedder
+	switch cfg.Embedding.ModelType {
+	case "clip":
+		clip, err := embedder.GetOrCreateChineseClipEmbedder(embedder.WithModelFile(cfg.Embedding.ModelFile))
+		if err != nil {
+			return nil, fmt.Errorf("创建 CLIP embedder 失败: %w", err)
+		}
+		emb = clip
+	default: // "bge"
+		bge, err := embedder.NewBGEEmbedder(
+			embedder.WithBGEModelFile(cfg.Embedding.ModelFile),
+			embedder.WithBGEDimension(cfg.Embedding.Dimension),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("创建 BGE embedder 失败: %w", err)
+		}
+		emb = bge
 	}
 
 	// 创建向量库
-	vectorStore, err := createVectorDB(ragDir, clip)
+	vectorStore, err := createVectorDB(ragDir, emb)
 	if err != nil {
 		return nil, fmt.Errorf("创建向量库失败: %w", err)
 	}
@@ -319,7 +364,8 @@ func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 	switch idxType {
 	case "semantic":
 		// 纯语义模式：仅向量库 + embedder
-		return indexer.NewSemanticIndexer(vectorStore, clip)
+		return indexer.NewSemanticIndexer(vectorStore, emb,
+			indexer.WithSemanticLogger(indexLogger))
 
 	case "graph":
 		// 纯图谱模式（独立使用，一般不推荐）
@@ -332,11 +378,10 @@ func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 
 	case "hyper":
 		// 生产推荐模式：语义线 + 关系线
-		// SemanticIndexer 不再持有 Summarizer（已移除），
-		// Summarizer 由 HyperIndexer 在后续版本中通过 WithHyperSummarizer 注入
 
-		// 1. 创建 SemanticIndexer
-		semantic, err := indexer.NewSemanticIndexer(vectorStore, clip)
+		// 1. 创建 SemanticIndexer（注入日志器以便查看向量化细节）
+		semantic, err := indexer.NewSemanticIndexer(vectorStore, emb,
+			indexer.WithSemanticLogger(indexLogger))
 		if err != nil {
 			return nil, fmt.Errorf("创建 SemanticIndexer 失败: %w", err)
 		}
@@ -352,7 +397,8 @@ func createIndexer(ragDir string, cfg *Config) (indexer.Indexer, error) {
 		}
 
 		// 3. 组合为 HyperIndexer（semantic 必传，graph 可为 nil 但此处不为 nil）
-		return indexer.NewHyperIndexer(semantic, graph)
+		return indexer.NewHyperIndexer(semantic, graph,
+			indexer.WithHyperLogger(indexLogger))
 
 	default:
 		return nil, fmt.Errorf("不支持的索引器类型: %s（仅支持 semantic/graph/hyper）", idxType)
@@ -442,7 +488,7 @@ func LoadConfig(ragDir string) (*Config, error) {
 }
 
 // createVectorDB 创建向量库
-func createVectorDB(ragDir string, clip *embedder.ChineseClipEmbedder) (core.VectorStore, error) {
+func createVectorDB(ragDir string, emb core.Embedder) (core.VectorStore, error) {
 	name := filepath.Base(ragDir)
 	cfg, _ := loadConfig(ragDir)
 	vectorsDir := cfg.Storage.VectorsDir
@@ -452,7 +498,7 @@ func createVectorDB(ragDir string, clip *embedder.ChineseClipEmbedder) (core.Vec
 	vectorDbFile := filepath.Join(ragDir, vectorsDir, name+".db")
 	return govector.NewStore(
 		govector.WithCollection(name),
-		govector.WithDimension(clip.Dim()),
+		govector.WithDimension(emb.Dim()),
 		govector.WithDBPath(vectorDbFile),
 		govector.WithHNSW(true),
 	)

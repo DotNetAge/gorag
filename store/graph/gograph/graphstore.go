@@ -180,24 +180,13 @@ func convertEdge(rel graph.Relationship) *core.Edge {
 
 // gographStore is an implementation of core.GraphStore using gograph.
 type gographStore struct {
-	dbPath string          // open-close 模式
-	db     *api.DB         // WrapGraphStore 模式（非空时优先使用）
-	gs     *api.GraphStore // WrapGraphStore 模式（非空时优先使用）
+	db *api.DB         // 持久化 Pebble 连接
+	gs *api.GraphStore // 持久化 GraphStore 实例
 }
 
-// withStore 统一管理数据库连接生命周期。
-// WrapGraphStore 模式（s.db != nil）时直接使用已有连接，否则打开新连接。
+// withStore 直接使用持久化连接，避免每次操作重复打开/关闭 Pebble 数据库。
 func (s *gographStore) withStore(fn func(db *api.DB, gs *api.GraphStore) error) error {
-	if s.db != nil {
-		return fn(s.db, s.gs)
-	}
-	db, err := api.Open(s.dbPath)
-	if err != nil {
-		return fmt.Errorf("gograph: 打开数据库失败: %w", err)
-	}
-	defer db.Close()
-	gs := api.NewGraphStore(db)
-	return fn(db, gs)
+	return fn(s.db, s.gs)
 }
 
 // Options contains configuration options for the gograph store.
@@ -230,15 +219,21 @@ func DefaultGraphStore(opts ...Option) (core.GraphStore, error) {
 	return NewGraphStore(options.Path)
 }
 
-// NewGraphStore creates a new gograph store with the specified path.
+// NewGraphStore 创建持久化连接的 gograph store。
+// 构造函数中一次打开 Pebble 数据库，后续所有操作复用同一连接。
 func NewGraphStore(path string) (core.GraphStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("gograph.NewGraphStore: 数据库路径不能为空")
 	}
-	s := &gographStore{dbPath: path}
-	return s, s.withStore(func(db *api.DB, gs *api.GraphStore) error {
-		return nil
-	})
+	db, err := api.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("gograph: 打开数据库失败: %w", err)
+	}
+	gs := api.NewGraphStore(db)
+	return &gographStore{
+		db: db,
+		gs: gs,
+	}, nil
 }
 
 // WrapGraphStore 将已存在的 gograph 数据库包装为 core.GraphStore 接口。
@@ -478,9 +473,7 @@ func (s *gographStore) Clear(ctx context.Context) error {
 	})
 }
 
-// Close closes the graph store.
-// 在 open-close 模式下（dbPath 模式）无需显式关闭，连接已由 withStore 管理。
-// 在 WrapGraphStore 模式下关闭底层连接。
+// Close 关闭持久化数据库连接。
 func (s *gographStore) Close(ctx context.Context) error {
 	if s.db != nil {
 		return s.db.Close()

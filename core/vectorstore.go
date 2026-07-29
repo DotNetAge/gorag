@@ -52,6 +52,6 @@ type VectorStore interface {
 //   - "prefix"：前缀匹配（仅适用于 string 类型 value）
 type FilterCondition struct {
 	Key   string `json:"key"`
-	Type  string `json:"type"`  // "exact" 或 "prefix"
+	Type  string `json:"type"` // "exact" 或 "prefix"
 	Value any    `json:"value"`
 }

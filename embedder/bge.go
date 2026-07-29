@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	// BGE 默认配置 (base 模型)
-	bgeDefaultModelFile = "./models/bge-base-zh-v1.5/onnx/model.onnx"
-	bgeDefaultDimension = 768 // BGE-base hidden size
+	// BGE 默认配置 (small 模型)
+	bgeDefaultModelFile = "./models/bge-small-zh-v1.5/onnx/model.onnx"
+	bgeDefaultDimension = 512 // BGE-small-zh hidden size (英文 small 为 384，中文为 512)
 	bgeDefaultMaxLength = 512 // BGE 最大序列长度
 )
 
@@ -47,13 +47,13 @@ func WithBGEDimension(dim int) BGEOption {
 
 // BGEEmbedder 使用 onnxruntime-go 进行 BGE ONNX 模型推理
 type BGEEmbedder struct {
-	encoder   *TextEncoder   // 通用文本编码器
+	encoder   *TextEncoder // 通用文本编码器
 	tokenizer *VocabTokenizer
 	dimension int
 }
 
 // NewBGEEmbedder 创建 BGE 向量化器
-// 默认从 ./models/bge-base-zh-v1.5/onnx/model.onnx 加载模型
+// 默认从 ./models/bge-small-zh-v1.5/onnx/model.onnx 加载模型
 func NewBGEEmbedder(opts ...BGEOption) (*BGEEmbedder, error) {
 	cfg := &bgeConfig{
 		modelFile: bgeDefaultModelFile,
@@ -87,15 +87,15 @@ func NewBGEEmbedder(opts ...BGEOption) (*BGEEmbedder, error) {
 	modelPath := cfg.modelFile
 
 	// 验证模型
-	inputNames := []string{"input_ids", "attention_mask"}
+	inputNames := []string{"input_ids", "attention_mask", "token_type_ids"}
 	outputNames := []string{"last_hidden_state"}
 
-	// 尝试验证，如果失败则尝试其他输入组合
+	// 部分 BGE 模型不需要 token_type_ids，验证失败时降级
 	validated := validateTextEncoderConfig(modelPath, inputNames, outputNames, cfg.dimension, bgeDefaultMaxLength)
 	if !validated {
 		altInputs := [][]string{
+			{"input_ids", "attention_mask"},
 			{"input_ids"},
-			{"input_ids", "attention_mask", "token_type_ids"},
 		}
 		for _, inputs := range altInputs {
 			if validateTextEncoderConfig(modelPath, inputs, outputNames, cfg.dimension, bgeDefaultMaxLength) {

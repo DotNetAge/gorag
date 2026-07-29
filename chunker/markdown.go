@@ -64,7 +64,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	src := []byte(content)
 
-	dir := filepath.Dir(doc.FileName())
+	dir := strings.ToLower(filepath.Dir(doc.FileName()))
 	regionName := filepath.Base(dir)
 
 	// README.md 生成式路径：检测到 RegionDescriptorMarker 直接返回单 Chunk，不再按 heading 切分

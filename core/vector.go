@@ -20,6 +20,7 @@ const (
 	VecMetaEndLine   = "end_line"   // Chunk.EndLine
 	VecMetaStartPos  = "start_pos"  // Chunk.StartPos
 	VecMetaEndPos    = "end_pos"    // Chunk.EndPos
+	VecMetaIndex     = "index"     // Chunk.Index
 )
 
 // Vector 向量：Chunk 的向量化表示。

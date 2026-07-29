@@ -42,8 +42,8 @@ type Chunk struct {
 	Summary   string         `json:"summary"`              // 分片摘要（由 Chunker/Summarizer 生成；向量化为 chunkID:summary）
 	Content   string         `json:"content"`              // 分片内容（清洗后纯文本；向量化为主向量 chunkID）
 	Tags      []string       `json:"tags,omitempty"`       // 标签列表（由 Chunker/用户标注；用于分类和过滤）
-	FileName  string         `json:"file_name,omitempty"`  // 文件名（filepath.Base 结果；全小写）
-	Dir       string         `json:"dir,omitempty"`        // 目录绝对路径（filepath.Dir 结果；全小写）
+	FileName  string         `json:"file_name,omitempty"`  // 文件名（filepath.Base 结果）
+	Dir       string         `json:"dir,omitempty"`        // 目录绝对路径（filepath.Dir 结果）
 	RegionID  string         `json:"region_id,omitempty"`  // 所属 Region ID（目录的 SHA256 哈希；由 Chunker 写入）
 	Language  string         `json:"language,omitempty"`   // 代码语言（如 go/python；由 CodeChunker 写入）
 	StartLine int            `json:"start_line,omitempty"` // 在源文件中的起始行号（由 CodeChunker 写入）
