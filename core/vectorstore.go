@@ -41,6 +41,12 @@ type VectorStore interface {
 	// Clear 清空所有向量数据，清空后可立即接收新数据。
 	Clear(ctx context.Context) error
 
+	// Flush 强制将写入缓冲刷入持久化存储。
+	// 底层存储（如 govector）为性能采用攒批缓冲写入：数据先进内存索引（查询
+	// 即时可见），只有攒够阈值或显式 Flush/Close 才真正写入磁盘。调用方应在
+	// 关键数据写入后立即调用，避免进程异常退出导致缓冲中的数据丢失。
+	Flush(ctx context.Context) error
+
 	// Close 优雅关闭连接，释放底层资源。
 	Close(ctx context.Context) error
 }

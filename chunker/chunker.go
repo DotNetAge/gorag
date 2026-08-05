@@ -74,13 +74,25 @@ func New(doc document.RawDoc) (Chunker, error) {
 // 共用辅助函数
 // =====================================================================
 
+// setContentType 为分片统一标注内容类型（写入 core.MetaContentType）。
+// 取值与 Node 根标签（core.ContentType*）同源；由各 Chunker 按自身类别调用。
+func setContentType(chunks []core.Chunk, ct string) []core.Chunk {
+	for i := range chunks {
+		if chunks[i].Metadata == nil {
+			chunks[i].Metadata = map[string]any{}
+		}
+		chunks[i].Metadata[core.MetaContentType] = ct
+	}
+	return chunks
+}
+
 // buildChunk 构造单个 Chunk，统一填充 ID/DocID/Source。
 //
 // 设计要点：
-	//   - Chunk.ID 使用 utils.GenerateID([]byte(docID + ":" + title + ":" + content)) 生成
-	//     将 title（路径/符号名/数据路径等）纳入盐值，可避免数据文件中相同内容的记录（如数组里多个相同对象）产生重复 ID
-	//   - Summary 字段默认留空，由各 Chunker 在返回前按统一策略填充
-	//   - Chunk.FileName / Dir 直接记录 doc.FileName() 的 Base / Dir 部分（高频跨包属性已提升为结构体字段）
+//   - Chunk.ID 使用 utils.GenerateID([]byte(docID + ":" + title + ":" + content)) 生成
+//     将 title（路径/符号名/数据路径等）纳入盐值，可避免数据文件中相同内容的记录（如数组里多个相同对象）产生重复 ID
+//   - Summary 字段默认留空，由各 Chunker 在返回前按统一策略填充
+//   - Chunk.FileName / Dir 直接记录 doc.FileName() 的 Base / Dir 部分（高频跨包属性已提升为结构体字段）
 func buildChunk(
 	doc document.RawDoc,
 	idx int,

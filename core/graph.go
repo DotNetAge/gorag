@@ -4,18 +4,18 @@ package core
 // Node/Edge 属性键名常量。
 // 用于 Node.Properties 和 Edge.Properties 的键名，消除字符串散落。
 const (
-	PropDir         = "dir"          // 目录路径
-	PropFileName    = "file"         // 文件名
-	PropSignature   = "signature"    // 代码符号签名
-	PropVisibility  = "visibility"   // 代码符号可见性
-	PropReceiver    = "receiver"     // 代码符号接收者
-	PropPackage     = "package"      // 代码包名
-	PropFrequency   = "frequency"    // 跨文档出现次数
-	PropConfidence  = "confidence"   // 抽取置信度（0~1）
-	PropScore       = "score"        // 关系强度分数
-	PropEvidence    = "evidence"     // 关系的文本证据
-	PropAliases     = "aliases"      // 别名列表
-	PropVectors     = "vectors"      // 语义 embedding 向量
+	PropDir        = "dir"        // 目录路径
+	PropFileName   = "file"       // 文件名
+	PropSignature  = "signature"  // 代码符号签名
+	PropVisibility = "visibility" // 代码符号可见性
+	PropReceiver   = "receiver"   // 代码符号接收者
+	PropPackage    = "package"    // 代码包名
+	PropFrequency  = "frequency"  // 跨文档出现次数
+	PropConfidence = "confidence" // 抽取置信度（0~1）
+	PropScore      = "score"      // 关系强度分数
+	PropEvidence   = "evidence"   // 关系的文本证据
+	PropAliases    = "aliases"    // 别名列表
+	PropVectors    = "vectors"    // 语义 embedding 向量
 )
 
 // Node 表示 RAG 知识图谱中的图节点实体。
@@ -52,9 +52,26 @@ type Edge struct {
 // Label 常量：Graph 内节点的 Labels 标识
 // Chunk 不作为 Node 写入 GraphStore，只存在于 VectorStore（语义线）；
 // 实体 Node 存在于 GraphStore（关系线），二者通过 Node.SourceChunkIDs 双向关联。
+//
+// 根节点类别约定：Document/Code/Image/DataFile 四类为「文档根节点」标签，
+// 由 Chunker 在分块时产出，不参与实体抽取的类别体系（Person/Organization 等）。
+// 取值与 Chunk 的 content_type（core.ContentType*）同源。
 const (
-	LabelRegion = "Region" // Region 节点：对应目录 README.md 的知识库分区
+	LabelDocument = ContentTypeDocument // 文档根节点
+	LabelCode     = ContentTypeCode     // 代码文档根节点
+	LabelImage    = ContentTypeImage    // 图片根节点
+	LabelDataFile = ContentTypeDataFile // 数据文件根节点
+	LabelRegion   = "Region"            // Region 节点：对应目录 README.md 的知识库分区
 )
+
+// IsRootLabel 判断标签是否为文档根节点类别之一（Document/Code/Image/DataFile）。
+func IsRootLabel(label string) bool {
+	switch label {
+	case LabelDocument, LabelCode, LabelImage, LabelDataFile:
+		return true
+	}
+	return false
+}
 
 // Edge Type 常量：Graph 内边的 Type 标识
 // Chunk 不在 Graph 中，分块树只在 VectorStore.Metadata 中通过 parent_id 体现。

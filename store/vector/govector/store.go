@@ -295,6 +295,22 @@ func (s *Store) Close(ctx context.Context) error {
 	return s.collection.Close()
 }
 
+// Flush 强制将写入缓冲（writeBuf）刷入 bbolt，确保数据真正落盘。
+//
+// govector 的 Upsert 是攒批缓冲写入：数据先进内存索引（查询即时可见），
+// 只有攒够 flushThreshold 或显式 Close/Flush 才写 bbolt。
+// 对关键数据（如记忆、知识库索引），调用方应在写入后立即调用本方法，
+// 避免进程异常退出（如 os.Exit 重启）导致缓冲中的数据丢失。
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//
+// Returns:
+//   - error: Any error that occurred
+func (s *Store) Flush(ctx context.Context) error {
+	return s.collection.Flush()
+}
+
 // GetByDocID retrieves all vectors belonging to the same document by doc_id.
 // Results are sorted by chunk_meta.index to enable document reconstruction.
 //

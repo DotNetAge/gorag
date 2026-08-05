@@ -885,3 +885,57 @@ func TestMarkdownChunker_GeneratedRegionDescriptor(t *testing.T) {
 		t.Errorf("生成式 README Chunk 应设置 %s=true", core.MetaRegionGenerated)
 	}
 }
+
+// TestChunker_ContentType 验证四个分块器产出的 Chunk 均标注 content_type（写入向量 metadata）。
+func TestChunker_ContentType(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		content  string
+		chunker  func(document.RawDoc) (ChunkResult, error)
+		expected string
+	}{
+		{
+			name:     "代码分片",
+			fileName: "demo.go",
+			content:  "package main\n\nfunc main() {}\n",
+			chunker:  NewCodeChunker().Chunk,
+			expected: core.ContentTypeCode,
+		},
+		{
+			name:     "文档分片",
+			fileName: "doc.md",
+			content:  "# 标题\n\n正文。\n",
+			chunker:  NewMarkdownChunker().Chunk,
+			expected: core.ContentTypeDocument,
+		},
+		{
+			name:     "数据分片",
+			fileName: "data.json",
+			content:  `{"name": "test"}`,
+			chunker:  NewDatumChunker().Chunk,
+			expected: core.ContentTypeDataFile,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempFile(t, tt.fileName, tt.content)
+			doc, err := document.Open(path)
+			if err != nil {
+				t.Fatalf("document.Open 失败: %v", err)
+			}
+			result, err := tt.chunker(doc)
+			if err != nil {
+				t.Fatalf("Chunker 返回错误: %v", err)
+			}
+			if len(result.Chunks) == 0 {
+				t.Fatalf("期望至少 1 个 chunk，实际 0")
+			}
+			for _, c := range result.Chunks {
+				if c.Metadata[core.MetaContentType] != tt.expected {
+					t.Errorf("chunk %q content_type 期望 %q，实际 %v", c.Title, tt.expected, c.Metadata[core.MetaContentType])
+				}
+			}
+		})
+	}
+}

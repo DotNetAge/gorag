@@ -75,6 +75,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 			core.MetaRegionGenerated:    true,
 		}
 		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
+		chunks = setContentType(chunks, core.ContentTypeDocument)
 		regionNode := buildRegionNode(doc, dir, []string{chunks[0].ID})
 		return ChunkResult{
 			Chunks: chunks,
@@ -91,7 +92,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		title := deriveTitle(doc.FileName())
 		chunk := buildChunk(doc, 0, 0, len(content), title, content)
 		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeDocument)}, nil
 	}
 	defer tree.BlockTree().Close()
 
@@ -102,7 +103,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		title := deriveTitle(doc.FileName())
 		chunk := buildChunk(doc, 0, 0, len(content), title, content)
 		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeDocument)}, nil
 	}
 	defer q.Close()
 
@@ -139,7 +140,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		title := deriveTitle(doc.FileName())
 		chunk := buildChunk(doc, 0, 0, len(content), title, content)
 		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeDocument)}, nil
 	}
 
 	var chunks []core.Chunk
@@ -198,6 +199,7 @@ func (m *MarkdownChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	// 9. 统一 enriched 通用元数据（行号、语言、目录等）
 	chunks = enrichChunksMetadata(chunks, content, doc.FileName())
+	chunks = setContentType(chunks, core.ContentTypeDocument)
 
 	return ChunkResult{
 		Chunks: chunks,

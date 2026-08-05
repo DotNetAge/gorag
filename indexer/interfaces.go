@@ -105,6 +105,21 @@ type IndexerCloser interface {
 	Close(ctx context.Context) error
 }
 
+// IndexerFlusher 落盘接口：强制将写入缓冲刷入持久化存储。
+//
+// 底层存储（如 govector）为性能采用攒批缓冲写入：数据先进内存索引（查询
+// 即时可见），只有攒够阈值或显式 Flush/Close 才真正写入磁盘。对关键数据
+// （如记忆），调用方应在写入后立即调用 Flush，避免进程异常退出
+// （如 os.Exit 重启）导致缓冲中的数据丢失。
+//
+// 调用方按需 type-assert：
+//
+//	if f, ok := idx.(IndexerFlusher); ok { f.Flush(ctx) }
+type IndexerFlusher interface {
+	// Flush 强制将写入缓冲刷入持久化存储。
+	Flush(ctx context.Context) error
+}
+
 // TreeViewBuilder 知识库导航接口：构建 Region → Document → Chunk 层级树。
 //
 // 仅 HyperIndexer 实现，因为它需要同时访问 GraphStore 的 Region→Document 层级

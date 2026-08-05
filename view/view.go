@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/DotNetAge/gorag/v2/core"
 )
 
 // ── 公共类型 ─────────────────────────────────────────────────
@@ -259,8 +261,15 @@ func (s *Service) ListLabels(ctx context.Context) ([]LabelInfo, error) {
 		}
 	}
 
-	// 2. 过滤内部标签
-	internal := map[string]struct{}{"Region": {}, "Document": {}, "__Node__": {}}
+	// 2. 过滤内部标签（Region、文档根节点四类、__Node__）
+	internal := map[string]struct{}{
+		core.LabelRegion:   {},
+		core.LabelDocument: {},
+		core.LabelCode:     {},
+		core.LabelImage:    {},
+		core.LabelDataFile: {},
+		"__Node__":         {},
+	}
 	results := make([]LabelInfo, 0, len(labelSet))
 	for label := range labelSet {
 		if _, skip := internal[label]; skip {

@@ -866,15 +866,25 @@ func (s *semanticIndexer) GetChunks(ctx context.Context, docID string) ([]*core.
 
 // Count 实现 IndexerAdmin 接口：返回已索引的 Chunk 总数。
 //
-// 使用 VectorStore.Count() 获取原始向量总数，这是 col.Count() 的轻量调用（O(1)），
-// 只读取 bbolt bucket 元素计数，不加载向量数据。
-//
-// 注意：VectorStore.Count 返回的是所有向量总数（含 :title / :summary 从属维度），
-// 会比实际 Chunk 数偏高约 2~3 倍。上层调用方（如 Tree）可据此估算。
+// 多维度向量索引会为同一 Chunk 写入 Content/Title/Summary 三个向量，
+// 从属向量（:title / :summary）仅服务于搜索召回，不属于独立 Chunk。
+// 因此 Count 与 List 保持一致的口径：过滤掉从属维度向量，只统计主向量，
+// 保证返回值与 Chunk 语义一致，避免偏高 2~3 倍。
 func (s *semanticIndexer) Count(ctx context.Context) (int, error) {
-	total, err := s.db.Count(ctx)
+	all, _, err := s.db.List(ctx, 0, 1<<30, nil)
 	if err != nil {
+		s.logger.Error("语义索引器: Count 查询失败", err)
 		return 0, fmt.Errorf("Count: 查询失败: %w", err)
+	}
+	total := 0
+	for _, vec := range all {
+		if vec == nil {
+			continue
+		}
+		if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
+			continue
+		}
+		total++
 	}
 	return total, nil
 }
@@ -898,5 +908,16 @@ func (s *semanticIndexer) Close(ctx context.Context) error {
 		return err
 	}
 	s.logger.Debug("语义索引器: 存储已关闭")
+	return nil
+}
+
+// Flush 实现 IndexerFlusher 接口：强制将写入缓冲刷入持久化存储。
+func (s *semanticIndexer) Flush(ctx context.Context) error {
+	s.logger.Debug("语义索引器: 刷入持久化存储")
+	if err := s.db.Flush(ctx); err != nil {
+		s.logger.Error("语义索引器: 刷入持久化存储失败", err)
+		return err
+	}
+	s.logger.Debug("语义索引器: 存储已刷入磁盘")
 	return nil
 }

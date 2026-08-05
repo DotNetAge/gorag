@@ -84,7 +84,7 @@ func RegionIDFromContext(ctx context.Context) string {
 //
 // HyperIndexer 编排模式：
 //   - HyperIndexer 完成分块后，通过 Save(ctx, doc) 注入已分块的 StructuredDoc
-//   - GraphIndexer 只负责写入实体/关系 + 维护 Region→Document 的 CONTAINS 边
+//   - GraphIndexer 只负责写入实体/关系 + 维护 Region→文档根节点的 CONTAINS 边
 type GraphIndexer struct {
 	graphDB core.GraphStore
 	logger  logging.Logger
@@ -96,6 +96,10 @@ type GraphIndexer struct {
 	relsCreated     int
 	statsMu         sync.Mutex
 }
+
+// rootDocLabels 文档根节点标签列表，与 core.IsRootLabel 保持一致。
+// 文档根节点由各 Chunker 产出：Document/Code/Image/DataFile 四类。
+var rootDocLabels = []string{core.LabelDocument, core.LabelCode, core.LabelImage, core.LabelDataFile}
 
 // GraphOption 配置 GraphIndexer 的可选参数。
 type GraphOption func(*GraphIndexer)
@@ -296,13 +300,13 @@ func (idx *GraphIndexer) NewQuery(terms string) core.Query {
 //
 //   - 从 doc.Nodes() 读取实体，写入 graphDB.UpsertNodes
 //   - 从 doc.Edges() 读取关系，写入 graphDB.UpsertEdges
-//   - 调用 writeContainsEdges 维护 Region→Document 的 CONTAINS 边
+//   - 调用 writeContainsEdges 维护 Region→文档根节点的 CONTAINS 边
 //   - 不写 Chunk 节点到 GraphStore
-//   - 不写 Document→Chunk 的 CONTAINS 边（由 TreeViewBuilder 在视图层组装）
+//   - 不写 文档根节点→Chunk 的 CONTAINS 边（由 TreeViewBuilder 在视图层组装）
 //
 // 与 SemanticIndexer.Save 的差异：
 //   - SemanticIndexer.Save 写 VectorStore（向量化）
-//   - GraphIndexer.Save 写 GraphStore（实体 + Region→Document 边，不向量化）
+//   - GraphIndexer.Save 写 GraphStore（实体 + Region→文档根节点边，不向量化）
 func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error {
 	if doc == nil {
 		return fmt.Errorf("图索引器: Save doc 不能为空")
@@ -314,7 +318,7 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		"nodes", len(doc.Nodes()),
 		"edges", len(doc.Edges()))
 
-	// 获取文件路径，用于为 Document 节点补充 dir + file 属性
+	// 获取文件路径，用于为文档根节点补充 dir + file 属性
 	var docDir, docFile string
 	if raw := doc.Raw(); raw != nil {
 		fn := raw.FileName()
@@ -330,10 +334,10 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		nodes := make([]*core.Node, 0, len(rawNodes))
 		for i := range rawNodes {
 			n := rawNodes[i] // 复制一份，取地址
-			// 为 Document 节点补充 dir + file 属性（与 Chunk.Dir/FileName 一致）
+			// 为文档根节点补充 dir + file 属性（与 Chunk.Dir/FileName 一致）
 			if docDir != "" {
 				for _, l := range n.Labels {
-					if l == "Document" {
+					if core.IsRootLabel(l) {
 						if n.Properties == nil {
 							n.Properties = map[string]any{}
 						}
@@ -378,7 +382,7 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 		idx.logger.Debug("图索引器: 边写入完成", "edges", len(edges))
 	}
 
-	// 3. 维护 Region→Document 的 CONTAINS 边
+	// 3. 维护 Region→文档根节点的 CONTAINS 边
 	//    CONTAINS 边失败不阻塞主流程，仅记录警告
 	if err := idx.writeContainsEdges(ctx, doc); err != nil {
 		idx.logger.Warn("图索引器: 维护 CONTAINS 边失败",
@@ -391,14 +395,14 @@ func (idx *GraphIndexer) Save(ctx context.Context, doc core.StructuredDoc) error
 	return nil
 }
 
-// writeContainsEdges 维护 Region→Document 的 CONTAINS 边。
+// writeContainsEdges 维护 Region→文档根节点的 CONTAINS 边。
 //
 // 流程：
 //   - 从 doc.Raw() 获取文件路径
 //   - 创建 Region 节点（如果不存在）
-//   - 创建 Region→Document 的 CONTAINS 边
-//   - Document 节点应该已经在 doc.Nodes() 中（由 Chunker 生成），UpsertNodes 会处理
-//   - 不创建 Document→Chunk 的边（由 TreeViewBuilder 在视图层组装）
+//   - 创建 Region→文档根节点的 CONTAINS 边
+//   - 文档根节点应该已经在 doc.Nodes() 中（由 Chunker 生成），UpsertNodes 会处理
+//   - 不创建 文档根节点→Chunk 的边（由 TreeViewBuilder 在视图层组装）
 func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.StructuredDoc) error {
 	raw := doc.Raw()
 	if raw == nil {
@@ -417,11 +421,11 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 	// Region 节点 ID：与 Chunk.RegionID 保持一致，取 dir 的 SHA256
 	regionID := utils.GenerateID([]byte(dir))
 
-	// 查找 Document 节点 ID（由 Chunker 创建，应在 doc.Nodes() 中）
+	// 查找文档根节点 ID（由 Chunker 创建，应在 doc.Nodes() 中）
 	var docNodeID string
 	for _, n := range doc.Nodes() {
 		for _, l := range n.Labels {
-			if l == "Document" {
+			if core.IsRootLabel(l) {
 				docNodeID = n.ID
 				break
 			}
@@ -431,7 +435,7 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 		}
 	}
 	if docNodeID == "" {
-		// Chunker 未生成 Document 节点，跳过 CONTAINS 边创建
+		// Chunker 未生成文档根节点，跳过 CONTAINS 边创建
 		return nil
 	}
 
@@ -458,7 +462,7 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 		}
 	}
 
-	// 创建 Region→Document 的 CONTAINS 边
+	// 创建 Region→文档根节点的 CONTAINS 边
 	containsEdge := &core.Edge{
 		ID:        utils.GenerateID([]byte(regionID + ":CONTAINS:" + docNodeID)),
 		Type:      "CONTAINS",
@@ -467,7 +471,7 @@ func (idx *GraphIndexer) writeContainsEdges(ctx context.Context, doc core.Struct
 		Predicate: "CONTAINS",
 	}
 	if err := idx.graphDB.UpsertEdges(ctx, []*core.Edge{containsEdge}); err != nil {
-		return fmt.Errorf("图索引器: 写入 Region→Document CONTAINS 边失败: %w", err)
+		return fmt.Errorf("图索引器: 写入 Region→文档根节点 CONTAINS 边失败: %w", err)
 	}
 	return nil
 }
@@ -625,12 +629,12 @@ func (idx *GraphIndexer) Close(ctx context.Context) error {
 // 内部方法
 // ---------------------------------------------------------------------------
 
-// regionTree 返回 Region→Document 树（不含 Chunk 子节点）。
+// regionTree 返回 Region→文档根节点树（不含 Chunk 子节点）。
 // HyperIndexer.Tree() 通过此方法取得骨架，再从 VectorStore 补齐 Chunk 子节点。
 //
 // 参数：
 //   - regionID 为空时返回全局树（所有 Region 为第一级子节点）
-//   - regionID 非空时返回该 Region 的子树（仅 Document 子节点）
+//   - regionID 非空时返回该 Region 的子树（仅文档根节点子节点）
 //
 // 注意：此方法为未导出方法，供 HyperIndexer 内部组合使用。
 func (idx *GraphIndexer) regionTree(ctx context.Context, regionID string) (*core.TreeNode, error) {
@@ -670,7 +674,7 @@ func (idx *GraphIndexer) regionTree(ctx context.Context, regionID string) (*core
 	}
 	idx.logger.Debug("图索引器: Region 节点查询完成", "count", len(regionNodes))
 
-	// 2. 对每个 Region，通过 GetNeighbors 查询 CONTAINS 边指向的 Document 节点
+	// 2. 对每个 Region，通过 GetNeighbors 查询 CONTAINS 边指向的文档根节点
 	for _, regionNode := range regionNodes {
 		if regionNode == nil {
 			continue
@@ -692,7 +696,7 @@ func (idx *GraphIndexer) regionTree(ctx context.Context, regionID string) (*core
 			}
 		}
 
-		// 遍历 edges，找 Region→Document 的 CONTAINS 边
+		// 遍历 edges，找 Region→文档根节点的 CONTAINS 边
 		for _, edge := range edges {
 			if edge == nil || edge.Type != "CONTAINS" || edge.Source != regionNode.ID {
 				continue
@@ -701,15 +705,15 @@ func (idx *GraphIndexer) regionTree(ctx context.Context, regionID string) (*core
 			if !ok {
 				continue
 			}
-			// 检查是否为 Document 节点
-			isDocument := false
+			// 检查是否为文档根节点
+			isRoot := false
 			for _, l := range docNode.Labels {
-				if l == "Document" {
-					isDocument = true
+				if core.IsRootLabel(l) {
+					isRoot = true
 					break
 				}
 			}
-			if !isDocument {
+			if !isRoot {
 				continue
 			}
 			docTN := nodeToTreeNode(docNode, "document")
@@ -783,8 +787,8 @@ func (idx *GraphIndexer) CypherQuery(ctx context.Context, q string, params map[s
 // 流程：
 //  1. 通过目录路径生成 Region 节点 ID，获取 Region 节点
 //  2. 从 Region 节点出发，遍历 depth 跳邻居
-//  3. 通过 Cypher 查询所有 dir 以指定目录为前缀的 Document 节点，
-//     从这些 Document 出发获取 entity 子节点（解决子目录 Region 独立导致的实体不可达问题）
+//  3. 通过 Cypher 查询所有 dir 以指定目录为前缀的文档根节点，
+//     从这些文档根节点出发获取 entity 子节点（解决子目录 Region 独立导致的实体不可达问题）
 //  4. 合并全部节点与边并去重
 func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, limit int) (*RegionGraphView, error) {
 	if idx.graphDB == nil {
@@ -851,58 +855,57 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 		}
 	}
 
-	// Step 3: 从 dir 前缀匹配的 Document 出发，捕获子目录实体的节点与边
+	// Step 3: 从 dir 前缀匹配的文档根节点出发，捕获子目录实体的节点与边
 	// 解决子目录有独立 Region、根 Region 不可达的问题
-	idx.logger.Debug("图索引器: 执行 Document 前缀查询",
-		"dir", dir,
-		"query", "MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN d")
+	idx.logger.Debug("图索引器: 执行文档根节点前缀查询", "dir", dir)
 
-	docRows, queryErr := idx.graphDB.Query(ctx,
-		`MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN d`,
-		map[string]any{"dir": dir})
-
-	if queryErr != nil {
-		idx.logger.Warn("图索引器: Document 前缀查询失败，仅返回 Region 遍历结果",
-			"dir", dir, "error", queryErr)
-	} else {
-		idx.logger.Debug("图索引器: Document 前缀查询结果", "rows", len(docRows))
-		fmt.Fprintf(os.Stderr, "[DEBUG] ExploreRegion docRows count=%d\n", len(docRows))
-		if len(docRows) == 0 {
-			idx.logger.Debug("图索引器: 无匹配 Document 节点，可能原因：", "建议", "1) dir + file 属性未写入 2) 路径前缀不匹配 3) 节点实际数量")
+	var docRows []map[string]any
+	for _, lbl := range rootDocLabels {
+		rows, qerr := idx.graphDB.Query(ctx,
+			`MATCH (d:`+lbl+`) WHERE d.dir STARTS WITH $dir RETURN d`,
+			map[string]any{"dir": dir})
+		if qerr != nil {
+			idx.logger.Warn("图索引器: 文档根节点前缀查询失败，仅返回 Region 遍历结果",
+				"dir", dir, "label", lbl, "error", qerr)
+			continue
 		}
-		for _, row := range docRows {
-			dMap, ok := row["d"].(map[string]any)
-			if !ok {
-				continue
-			}
-			docID, ok := dMap["id"].(string)
-			if !ok {
-				continue
-			}
+		docRows = append(docRows, rows...)
+	}
+	if len(docRows) == 0 {
+		idx.logger.Debug("图索引器: 无匹配文档根节点，可能原因：", "建议", "1) dir + file 属性未写入 2) 路径前缀不匹配 3) 节点实际数量")
+	}
+	for _, row := range docRows {
+		dMap, ok := row["d"].(map[string]any)
+		if !ok {
+			continue
+		}
+		docID, ok := dMap["id"].(string)
+		if !ok {
+			continue
+		}
 
-			// 跳过已在 nodeMap 中的 Document（Region 遍历已覆盖）
-			if _, exists := nodeMap[docID]; exists {
-				continue
-			}
+		// 跳过已在 nodeMap 中的文档根节点（Region 遍历已覆盖）
+		if _, exists := nodeMap[docID]; exists {
+			continue
+		}
 
-			// 获取 Document 节点自身
-			docNode, getErr := idx.graphDB.GetNode(ctx, docID)
-			if getErr == nil && docNode != nil {
-				nodeMap[docNode.ID] = docNode
-			}
+		// 获取文档根节点自身
+		docNode, getErr := idx.graphDB.GetNode(ctx, docID)
+		if getErr == nil && docNode != nil {
+			nodeMap[docNode.ID] = docNode
+		}
 
-			// 从 Document 出发遍历 entity 子节点
-			entityNodes, entityEdges, neighErr := idx.graphDB.GetNeighbors(ctx, docID, depth, limit)
-			if neighErr == nil {
-				for _, n := range entityNodes {
-					if n != nil {
-						nodeMap[n.ID] = n
-					}
+		// 从文档根节点出发遍历 entity 子节点
+		entityNodes, entityEdges, neighErr := idx.graphDB.GetNeighbors(ctx, docID, depth, limit)
+		if neighErr == nil {
+			for _, n := range entityNodes {
+				if n != nil {
+					nodeMap[n.ID] = n
 				}
-				for _, e := range entityEdges {
-					if e != nil {
-						edgeMap[e.ID] = e
-					}
+			}
+			for _, e := range entityEdges {
+				if e != nil {
+					edgeMap[e.ID] = e
 				}
 			}
 		}
@@ -939,11 +942,11 @@ func (idx *GraphIndexer) ExploreRegion(ctx context.Context, dir string, depth, l
 	}, nil
 }
 
-// ExploreFile 以文件 Document 为中心探索实体和关系。
+// ExploreFile 以文件文档根节点为中心探索实体和关系。
 //
 // 流程：
-//  1. 通过 Cypher 查询 dir + file 精确匹配的 Document 节点
-//  2. 从 Document 出发遍历 depth 跳邻居实体
+//  1. 通过 Cypher 查询 dir + file 精确匹配的文档根节点
+//  2. 从文档根节点出发遍历 depth 跳邻居实体
 //  3. 返回实体节点与关系边
 //
 // filePath 应为绝对路径；depth 默认 2 即可包含实体间关系。
@@ -971,17 +974,21 @@ func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth
 	nodeMap := make(map[string]*core.Node)
 	edgeMap := make(map[string]*core.Edge)
 
-	// Step 1: 精确匹配 dir + file 的 Document 节点
-	docRows, err := idx.graphDB.Query(ctx,
-		`MATCH (d:Document) WHERE d.dir = $dir AND d.file = $file RETURN d`,
-		map[string]any{"dir": fileDir, "file": fileName})
-	if err != nil {
-		idx.logger.Error("图索引器: Document 精确查询失败", err, "file", filePath)
-		return nil, fmt.Errorf("图索引器: 查询文件 Document 节点失败: %w", err)
+	// Step 1: 精确匹配 dir + file 的文档根节点（Document/Code/Image/DataFile）
+	var docRows []map[string]any
+	for _, lbl := range rootDocLabels {
+		rows, qerr := idx.graphDB.Query(ctx,
+			`MATCH (d:`+lbl+`) WHERE d.dir = $dir AND d.file = $file RETURN d`,
+			map[string]any{"dir": fileDir, "file": fileName})
+		if qerr != nil {
+			idx.logger.Error("图索引器: 文档根节点精确查询失败", qerr, "file", filePath, "label", lbl)
+			return nil, fmt.Errorf("图索引器: 查询文件文档根节点失败: %w", qerr)
+		}
+		docRows = append(docRows, rows...)
 	}
 
 	if len(docRows) == 0 {
-		idx.logger.Debug("图索引器: 未找到该文件的 Document 节点", "file", filePath)
+		idx.logger.Debug("图索引器: 未找到该文件的文档根节点", "file", filePath)
 		return &RegionGraphView{Nodes: nil, Edges: nil}, nil
 	}
 
@@ -995,13 +1002,13 @@ func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth
 			continue
 		}
 
-		// Step 2: 获取 Document 节点自身
+		// Step 2: 获取文档根节点自身
 		docNode, getErr := idx.graphDB.GetNode(ctx, docID)
 		if getErr == nil && docNode != nil {
 			nodeMap[docNode.ID] = docNode
 		}
 
-		// Step 3: 从 Document 出发遍历 entity 子节点（depth=2 包含实体间关系）
+		// Step 3: 从文档根节点出发遍历 entity 子节点（depth=2 包含实体间关系）
 		entityNodes, entityEdges, neighErr := idx.graphDB.GetNeighbors(ctx, docID, depth, limit)
 		if neighErr == nil {
 			for _, n := range entityNodes {
@@ -1038,8 +1045,8 @@ func (idx *GraphIndexer) ExploreFile(ctx context.Context, filePath string, depth
 	}, nil
 }
 
-// CountByRegion 返回指定路径下（dir 前缀匹配）的 Document 节点总数。
-// Document 节点的 dir 属性由 Save 方法在写入时填充。
+// CountByRegion 返回指定路径下（dir 前缀匹配）的文档根节点总数。
+// 文档根节点的 dir 属性由 Save 方法在写入时填充。
 func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, error) {
 	if idx.graphDB == nil {
 		return 0, nil
@@ -1048,41 +1055,38 @@ func (idx *GraphIndexer) CountByRegion(ctx context.Context, path string) (int, e
 	if path == "" {
 		return 0, nil
 	}
-	cypher := `MATCH (d:Document) WHERE d.dir STARTS WITH $dir RETURN count(d) AS cnt`
-	rows, err := idx.graphDB.Query(ctx, cypher, map[string]any{"dir": path})
-	if err != nil {
-		idx.logger.Error("图索引器: CountByRegion 查询失败", err, "path", path)
-		return 0, fmt.Errorf("图索引器: CountByRegion 查询失败: %w", err)
+	total := 0
+	for _, lbl := range rootDocLabels {
+		rows, err := idx.graphDB.Query(ctx,
+			`MATCH (d:`+lbl+`) WHERE d.dir STARTS WITH $dir RETURN count(d) AS cnt`,
+			map[string]any{"dir": path})
+		if err != nil {
+			idx.logger.Error("图索引器: CountByRegion 查询失败", err, "path", path, "label", lbl)
+			return 0, fmt.Errorf("图索引器: CountByRegion 查询失败: %w", err)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		// 尝试多种数值类型
+		switch v := rows[0]["cnt"].(type) {
+		case int64:
+			total += int(v)
+		case float64:
+			total += int(v)
+		case int:
+			total += v
+		case int32:
+			total += int(v)
+		default:
+			idx.logger.Warn("图索引器: CountByRegion 类型异常",
+				"path", path,
+				"label", lbl,
+				"type", fmt.Sprintf("%T", rows[0]["cnt"]),
+				"value", fmt.Sprintf("%v", rows[0]["cnt"]))
+		}
 	}
-	if len(rows) == 0 {
-		idx.logger.Debug("图索引器: CountByRegion 无结果", "path", path)
-		return 0, nil
-	}
-
-	row := rows[0]
-	fmt.Fprintf(os.Stderr, "[DEBUG] CountByRegion row=%+v cnt_type=%T\n", row, row["cnt"])
-
-	// 尝试多种数值类型
-	switch v := row["cnt"].(type) {
-	case int64:
-		idx.logger.Debug("图索引器: CountByRegion 完成", "path", path, "count", v)
-		return int(v), nil
-	case float64:
-		idx.logger.Debug("图索引器: CountByRegion 完成(float64)", "path", path, "count", v)
-		return int(v), nil
-	case int:
-		idx.logger.Debug("图索引器: CountByRegion 完成(int)", "path", path, "count", v)
-		return v, nil
-	case int32:
-		idx.logger.Debug("图索引器: CountByRegion 完成(int32)", "path", path, "count", v)
-		return int(v), nil
-	default:
-		idx.logger.Warn("图索引器: CountByRegion 类型异常",
-			"path", path,
-			"type", fmt.Sprintf("%T", rows[0]["cnt"]),
-			"value", fmt.Sprintf("%v", rows[0]["cnt"]))
-		return 0, nil
-	}
+	idx.logger.Debug("图索引器: CountByRegion 完成", "path", path, "count", total)
+	return total, nil
 }
 
 // EntityStats 返回自上次 ResetEntityStats 以来累计创建的实体和关系数量。
@@ -1156,7 +1160,7 @@ func extractNodeFromRow(row map[string]any) *core.Node {
 }
 
 // nodeToTreeNode 将 graphDB Node 转换为 TreeNode。
-// Document/Region 节点的 dir 映射到 Path。
+// 文档根节点/Region 节点的 dir 映射到 Path。
 func nodeToTreeNode(n *core.Node, nodeType string) *core.TreeNode {
 	tn := &core.TreeNode{
 		ID:   n.ID,

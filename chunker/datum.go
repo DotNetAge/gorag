@@ -65,6 +65,7 @@ func (d *DatumChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		nodes, edges := buildDatumGraph(doc, chunks, dataKind)
 		// fillDatumSummary(chunks)
 		chunks = enrichChunksMetadata(chunks, content, doc.FileName())
+		chunks = setContentType(chunks, core.ContentTypeDataFile)
 		return ChunkResult{
 			Chunks: chunks,
 			Nodes:  nodes,
@@ -76,7 +77,7 @@ func (d *DatumChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	chunks := d.chunkByLines(doc, content, dataKind)
 	// fillDatumSummary(chunks)
 	chunks = enrichChunksMetadata(chunks, content, doc.FileName())
-	return ChunkResult{Chunks: chunks}, nil
+	return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeDataFile)}, nil
 }
 
 // // fillDatumSummary 为数据分块统一填充 Summary。

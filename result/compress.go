@@ -89,7 +89,6 @@ func compressChunkHit(llm goChatCore.Client, ch core.ChunkHit) (core.ChunkHit, e
 
 	resp, err := llm.Chat(context.Background(), messages,
 		goChatCore.WithTemperature(0.1),
-		goChatCore.WithMaxTokens(1024),
 	)
 	if err != nil {
 		return ch, err

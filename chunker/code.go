@@ -7,12 +7,12 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/DotNetAge/gorag/v2/chunker/vue"
 	"github.com/DotNetAge/gorag/v2/core"
 	"github.com/DotNetAge/gorag/v2/document"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/bash"
 	"github.com/smacker/go-tree-sitter/c"
-	"github.com/DotNetAge/gorag/v2/chunker/vue"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/golang"
@@ -444,7 +444,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		title := deriveTitle(doc.FileName())
 		chunk := buildChunk(doc, 0, 0, len(content), title, content)
 		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
-		return ChunkResult{Chunks: chunks}, nil
+		return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeCode)}, nil
 	}
 
 	// 5. 按字节偏移排序（Query 通常已按文档顺序返回，但保险起见排序一次）
@@ -546,7 +546,8 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	if len(chunks) == 0 {
 		title := deriveTitle(doc.FileName())
 		chunk := buildChunk(doc, 0, 0, len(content), title, content)
-		return ChunkResult{Chunks: []core.Chunk{chunk}}, nil
+		chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
+		return ChunkResult{Chunks: setContentType(chunks, core.ContentTypeCode)}, nil
 	}
 
 	// 8. 提前提取 Go 方法 receiver，供 Node.Properties 与后续边生成使用
@@ -575,6 +576,7 @@ func (c *CodeChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 
 	// 13. 统一 enriched 通用元数据（行号、语言、目录等）
 	chunks = enrichChunksMetadata(chunks, content, doc.FileName())
+	chunks = setContentType(chunks, core.ContentTypeCode)
 
 	return ChunkResult{
 		Chunks: chunks,
@@ -663,10 +665,10 @@ func buildCodeGraph(doc document.RawDoc, content string, symbols []codeSymbol, s
 
 		label := codeSymbolLabel(sym.nodeType)
 		props := map[string]any{
-			"node_type":          sym.nodeType,
+			"node_type":         sym.nodeType,
 			core.PropSignature:  sym.signature,
 			core.PropVisibility: sym.visibility,
-			"language":           deriveLanguage(doc.FileName()),
+			"language":          deriveLanguage(doc.FileName()),
 		}
 		if sym.receiver != "" {
 			props[core.PropReceiver] = sym.receiver
@@ -1709,7 +1711,7 @@ func extractPrecedingCommentAST(src []byte, symStart, prevEnd uint32, root *sitt
 	return strings.Join(lines, "\n")
 }
 
-// cleanCommentText 去除常见注释前缀（// / # / /* / """ / '''）并 TrimSpace。
+// cleanCommentText 去除常见注释前缀（// / # / /* / """ / ”'）并 TrimSpace。
 func cleanCommentText(text string) string {
 	text = strings.TrimSpace(text)
 	switch {

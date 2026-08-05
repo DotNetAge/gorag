@@ -35,6 +35,21 @@ func TestImageChunker_Metadata(t *testing.T) {
 	if size, ok := chunk.Metadata[core.MetaThumbnailSize].(int); !ok || size <= 0 {
 		t.Errorf("thumbnail_size 应为正整数，实际 %v", chunk.Metadata[core.MetaThumbnailSize])
 	}
+	if chunk.Metadata[core.MetaContentType] != core.ContentTypeImage {
+		t.Errorf("content_type 期望 %q，实际 %v", core.ContentTypeImage, chunk.Metadata[core.MetaContentType])
+	}
+
+	// 验证图片根节点（Label=LabelImage，node_type=image）
+	if len(result.Nodes) != 1 {
+		t.Fatalf("期望 1 个图片根节点，实际 %d", len(result.Nodes))
+	}
+	imgNode := result.Nodes[0]
+	if len(imgNode.Labels) != 1 || imgNode.Labels[0] != core.LabelImage {
+		t.Errorf("图片根节点 Labels 期望 [%s]，实际 %v", core.LabelImage, imgNode.Labels)
+	}
+	if imgNode.Properties["node_type"] != "image" {
+		t.Errorf("图片根节点 node_type 期望 image，实际 %v", imgNode.Properties["node_type"])
+	}
 }
 
 // writeTempImageFile 创建临时 JPEG 图片文件并返回绝对路径。

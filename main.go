@@ -63,7 +63,6 @@ type LLMConfig struct {
 	Model          string `yaml:"model"`
 	APIKey         string `yaml:"api_key,omitempty"`      // API Key
 	Language       string `yaml:"language"`               // 内容语言（如 Chinese）
-	MaxTokens      int    `yaml:"max_tokens"`             // 模型最大输出 token
 	ContextLength  int    `yaml:"context_length"`         // 模型上下文长度
 	ThinkingBudget int    `yaml:"thinking_budget"`        // 思考模式 token 预算（0=默认）
 	APIKeyFile     string `yaml:"api_key_file,omitempty"` // 外部 API Key 文件路径（可选）
@@ -142,7 +141,6 @@ func defaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Language:      "Chinese",
-			MaxTokens:     128000,
 			ContextLength: 128000,
 		},
 		Indexer: IndexerConfig{
@@ -434,9 +432,6 @@ func loadConfig(ragDir string) (*Config, error) {
 	}
 	if cfg.LLM.Language == "" {
 		cfg.LLM.Language = "Chinese"
-	}
-	if cfg.LLM.MaxTokens <= 0 {
-		cfg.LLM.MaxTokens = 128000
 	}
 	if cfg.LLM.ContextLength <= 0 {
 		cfg.LLM.ContextLength = 128000

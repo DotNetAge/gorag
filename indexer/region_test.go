@@ -148,10 +148,10 @@ func TestGraphIndexer_RegionIDMatchesChunkRegionID(t *testing.T) {
 		t.Fatalf("Structurize 失败: %v", err)
 	}
 
-	// 构造一个 Document 节点，模拟 Chunker 产出
+	// 构造一个文档根节点，模拟 Chunker 产出
 	docNode := core.Node{
 		ID:     utils.GenerateID([]byte(raw.ID() + ":doc:Document")),
-		Labels: []string{"Document"},
+		Labels: []string{core.LabelDocument},
 		Name:   "doc",
 	}
 	doc.SetNodes([]core.Node{docNode})
@@ -222,7 +222,7 @@ func TestGraphIndexer_RegionNodeNotOverwritten(t *testing.T) {
 
 	docNode := core.Node{
 		ID:     utils.GenerateID([]byte(raw.ID() + ":doc:Document")),
-		Labels: []string{"Document"},
+		Labels: []string{core.LabelDocument},
 		Name:   "doc",
 	}
 	doc.SetNodes([]core.Node{docNode})
@@ -257,7 +257,7 @@ func TestGraphIndexer_Neighbors(t *testing.T) {
 
 	// 构造图：region --CONTAINS--> doc --HAS--> entity
 	store.nodes["region"] = &core.Node{ID: "region", Labels: []string{"Region"}, Name: "docs"}
-	store.nodes["doc"] = &core.Node{ID: "doc", Labels: []string{"Document"}, Name: "intro.md"}
+	store.nodes["doc"] = &core.Node{ID: "doc", Labels: []string{core.LabelDocument}, Name: "intro.md"}
 	store.nodes["entity"] = &core.Node{ID: "entity", Labels: []string{"Person"}, Name: "张三"}
 	store.edges["e1"] = &core.Edge{ID: "e1", Type: "CONTAINS", Source: "region", Target: "doc"}
 	store.edges["e2"] = &core.Edge{ID: "e2", Type: "HAS", Source: "doc", Target: "entity"}
@@ -362,7 +362,7 @@ func TestGraphIndexer_ExploreRegion(t *testing.T) {
 	dir := "/home/user/docs"
 	regionID := utils.GenerateID([]byte(dir))
 	store.nodes[regionID] = &core.Node{ID: regionID, Labels: []string{core.LabelRegion}, Name: "docs"}
-	store.nodes["doc"] = &core.Node{ID: "doc", Labels: []string{"Document"}, Name: "intro.md"}
+	store.nodes["doc"] = &core.Node{ID: "doc", Labels: []string{core.LabelDocument}, Name: "intro.md"}
 	store.nodes["entity"] = &core.Node{ID: "entity", Labels: []string{"Person"}, Name: "张三"}
 	store.edges["e1"] = &core.Edge{ID: "e1", Type: "CONTAINS", Source: regionID, Target: "doc"}
 	store.edges["e2"] = &core.Edge{ID: "e2", Type: "HAS", Source: "doc", Target: "entity"}

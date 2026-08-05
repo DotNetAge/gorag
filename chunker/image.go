@@ -5,7 +5,7 @@ import (
 	"github.com/DotNetAge/gorag/v2/document"
 )
 
-// ImageChunker 图片分块器：整图作为一个 Chunk。
+// ImageChunker 图片分块器：整图作为一个 Chunk，产出图片根节点。
 //
 // 适用 RawDocType：RawDocImage（jpg/png/gif 等，content 已为 Base64）。
 // 设计要点：
@@ -15,12 +15,13 @@ import (
 //   - Chunk.Summary 留空（由 Extractor 填充）
 //   - DocID 使用 doc.ID()，Chunk.Source=doc.FileName()（高频跨包属性提升为字段）
 //   - 图片元数据（mime_type/thumbnail_size）保留在 Metadata 中，使用 core.Meta* 常量键名
+//   - 产出单个根节点（Label=core.LabelImage），与 Document/Code/DataFile 根节点对齐
 type ImageChunker struct{}
 
 // NewImageChunker 创建图片分块器。
 func NewImageChunker() *ImageChunker { return &ImageChunker{} }
 
-// Chunk 实现 Chunker 接口：整图作为一个 Chunk，不产出结构节点。
+// Chunk 实现 Chunker 接口：整图作为一个 Chunk，并产出图片根节点。
 func (c *ImageChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 	if doc == nil {
 		return ChunkResult{}, nil
@@ -49,5 +50,11 @@ func (c *ImageChunker) Chunk(doc document.RawDoc) (ChunkResult, error) {
 		}
 	}
 	chunks := enrichChunksMetadata([]core.Chunk{chunk}, content, doc.FileName())
-	return ChunkResult{Chunks: chunks}, nil
+	chunks = setContentType(chunks, core.ContentTypeImage)
+	// 图片根节点：承载图片类别信息，与其余三类根节点对齐
+	imageNode := buildNode(doc, title, []string{core.LabelImage}, chunk.ID, map[string]any{"node_type": "image"})
+	return ChunkResult{
+		Chunks: chunks,
+		Nodes:  []core.Node{imageNode},
+	}, nil
 }

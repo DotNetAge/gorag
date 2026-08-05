@@ -17,6 +17,16 @@ const (
 	MetaIsParent           = "is_parent"            // 是否为父文档分块
 	MetaIsRegionDescriptor = "is_region_descriptor" // 是否为 README.md 描述的 Region 分片
 	MetaRegionGenerated    = "region_generated"     // 是否由 GoRAG 自动生成
+	MetaContentType        = "content_type"         // 分片内容类型（与 Node 根标签 core.Label* 同源）
+)
+
+// ContentType 分片内容类型取值常量。
+// 与 Node 根节点标签（core.Label*）一一对应且同源，用于按内容类别精准过滤召回。
+const (
+	ContentTypeDocument = "Document" // 文档（Markdown/PDF/DOCX 等）
+	ContentTypeCode     = "Code"     // 代码
+	ContentTypeImage    = "Image"    // 图片
+	ContentTypeDataFile = "DataFile" // 数据文件（JSON/CSV/YAML 等）
 )
 
 // RegionDescriptorMarker 是生成式 README.md 文件的内容标记。
