@@ -715,6 +715,47 @@ func (s *semanticIndexer) Remove(ctx context.Context, chunkID string) error {
 	return nil
 }
 
+// UpdateVectorMetadata 按 chunkID 更新主向量（Content 维度）的 metadata。
+//
+// 与 Remove + Save 的区别：直接在原向量上修改 metadata 并以原 ID 写回
+// （VectorStore.Upsert 对已存在 ID 为 replace 语义），不触发向量删除，
+// 避免 HNSW 图在 Remove 后结构不一致的问题。从属维度向量不存 metadata，
+// 无需处理。
+//
+// 典型用途：删除会话时把记忆 chunk 的 session_id 归属更新到最近使用的会话。
+func (s *semanticIndexer) UpdateVectorMetadata(ctx context.Context, chunkID string, patch map[string]any) error {
+	if chunkID == "" {
+		return fmt.Errorf("UpdateVectorMetadata: chunkID 不能为空")
+	}
+	all, _, err := s.db.List(ctx, 0, 1<<30, nil)
+	if err != nil {
+		return fmt.Errorf("UpdateVectorMetadata: 查询向量失败: %w", err)
+	}
+	var target *core.Vector
+	for _, vec := range all {
+		if vec == nil || vec.ChunkID != chunkID {
+			continue
+		}
+		if _, isDim := stripDimSuffix(vec.ChunkID, semanticDimensions); isDim {
+			continue // 只更新主向量
+		}
+		target = vec
+		break
+	}
+	if target == nil {
+		return fmt.Errorf("UpdateVectorMetadata: chunkID %s 不存在", chunkID)
+	}
+	// 复制一份再修改，避免污染底层存储缓存
+	cloned := *target
+	if cloned.Metadata == nil {
+		cloned.Metadata = map[string]any{}
+	}
+	for k, v := range patch {
+		cloned.Metadata[k] = v
+	}
+	return s.db.Upsert(ctx, []*core.Vector{&cloned})
+}
+
 // Refill 为已有分片补充从属维度的向量（title/summary 等）（非接口方法）。
 // 用于存量数据迁移到多维度索引。幂等：已存在的从属向量会跳过，支持中断重跑。
 func (s *semanticIndexer) Refill(ctx context.Context) error {

@@ -120,6 +120,20 @@ type IndexerFlusher interface {
 	Flush(ctx context.Context) error
 }
 
+// IndexerMetadataUpdater 向量元数据更新接口：按 chunkID 就地更新主向量 metadata。
+//
+// 与 Remove + Save 的区别：以原向量 ID 写回（Upsert 对已存在 ID 为 replace 语义），
+// 不触发向量删除，避免 HNSW 图在 Remove 后结构不一致的问题。
+// 仅 SemanticIndexer 实现。
+//
+// 调用方按需 type-assert：
+//
+//	if u, ok := idx.(IndexerMetadataUpdater); ok { u.UpdateVectorMetadata(ctx, id, patch) }
+type IndexerMetadataUpdater interface {
+	// UpdateVectorMetadata 更新主向量的 metadata（patch 逐键覆盖）。
+	UpdateVectorMetadata(ctx context.Context, chunkID string, patch map[string]any) error
+}
+
 // TreeViewBuilder 知识库导航接口：构建 Region → Document → Chunk 层级树。
 //
 // 仅 HyperIndexer 实现，因为它需要同时访问 GraphStore 的 Region→Document 层级
