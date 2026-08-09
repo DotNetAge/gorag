@@ -3,7 +3,7 @@ module github.com/DotNetAge/gorag/v2
 go 1.25.1
 
 require (
-	github.com/DotNetAge/gochat v0.2.8
+	github.com/DotNetAge/gochat v0.2.9
 	github.com/DotNetAge/gograph v0.4.0
 	github.com/DotNetAge/govector v0.1.8
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -92,5 +92,3 @@ require (
 )
 
 tool golang.org/x/mobile/cmd/gobind
-
-replace github.com/DotNetAge/gochat => ../gochat
