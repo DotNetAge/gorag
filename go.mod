@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/DotNetAge/gochat v0.2.9
 	github.com/DotNetAge/gograph v0.4.0
-	github.com/DotNetAge/govector v0.1.8
+	github.com/DotNetAge/govector v0.1.9
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/extrame/xls v0.0.1
 	github.com/go-ego/gse v1.0.2
