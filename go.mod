@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/DotNetAge/gochat v0.2.9
 	github.com/DotNetAge/gograph v0.4.0
-	github.com/DotNetAge/govector v0.1.9
+	github.com/DotNetAge/govector v0.1.10
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/extrame/xls v0.0.1
 	github.com/go-ego/gse v1.0.2
@@ -38,7 +38,6 @@ require (
 	github.com/cockroachdb/pebble v1.1.5 // indirect
 	github.com/cockroachdb/redact v1.1.8 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20250429170803-42689b6311bb // indirect
-	github.com/coder/hnsw v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
@@ -46,7 +45,6 @@ require (
 	github.com/getsentry/sentry-go v0.46.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/renameio v1.0.1 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
