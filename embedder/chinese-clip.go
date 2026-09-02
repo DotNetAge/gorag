@@ -3,6 +3,7 @@ package embedder
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/DotNetAge/gorag/v2/core"
@@ -50,8 +51,8 @@ func WithVocab(path string) ChineseClipOption {
 
 // ChineseClipEmbedder 使用 onnxruntime-go 进行 Chinese-CLIP ONNX 模型推理
 type ChineseClipEmbedder struct {
-	textEncoder    *TextEncoder    // 通用文本编码器
-	imageEncoder   *ImageEncoder   // 通用图像编码器
+	textEncoder    *TextEncoder  // 通用文本编码器
+	imageEncoder   *ImageEncoder // 通用图像编码器
 	tokenizer      *VocabTokenizer
 	imageProcessor *ImageProcessor
 	imageSize      int
@@ -298,8 +299,31 @@ func (e *ChineseClipEmbedder) Close() error {
 }
 
 // getORTSharedLibraryPath 获取 ONNX Runtime 共享库路径
+// 优先级：环境变量显式指定 → 用户目录 ~/.mindx/lib（随包释放位，无需提权）→ 系统库目录兜底
 func getORTSharedLibraryPath() string {
-	// macOS Homebrew 安装路径
+	// 环境变量显式覆盖，优先级最高
+	if p := os.Getenv("MINDX_ORT_LIBRARY_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	// 用户目录（macOS 与 Linux 一致），发行版安装器将 dylib/so 释放到此处
+	if home, err := os.UserHomeDir(); err == nil {
+		userPaths := []string{
+			filepath.Join(home, ".mindx", "lib", "libonnxruntime.dylib"),
+			filepath.Join(home, ".mindx", "lib", "libonnxruntime.1.24.4.dylib"),
+			filepath.Join(home, ".mindx", "lib", "libonnxruntime.so"),
+			filepath.Join(home, ".mindx", "lib", "libonnxruntime.so.1.24"),
+		}
+		for _, p := range userPaths {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+
+	// macOS Homebrew / 手动安装的系统路径兜底
 	macPaths := []string{
 		"/usr/local/lib/libonnxruntime.dylib",
 		"/usr/local/lib/libonnxruntime.1.24.4.dylib",
@@ -314,7 +338,7 @@ func getORTSharedLibraryPath() string {
 		}
 	}
 
-	// Linux 路径
+	// Linux 系统路径兜底
 	linuxPaths := []string{
 		"/usr/local/lib/libonnxruntime.so",
 		"/usr/local/lib/libonnxruntime.so.1.24",
