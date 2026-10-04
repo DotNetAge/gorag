@@ -11,22 +11,29 @@
 
 ---
 
-GoRAG is a local-first RAG toolkit with both CLI and Go API, supporting semantic vector search, graph-based retrieval, and hybrid indexing.
+GoRAG is a local-first retrieval foundation with both CLI and Go API. It serves two retrieval shapes:
+
+- **Document path (Agentic RAG)**: a full pipeline for external material — 20+ format normalization, chunking, semantic / graph / hybrid indexing, result fusion and reranking;
+- **Entry path (Native RAG)**: minimal semantic indexing for structured facts inside your system (skill registries, tool catalogs, config entries) — `Add` to index, `Search` to retrieve, no file landing required.
+
+Both paths share the same foundation (local embedding inference + bbolt storage); they only diverge in the middle layer.
 
 ---
 
-## Features
+## Feature Highlights
 
-- **Semantic Search**: Multi-dimension vector matching on Title / Summary / Content
-- **Graph Search**: Multi-hop neighbor traversal via knowledge graph, native Cypher support
-- **Hybrid Indexing** (Hyper): Dual pipeline orchestration of semantic + graph, fused search results
-- **LLM Enhancement**: Automatic title/summary/tag generation for chunks, entity and relation extraction
-- **Region System**: Automatic directory-to-Region mapping, auto-generated README summaries
-- **Incremental Indexing**: mtime+size+hash change detection, re-index only changed files
-- **Incremental LLM Processing**: Per-chunk status tracking, resume from breakpoint, auto-reprocess on content change
-- **Progress Tracking**: SQLite metadata store for real-time index and LLM status
-- **Multi-format Support**: PDF / DOCX / HTML / EPUB / PPTX / Markdown / CSV / XLSX / JSON / YAML / images / code
-- **Zero CGO**: Pure Go, painless cross-compilation
+| Feature | Description | Code |
+| --- | --- | --- |
+| **Dual retrieval paths** | Document pipeline and entry semantic indexing share one Embedder / storage foundation; indexers stay pure, fusion happens at query time | `native/` + `indexer/` |
+| **Fully local** | Local ONNX embedding inference (quantized BGE, Chinese-capable), bbolt + SQLite storage — no external vector DB, no embedding API, works offline | `embedder/`, `store/` |
+| **Semantic + graph dual line** | HyperIndexer orchestrates the semantic and relation lines, entity/relation writing to GraphStore, Region hierarchy for directories | `indexer/hyper.go`, `core/graph.go` |
+| **Multi-format normalization** | PDF / DOCX / XLSX / PPTX / EPUB / EML / HTML / Markdown / YAML / images / code (tree-sitter), routed by mimetype sniffing | `document/` |
+| **CLI & daemon coexistence** | bbolt locking: CLI opens read-only and fails fast while a daemon holds the write lock | `store/vector/govector/`, `store/meta/` |
+| **Storage engineering** | Buffered batched writes (merged fsync), SQ8 quantization, HNSW / Flat selectable, payload filtering | `store/vector/govector/` |
+| **Incremental & resumable** | mtime+size+hash change detection, per-chunk checkpoint resume, auto reprocess on change | `indexer/`, `store/meta/` |
+| **LLM enhancement** | Auto title / summary / tags per chunk, schema-driven entity & relation extraction | `llm/` |
+| **Interface segregation** | Small interfaces (IndexerCloser / Flusher / MetadataUpdater / GraphSearcher) consumed via type-assertion — never forced to implement what you don't need | `indexer/interfaces.go` |
+| **Zero CGO** | Pure Go, painless cross-compilation | — |
 
 ---
 
@@ -97,6 +104,33 @@ hit, _ := svc.Querier().Query(ctx, "RAG architecture design", "")
 result, _ := svc.Explorer().Nodes(ctx, "./docs", 2)
 ```
 
+### Entry semantic indexing (Native RAG)
+
+For skill registries, tool catalogs, config entries — any "key-value entries + semantic lookup" scenario, no document pipeline involved:
+
+```go
+import "github.com/DotNetAge/gorag/v2/native"
+
+// family = Collection, one db hosts many families; dbPath must be absolute
+seg, err := native.NewSegIndexer("/abs/path/native.db", embedder)
+if err != nil {
+    log.Fatal(err)
+}
+defer seg.Close()
+
+// every meta key-value pair becomes a sub-key vector; a hit on any dimension recalls the entry
+_ = seg.Add(ctx, "skill", "websearch", map[string]string{
+    "name":        "websearch",
+    "title":       "Web Search",
+    "description": "Search the web for content",
+})
+
+hits, _ := seg.Search(ctx, "skill", "web searching", 1)
+// hits[0].Value == "websearch", hits[0].Meta holds the full metadata
+```
+
+See [native/README.md](./native/README.md).
+
 ---
 
 ## CLI Reference
@@ -156,32 +190,13 @@ A directory-level semantic abstraction. Each indexed directory maps to a Region 
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────┐
-│              CLI (grag)                  │
-│   cmd/main.go + cmd/info.go             │
-└────────────────┬─────────────────────────┘
-                 │
-┌────────────────▼─────────────────────────┐
-│         IndexingService (Aggregate)       │
-│  ┌─────────────────────────────────────┐  │
-│  │  IndexerSvc · QuerySvc · GraphSvc  │  │
-│  │  AdminSvc  · RegionSvc · LLMSvc    │  │
-│  └─────────────────────────────────────┘  │
-└────────────────┬─────────────────────────┘
-                 │
-    ┌────────────┼────────────┐
-    ▼            ▼            ▼
- Semantic    Graph       Hyper(Orchestrator)
- Indexer    Indexer     ┌────┴────┐
-                        ▼         ▼
-                    Semantic   Graph
-                    Indexer    Indexer
-```
+![GoRAG Architecture](./docs/architecture.svg)
 
 - **SemanticIndexer**: Chunk → vectorize → write to VectorStore
 - **GraphIndexer**: Entities/relationships → write to GraphStore
 - **HyperIndexer**: Orchestrates semantic + graph pipelines, supports Summarizer / Refiller injection
+
+Alongside the document pipeline, the `native` package provides a parallel entry path: `SegIndexer` talks directly to the Embedder and govector (family = Collection), bypassing document / Chunker. Both paths share the storage foundation; fusion happens only at query time.
 
 ---
 
