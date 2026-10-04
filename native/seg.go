@@ -250,6 +250,61 @@ func (s *SegIndexer) Search(ctx context.Context, key, query string, topK int) ([
 	return aggregate(family, scored, topK), nil
 }
 
+// List 列出指定族的条目（仅主记录视图，不携带命中来源与分数）。
+//
+// 返回按主键去重后的条目列表，无排序保证；limit 截断结果（<=0 取 100）。
+func (s *SegIndexer) List(ctx context.Context, family string, limit int) ([]SegHit, error) {
+	if err := validFamily(family); err != nil {
+		return nil, fmt.Errorf("native.List: %w", err)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	col, err := s.collection(family)
+	if err != nil {
+		return nil, err
+	}
+
+	// 排除 schema 记录后遍历全部业务记录，主记录 = 无子键字段名的记录
+	pts, err := col.GetPointsByFilter(&gvcore.Filter{
+		MustNot: []gvcore.Condition{{
+			Key:   pKind,
+			Type:  gvcore.MatchTypeExact,
+			Match: gvcore.MatchValue{Value: kindSchema},
+		}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("native.List: 遍历失败: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(pts))
+	hits := make([]SegHit, 0, len(pts))
+	for _, pt := range pts {
+		if _, hasField := pt.Payload[pField]; hasField {
+			continue // 子键记录，仅列主记录
+		}
+		value, _ := pt.Payload[pValue].(string)
+		if value == "" {
+			continue
+		}
+		key := entryKey(family, value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		hits = append(hits, SegHit{
+			Key:   key,
+			Value: value,
+			Meta:  parseMeta(pt.Payload[pMeta]),
+		})
+		if len(hits) >= limit {
+			break
+		}
+	}
+	return hits, nil
+}
+
 // Close 刷盘并关闭底层存储。Close 后索引器不可再用。
 //
 // 任一族 Flush 失败不中断流程：storage.Close 必然执行以释放 bbolt

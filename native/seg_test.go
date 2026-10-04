@@ -298,6 +298,51 @@ func TestPersistenceAcrossClose(t *testing.T) {
 	}
 }
 
+// TestList 列出族内条目：仅主记录、去重、limit 截断。
+func TestList(t *testing.T) {
+	seg := newTestIndexer(t)
+	defer seg.Close()
+
+	entries := []struct{ value, title string }{
+		{"tool-alpha", "阿尔法工具"},
+		{"tool-beta", "贝塔工具"},
+	}
+	for _, e := range entries {
+		if err := seg.Add(t.Context(), "tool", e.value, map[string]string{"title": e.title}); err != nil {
+			t.Fatalf("Add %s 失败: %v", e.value, err)
+		}
+	}
+
+	hits, err := seg.List(t.Context(), "tool", 0)
+	if err != nil {
+		t.Fatalf("List 失败: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("期望列出 2 条主记录，实际 %d 条", len(hits))
+	}
+	values := map[string]bool{}
+	for _, h := range hits {
+		values[h.Value] = true
+		if h.Field != "" {
+			t.Errorf("List 不应返回子键记录，Field=%q", h.Field)
+		}
+		if h.Meta["title"] == "" {
+			t.Errorf("List 应携带元数据: %+v", h)
+		}
+	}
+	if !values["tool-alpha"] || !values["tool-beta"] {
+		t.Errorf("条目缺失: %v", values)
+	}
+
+	limited, err := seg.List(t.Context(), "tool", 1)
+	if err != nil {
+		t.Fatalf("List 失败: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Errorf("limit=1 期望 1 条，实际 %d 条", len(limited))
+	}
+}
+
 // TestContextCancellation 已取消的 ctx 应让 Add / Search 立即失败。
 func TestContextCancellation(t *testing.T) {
 	seg := newTestIndexer(t)
