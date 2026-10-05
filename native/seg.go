@@ -60,11 +60,11 @@ const (
 // 不复用 core.Hit——那是为 Chunks/Nodes/Edges 三类命中与 RRF 融合设计的
 // 重容器；本包命中即「一条记录 + 分数」，专用结构极简到底。
 type SegHit struct {
-	Key   string            // 条目主键：族:sha256(主值)
-	Field string            // 命中来源字段名（"" 表示主值本身命中）
-	Value string            // 条目主值
-	Meta  map[string]string // 条目元数据（无论命中主值还是子键，均返回完整元数据）
-	Score float32           // 相似度分数（Cosine，越大越相似）
+	Key   string            `json:"key"`             // 条目主键：族:sha256(主值)
+	Field string            `json:"field,omitempty"` // 命中来源字段名（"" 表示主值本身命中）
+	Value string            `json:"value"`           // 条目主值
+	Meta  map[string]string `json:"meta,omitempty"`  // 条目元数据（无论命中主值还是子键，均返回完整元数据）
+	Score float32           `json:"score,omitempty"` // 相似度分数（Cosine，越大越相似）
 }
 
 // SegIndexer 极简语义索引器：族 = Collection，一库多族共享一个存储连接。
